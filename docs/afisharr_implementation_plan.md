@@ -16,6 +16,19 @@ whatever capacity turns out to be real. Recorded as D-039. Do not add dates.
 
 ## How to read this
 
+**Before you write code for a task, read the rule file for the surface it touches.** Two files in
+the repository carry the stack-level coding guidelines, and both are normative:
+
+| File | Read it before touching |
+| --- | --- |
+| `.augment/rules/backend-rust-dev-pro.md` | Any Rust: `crates/**` — tokio, axum, SQLx, serde, errors, concurrency |
+| `.augment/rules/frontend-dev-pro.md` | Any frontend: `web/**` — Bun, Svelte 5 runes, SvelteKit 2, UnoCSS `presetWind4`, shadcn-svelte |
+
+This is a read-first obligation, not a review-time check, and it binds every author, human or agent.
+Both stacks compile the previous generation's idiom without complaint, so the gates in §A.1 stay
+green while the code is wrong. PRD §24.1 states the rule, §0.2 states its authority against §24, and
+D-048 records why. §A.2 and §A.3 open with the confirmation line.
+
 **Exit criteria are invariants, not opinions.** Every phase names the invariants from *Invariants* in
 the PRD that must pass before it is done. All 97 are assigned exactly once (*Invariant coverage*), so no invariant is
 orphaned and none is claimed twice. A phase whose invariants pass is finished; one whose invariants
@@ -2504,6 +2517,12 @@ guidelines live in the PRD's §24, and this appendix does not restate them; it s
 An implementer reading only this appendix knows what to run and what must pass. An implementer who
 needs to know *why* a rule exists reads the PRD's §24.
 
+**Neither this appendix nor §24 replaces the stack rule files.** `.augment/rules/backend-rust-dev-pro.md`
+and `.augment/rules/frontend-dev-pro.md` are normative, and you read the one for your surface before
+you write code for it (PRD §24.1, D-048). The commands below cannot substitute for that: every rule
+in this appendix is one a script or a reviewer can catch, and the rule files exist because most of
+what makes code wrong on either stack is neither.
+
 ### A.1 The gates every phase must pass
 
 Every phase of work — a task, a PR, a milestone — passes only when all of the following commands succeed. This section is the single command list; §A.2–§A.5 explain how each command's configuration is derived and how to work through a task so the gates pass on the first CI run rather than the third.
@@ -2577,6 +2596,9 @@ Nothing merges with a red gate. A gate that is red because of a pre-existing, un
 
 Work through this list for every Rust task before requesting review. Each line names the concrete thing to check and where the rule that backs it lives in the requirements document (§24.2, and §24.6 for the four structure lines that open the list).
 
+The first line is the only one you tick *before* writing code rather than after.
+
+- [ ] **Rules read**: you read `.augment/rules/backend-rust-dev-pro.md` before writing this task's code, not after. If the task touches a construct the file covers — async, error types, trait design, `serde`, SQLx, concurrency — you re-read that part of it (PRD §24.1, D-048).
 - [ ] **Placement**: every new file sits in a subfolder named after a domain, not a layer. No file was added to a `utils`/`helpers`/`common`/`types`/`models` catch-all, and no such module was created (§24.6.1, §24.6.3).
 - [ ] **Single purpose**: you can name each new or changed file's job in one sentence with no "and". Where the sentence needed an "and", the file was split at that seam (§24.6.2).
 - [ ] **File size**: the structure gate in §A.1 prints nothing for this diff. A file over its soft limit is split, or the PR carries the one sentence saying why not. A file over its hard limit is split, or it carries a `// STRUCTURE:` comment naming the category — and you have asked a reviewer to sign it, not assumed they would (§24.6.4).
@@ -2659,6 +2681,9 @@ allow = ["MIT", "Apache-2.0", "BSD-3-Clause", "Unicode-3.0"]
 
 Work through this list for every frontend task before requesting review. Each line names the concrete thing to check and where the rule that backs it lives in the requirements document (§24.3, §24.4, and §24.6 for the four structure lines that open the list).
 
+The first line is the only one you tick *before* writing code rather than after.
+
+- [ ] **Rules read**: you read `.augment/rules/frontend-dev-pro.md` before writing this task's code, not after. If the task touches a construct the file covers — runes, props, effects, the SvelteKit file conventions, UnoCSS, shadcn-svelte, Bun tooling — you re-read that part of it. Read §24.4 alongside it: the rule file describes the full SvelteKit stack, and this project has no JavaScript server runtime (PRD §24.1, D-048).
 - [ ] **Placement**: new domain code sits in `src/lib/features/<domain>/` beside that domain's state and API calls; nothing domain-specific was added to `src/lib/components/ui/`; no `utils.ts`/`helpers.ts`/`types.ts` catch-all was created or grown (§24.6.1, §24.6.3).
 - [ ] **Single purpose**: each new component renders one thing, and each new `.svelte.ts` module owns one piece of state. A component that both fetches a list and edits a row is two components (§24.6.2).
 - [ ] **File size**: the structure gate in §A.1 prints nothing for this diff — 250 lines soft and 400 hard for `.svelte`, 300 soft and 500 hard for `.ts`/`.svelte.ts`. Past the hard limit, either split the component or carry a `// STRUCTURE:` comment a reviewer signs; "the sub-parts would share a dozen `$bindable` values" is a real reason, and it is written down (§24.6.4).
@@ -2792,6 +2817,7 @@ Any hit in the Rust `unsafe`/db/db-string block or the frontend static-SPA block
 - [ ] **Structure, before anything else.** Every new file is in a domain folder, states one thing, and does not add a responsibility to a module that already had a different one. A file that grew past its soft limit was split, or the PR says in one sentence why not (§24.6.1–§24.6.4). This is a request-changes on its own — a correct change in the wrong file is still the wrong file, and it is cheaper to move now than after the next phase builds on it.
 - [ ] **The hard-limit exception, if this PR takes one.** You are the second signature (§24.6.4), so decide rather than wave it through. The `// STRUCTURE:` comment names a category — one state machine, one exhaustive `match`, one editor whose parts would share a dozen `$bindable` values — and not a schedule. Confirm the file is one thing under §24.6.2 first: the exception exists for a file that is big, never for a file that is two files.
 - [ ] **Public surface.** Every new `pub`/`pub use`/barrel export is there because a caller outside the boundary needs it, not because a symbol was needed somewhere and `pub` was the shortest fix. Ask whether the caller belongs inside the boundary instead (§24.6.5).
+- [ ] **Stack idiom, checked against the rule file rather than from memory.** Where the diff uses a construct the surface's rule file covers, open that part of `.augment/rules/backend-rust-dev-pro.md` or `.augment/rules/frontend-dev-pro.md` and compare. Each file pairs the current idiom with the wrong-but-plausible alternative; the grep block above catches only the alternatives common enough to write as a regex, and the rest are found by reading. A diff that is green on every command and contradicts its rule file is a request-changes (PRD §24.1, D-048).
 - [ ] The OpenAPI schema/generated client were regenerated in the same PR as any handler/DTO change, and the frontend diff, if any, uses the regenerated client rather than a hand-typed shape (§24.2.6, §24.5).
 - [ ] Error responses use the shared `AppError` pattern; no new bespoke error shape was introduced for one endpoint (§24.2.6).
 - [ ] New public Rust items have doc comments; `cargo doc --no-deps` was actually run, not assumed clean (§24.2.15).

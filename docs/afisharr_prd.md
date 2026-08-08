@@ -21,8 +21,25 @@ plan, the non-functional requirements, every decision of record with its reasoni
 guidelines the implementation must satisfy.
 
 It has one companion, and only one: the implementation plan, which turns these requirements into
-phases, tasks, and subtasks. Together the two documents are the complete reference set for the
-project. Nothing else is normative.
+phases, tasks, and subtasks. Together the two documents are the complete reference set for what to
+build and in what order.
+
+**Two rule files carry the stack-level coding guidelines, and both are normative.** They live in the
+repository, not in this document:
+
+| File | Covers |
+| --- | --- |
+| `.augment/rules/frontend-dev-pro.md` | The frontend stack: Bun, Svelte 5 (runes), SvelteKit 2, UnoCSS `presetWind4`, shadcn-svelte |
+| `.augment/rules/backend-rust-dev-pro.md` | The backend stack: Rust 1.97.1, edition 2024, tokio, axum, SQLx, serde |
+
+**Read the rule file for the surface you are about to touch before you write any code for that
+surface.** This binds every author, human or agent, on every change. It is not background reading and
+it is not an appendix: the rule files state the one current idiomatic pattern for each construct on
+each stack, version-anchored, and code that contradicts them is wrong even when it compiles and the
+tests pass. §24.1 states the rule and its authority; D-048 records why.
+
+Those four files — this document, the implementation plan, and the two rule files — are the complete
+normative set. Nothing else is normative.
 
 ### 0.2 Authority
 
@@ -40,6 +57,11 @@ bug to report, not an ambiguity to resolve by choosing.**
 - *Coding guidelines* (§24) is normative for *how* code is written and sits outside this hierarchy.
   One exception is recorded in §24.4: the SPA has no server runtime, so the server-side half of the
   frontend guidelines is structurally inapplicable.
+- The two rule files in `.augment/rules/` are normative for *how* code is written on each stack, and
+  they also sit outside this hierarchy. Read the relevant one before writing code (§0.1, §24.1).
+  §24 is the project layer over them: it selects, tightens, and adds to them for Afisharr. Where a
+  rule file and §24 disagree, §24 wins, because §24 knows this project's architecture and the rule
+  file does not. Where §24 is silent, the rule file binds on its own.
 
 ### 0.3 Conventions
 
@@ -75,7 +97,7 @@ added.
 | §20 | Seven recurring failure patterns and all 97 invariants |
 | §21 | Scale, budgets, security, platforms, backup, upgrade, privacy, licence, test strategy |
 | §22–§23 | Every decision of record with its reasoning; open questions |
-| §24 | The normative coding guidelines, including the modular-structure requirement (§24.6) |
+| §24 | The normative coding guidelines: the two stack rule files (§24.1), the per-surface rules, and the modular-structure requirement (§24.6) |
 
 ### 0.5 What is still open
 
@@ -7926,6 +7948,40 @@ control, because the failure this prevents — unrelated responsibilities in one
 semantic property no linter available for either surface can see. Requirement in §24.6; gates and
 checklist lines in the implementation plan's §A.1–§A.4.
 
+**D-048 — The two stack rule files are normative, and they are read before code is written.**
+*Raised while recording the coding guidelines, 2026-08-09.* `.augment/rules/frontend-dev-pro.md`
+covers the frontend stack and `.augment/rules/backend-rust-dev-pro.md` covers the Rust backend
+stack. Both are normative, alongside this document and the implementation plan. Every author, human
+or agent, reads the file for the surface they are about to touch before writing code for it.
+
+*Why the files are normative rather than reference material:* they are the only place the current
+idiom for each stack is written down against the pinned versions. §24 is long, but it is a project
+layer — it assumes the stack idiom and states what Afisharr does on top of it. Demote the rule files
+to "background" and every construct §24 does not happen to mention has no stated right answer, which
+in practice means whichever answer the author already had.
+
+*Why read-first rather than check-at-review:* the failure these files prevent is silent. Both stacks
+accept the previous generation's idiom and the adjacent ecosystem's habits without complaint —
+`export let` compiles, `unwrap()` runs, a hand-rolled `fetch` returns data, and every gate in §A.1
+stays green. So review is the first place the mistake can surface, and by then it is a rewrite rather
+than a choice. Reading first costs one pass over a document; reading last costs the diff.
+
+*Why both surfaces are named explicitly rather than "the relevant rules":* an author who has to work
+out which file applies sometimes decides neither does. Two files, one per surface, each named where
+the reader starts (§0.1, §24.1, and the implementation plan's *How to read this*), removes that step.
+
+*Why the project layer wins on conflict:* the rule files are written for the stack in general and
+cannot know that this frontend has no server runtime (§24.4), that the API contract is generated
+(§24.5), or that files carry size limits (§24.6). Where §24 contradicts a rule file it is because
+this project's architecture requires it, and §24 says so. Where §24 is silent there is no conflict,
+and the rule file binds unchanged.
+
+*Rejected:* copying the rule files into §24, because two copies of a version-anchored document
+diverge at the first stack upgrade, and the copy inside the PRD is the one that would go stale
+unread. Rejected: leaving them as an unnamed convention that agents happen to pick up, because a
+convention nothing states is a convention no reviewer can enforce. Requirement in §24.1; authority
+in §0.2; gate and checklist lines in the implementation plan's §A.1–§A.4.
+
 ### 22.4 Change requests against the frozen scope
 
 The scope ledger froze on 2026-08-08. Every entry below is a recorded, dated reopening — never a
@@ -8142,8 +8198,25 @@ These guidelines are normative for all code merged into the Afisharr repository.
 
 The guidelines cover two independent surfaces that meet only at the generated API contract:
 
-- **The Rust backend** (§24.2): a single binary, stable Rust 1.97.1, edition 2024, Axum, SQLite via SQLx, utoipa-generated OpenAPI, SSE.
-- **The frontend** (§24.3): SvelteKit 2 / Svelte 5 / UnoCSS `presetWind4` / shadcn-svelte, built with Bun, compiled to a fully prerendered static site and embedded in the Rust binary.
+- **The Rust backend** (§24.2): a single binary, stable Rust 1.97.1, edition 2024, Axum, SQLite via SQLx, utoipa-generated OpenAPI, SSE. Stack rule file: `.augment/rules/backend-rust-dev-pro.md`.
+- **The frontend** (§24.3): SvelteKit 2 / Svelte 5 / UnoCSS `presetWind4` / shadcn-svelte, built with Bun, compiled to a fully prerendered static site and embedded in the Rust binary. Stack rule file: `.augment/rules/frontend-dev-pro.md`.
+
+**Read the rule file for your surface before you write any code for it.** The two files in
+`.augment/rules/` are normative, on the same footing as this section, and the obligation is to read
+first — not to write, then check. It binds every author, human or agent, on every change.
+
+Each file states the one current idiomatic pattern for each construct on its stack, anchored to the
+pinned versions, with the wrong-but-plausible alternative shown next to it. That pairing is the
+point. Neither stack fails loudly when you write the previous generation's idiom: Svelte 4's
+`export let` compiles, `Arc<Mutex<…>>` around a read-mostly map runs, and a green test suite reports
+nothing about either. A rule file read afterwards catches these in review, once the code exists and
+the cost of changing it is a rewrite. Read first and they never enter the diff (D-048).
+
+The rule files carry the stack; §24 carries the project. §24 selects from them, tightens them where
+this architecture needs it, and adds what no general stack guide can know — the static-SPA carve-out
+(§24.4), the generated-client contract (§24.5), the structural limits (§24.6). Where a rule file and
+§24 disagree, §24 wins. Where §24 is silent, the rule file binds on its own. Neither replaces the
+other, and reading §24 alone is not sufficient.
 
 Because the frontend is a static export with no JavaScript server runtime in production, a subset of standard SvelteKit guidance is structurally inapplicable here. §24.3 states the full frontend standard as a coherent reference; §24.4 is the authoritative carve-out that says exactly which parts of §24.3 do not apply to Afisharr and why, and what we do instead. Where the two sections conflict, §24.4 wins.
 
