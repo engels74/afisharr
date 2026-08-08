@@ -35,6 +35,13 @@ against the shell built in Phase 1.
 invariant, a command that exits zero, or a specific observable behaviour. "Looks correct" is not a
 completion criterion anywhere in this plan.
 
+**Modular structure is a constraint on every task, from Task 0.1 onward.** The source tree divides
+into subfolders by domain; every file states one thing; no module collects unrelated
+responsibilities; every file carries a soft and a hard size limit; every module exposes a narrow
+public surface it declares in one place. PRD §24.6 states the rule and D-047 records why. It is
+gated per change (§A.1) and checked per task (§A.2, §A.3, §A.4). It is not a refactor to schedule
+after a phase, because by then every later phase is written against the structure it would change.
+
 **Every task is also subject to the build gates.** Appendix A carries the coding standards as
 checkable gates. A task that passes its **Done when** clause but fails a gate in Appendix A is not
 done.
@@ -59,6 +66,17 @@ web/             SvelteKit 2, Svelte 5, UnoCSS (presetWind4), shadcn-svelte,
 ```
 
 Rust toolchain pinned at 1.97.1, edition 2024.
+
+**Inside a crate, the division continues by domain.** Each `src/` holds subfolders named after a
+thing the product has or a job it does — `placement/`, `lifecycle/`, `sources/trakt/`,
+`definition/validation/` — never a flat `src/` of siblings, and never a folder named after a layer
+(`utils/`, `helpers/`, `common/`, `types/`, `models/`). Code shared across domains is not banned —
+it goes in `crates/core/src/<named>/` or `web/src/lib/shared/<named>/` under a name that predicts
+what it does (`text/slug.rs`, not `utils.rs`), and is itself a domain (§24.6.1). Frontend domain code lives in
+`web/src/lib/features/<domain>/`, holding that domain's components, `.svelte.ts` state, and calls to
+the generated client together; `web/src/lib/components/ui/` stays the shared primitive layer. Where a
+domain spans crates, the folder name matches on both sides: `crates/core/src/placement/` and
+`crates/api/src/routes/placement/`. Rule in PRD §24.6.1.
 
 ---
 
@@ -134,9 +152,13 @@ a unique index. Both are cheap now and are table rebuilds later.
      placeholder checks to run — later phases add jobs to an existing lane rather than build one.
   6. Wire the rule that a nightly failure blocks the next merge until fixed or explicitly waived with
      a named reason.
+  7. Add the structure gate from §A.1 as a prek hook and a merge-lane step, with the exempt paths
+     (generated client, `target/`, `.svelte-kit/`, migrations, registry constant tables) excluded in
+     the script rather than by raising a threshold. It exists from the first commit because a limit
+     introduced in Phase 6 is a limit that first fires as a backlog (§24.6.4, D-047).
 - **Done when:** `prek install` leaves hooks active in a fresh clone, and a trivial commit runs the
   merge lane to a pass inside the 10-minute budget, with the nightly and release lane jobs present and
-  schedulable.
+  schedulable. The structure gate runs in that lane and passes on the empty tree.
 
 ### Task 0.2 The complete schema
 - **Build:** all 68 tables and their indexes, exactly as specified, as SQLx migrations.
@@ -2515,6 +2537,32 @@ bun run test:browser            # vitest run — .svelte component tests
 bun run build                   # vite build via adapter-static; must complete with no server-only code reachable
 ```
 
+**Structure gate (run from the workspace root).** This is the script-checkable half of PRD §24.6.
+Each command must print nothing. A line of output names a file over its soft limit (§24.6.4), which
+is either split in this change or justified in one sentence in the PR. A file over its hard limit is
+split, or it carries a `// STRUCTURE:` header comment naming why the split is worse, agreed by a
+reviewer who is not the author — two signatures, recorded in the file.
+
+```bash
+# Rust, non-test: soft 400, hard 700
+find crates -name '*.rs' -not -path '*/target/*' -print0 \
+  | xargs -0 wc -l | awk '$2 != "total" && $1 > 400' | sort -rn
+
+# Svelte components: soft 250, hard 400
+find web/src -name '*.svelte' -print0 \
+  | xargs -0 wc -l | awk '$2 != "total" && $1 > 250' | sort -rn
+
+# TypeScript and rune modules: soft 300, hard 500
+find web/src \( -name '*.ts' -o -name '*.svelte.ts' \) -print0 \
+  | xargs -0 wc -l | awk '$2 != "total" && $1 > 300' | sort -rn
+```
+
+Generated code, the four registry constant tables (§13.2–§13.6 in the PRD), and SQL migrations are
+exempt from the limits — exclude them from the paths above rather than raising a threshold to
+accommodate them. The other four rules of §24.6 — division by domain, one file one thing, no god
+files, narrow public surfaces — carry no command, because no linter for either surface can see
+whether two responsibilities are related. They are enforced in §A.2, §A.3, and §A.4 instead.
+
 **Local hooks:** the repository uses `prek` (a pre-commit-compatible hook runner) to run a fast subset of the above on every commit, and the full set on push/CI. `prek` reads the same `.pre-commit-config.yaml` shape as its predecessor tooling; do not write a second, competing hook mechanism (a custom `git commit` wrapper, a `husky`-style npm hook, etc.) alongside it.
 
 ```bash
@@ -2527,8 +2575,12 @@ Nothing merges with a red gate. A gate that is red because of a pre-existing, un
 
 ### A.2 Rust checklist per task
 
-Work through this list for every Rust task before requesting review. Each line names the concrete thing to check and where the rule that backs it lives in the requirements document (§24.2).
+Work through this list for every Rust task before requesting review. Each line names the concrete thing to check and where the rule that backs it lives in the requirements document (§24.2, and §24.6 for the four structure lines that open the list).
 
+- [ ] **Placement**: every new file sits in a subfolder named after a domain, not a layer. No file was added to a `utils`/`helpers`/`common`/`types`/`models` catch-all, and no such module was created (§24.6.1, §24.6.3).
+- [ ] **Single purpose**: you can name each new or changed file's job in one sentence with no "and". Where the sentence needed an "and", the file was split at that seam (§24.6.2).
+- [ ] **File size**: the structure gate in §A.1 prints nothing for this diff. A file over its soft limit is split, or the PR carries the one sentence saying why not. A file over its hard limit is split, or it carries a `// STRUCTURE:` comment naming the category — and you have asked a reviewer to sign it, not assumed they would (§24.6.4).
+- [ ] **Module surface**: children are declared `mod x;` and the intended surface re-exported with `pub use`; `pub(crate)` used for anything shared only inside the crate; no new `pub` that exists so one caller could reach three levels in. `mod.rs` declares and re-exports, and holds no logic (§24.6.5, §24.6.3).
 - [ ] **Ownership**: parameters accept the least-owned type that works (`&str`/`&[T]`/`impl AsRef<Path>`/`Cow`), not `&String`/`&Vec<T>`/forced-owned `String` (§24.2.1).
 - [ ] **Shared state**: no new `Arc<Mutex<HashMap<…>>>` introduced for a read-mostly structure; `RwLock`/`dashmap` used instead where reads dominate (§24.2.1).
 - [ ] **Typing**: any new domain concept that can be in an illegal state is a newtype, not a raw `u64`/`String`/`i32` passed around by convention (§24.2.2).
@@ -2605,8 +2657,12 @@ allow = ["MIT", "Apache-2.0", "BSD-3-Clause", "Unicode-3.0"]
 
 ### A.3 Frontend checklist per task
 
-Work through this list for every frontend task before requesting review. Each line names the concrete thing to check and where the rule that backs it lives in the requirements document (§24.3, §24.4).
+Work through this list for every frontend task before requesting review. Each line names the concrete thing to check and where the rule that backs it lives in the requirements document (§24.3, §24.4, and §24.6 for the four structure lines that open the list).
 
+- [ ] **Placement**: new domain code sits in `src/lib/features/<domain>/` beside that domain's state and API calls; nothing domain-specific was added to `src/lib/components/ui/`; no `utils.ts`/`helpers.ts`/`types.ts` catch-all was created or grown (§24.6.1, §24.6.3).
+- [ ] **Single purpose**: each new component renders one thing, and each new `.svelte.ts` module owns one piece of state. A component that both fetches a list and edits a row is two components (§24.6.2).
+- [ ] **File size**: the structure gate in §A.1 prints nothing for this diff — 250 lines soft and 400 hard for `.svelte`, 300 soft and 500 hard for `.ts`/`.svelte.ts`. Past the hard limit, either split the component or carry a `// STRUCTURE:` comment a reviewer signs; "the sub-parts would share a dozen `$bindable` values" is a real reason, and it is written down (§24.6.4).
+- [ ] **Feature surface**: the feature's `index.ts` names its exports, and every cross-feature import goes through that barrel rather than a deep path. Components that serve one parent are not exported from it (§24.6.5).
 - [ ] **Runes only**: no `export let`, `$:`, `on:click`, `<slot />`, `createEventDispatcher`, or `new Component({ target })` introduced anywhere in the diff — grep the diff for these before opening the PR (§24.3.2, §24.3.13).
 - [ ] **Derived vs effect**: any new value computed from other state is `$derived`/`$derived.by`, not an `$effect` that writes to another `$state` (§24.3.2).
 - [ ] **Reactive collections**: any new `Map`/`Set`/`Date` that needs to be reactive is `SvelteMap`/`SvelteSet`/`SvelteDate` from `svelte/reactivity`, not the plain built-in (§24.3.3).
@@ -2720,10 +2776,22 @@ git diff --unified=0 -- '*' | grep -nE '\+page\.server\.ts|\+layout\.server\.ts|
 git diff --unified=0 -- '*' | grep -nE '\bdotenv\b|\bts-node\b|\bbcrypt\b|\bjest\b'
 ```
 
+Structure, both surfaces (§24.6):
+```bash
+# Catch-all module names, created or grown
+git diff --name-only | grep -nE '(^|/)(utils|helpers|common|misc|shared|types|models)\.(rs|ts)$|(^|/)(utils|helpers|common|misc|shared)/'
+
+# Size of every file the diff touches, against the limits in §A.1
+git diff --name-only --diff-filter=d | xargs wc -l | sort -rn | head -20
+```
+
 Any hit in the Rust `unsafe`/db/db-string block or the frontend static-SPA block is not automatically wrong, but it must be explained in the PR description with the §24.4/§24.2.9 rationale for why the exception applies — an unexplained hit is a request-changes.
 
 **Beyond grep, the reviewer confirms:**
 
+- [ ] **Structure, before anything else.** Every new file is in a domain folder, states one thing, and does not add a responsibility to a module that already had a different one. A file that grew past its soft limit was split, or the PR says in one sentence why not (§24.6.1–§24.6.4). This is a request-changes on its own — a correct change in the wrong file is still the wrong file, and it is cheaper to move now than after the next phase builds on it.
+- [ ] **The hard-limit exception, if this PR takes one.** You are the second signature (§24.6.4), so decide rather than wave it through. The `// STRUCTURE:` comment names a category — one state machine, one exhaustive `match`, one editor whose parts would share a dozen `$bindable` values — and not a schedule. Confirm the file is one thing under §24.6.2 first: the exception exists for a file that is big, never for a file that is two files.
+- [ ] **Public surface.** Every new `pub`/`pub use`/barrel export is there because a caller outside the boundary needs it, not because a symbol was needed somewhere and `pub` was the shortest fix. Ask whether the caller belongs inside the boundary instead (§24.6.5).
 - [ ] The OpenAPI schema/generated client were regenerated in the same PR as any handler/DTO change, and the frontend diff, if any, uses the regenerated client rather than a hand-typed shape (§24.2.6, §24.5).
 - [ ] Error responses use the shared `AppError` pattern; no new bespoke error shape was introduced for one endpoint (§24.2.6).
 - [ ] New public Rust items have doc comments; `cargo doc --no-deps` was actually run, not assumed clean (§24.2.15).
@@ -2783,6 +2851,13 @@ repos:
         language: system
         pass_filenames: false
         stages: [push]
+      - id: file-size
+        name: file size limits (PRD 24.6.4)
+        entry: scripts/check-file-size.sh
+        language: system
+        pass_filenames: false
 ```
+
+`scripts/check-file-size.sh` holds the three commands from §A.1, plus the exempt-path exclusions, and exits non-zero on any output. It also skips any file whose first ten lines carry a `// STRUCTURE:` comment, so a signed hard-limit exception (§24.6.4) does not block every later commit that touches the file. That is the whole enforcement of the exception in the script — a comment is cheap to write, and the control that makes it expensive is the reviewer who has to sign it (§A.4), not the grep. It is a commit-stage hook rather than a push-stage one on purpose: the point of the limit is to stop a file crossing it, and a check that runs after five commits reports a split that is now five commits deep.
 
 Never use `npm`/`npx` in any lane or hook — every frontend command in this document is a `bun`/`bunx` invocation, and a stray `npm install` in CI config is itself a gate failure to catch in review (§A.4).

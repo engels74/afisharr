@@ -75,7 +75,7 @@ added.
 | §20 | Seven recurring failure patterns and all 97 invariants |
 | §21 | Scale, budgets, security, platforms, backup, upgrade, privacy, licence, test strategy |
 | §22–§23 | Every decision of record with its reasoning; open questions |
-| §24 | The normative coding guidelines |
+| §24 | The normative coding guidelines, including the modular-structure requirement (§24.6) |
 
 ### 0.5 What is still open
 
@@ -600,6 +600,12 @@ web/             SvelteKit 2, Svelte 5, UnoCSS (presetWind4), shadcn-svelte,
 ```
 
 Rust toolchain pinned at 1.97.1, edition 2024.
+
+**Inside each crate, the same division continues.** A crate's `src/` divides into subfolders named
+after a domain, not after a layer; every file states one thing; no module collects unrelated
+responsibilities; every file carries a size limit; and every module declares a narrow public surface.
+This is normative and gated per change, not a cleanup to schedule. Full requirement in §24.6,
+recorded as D-047.
 
 **Frontend boundary.** The SPA is fully prerendered and embedded; there is no JavaScript server
 runtime in production. Server-side SvelteKit features — server load functions, form actions, server
@@ -7883,6 +7889,43 @@ ordinary. Without a second path, the operator's own account — created at step 
 database — would be unable to open the wizard that created it. Resume table in §7.14; tested by
 I-UX-10.
 
+**D-047 — Modular structure is a build gate, not a refactor to schedule.** *Raised while recording
+the structural requirement, 2026-08-09.* The source tree divides into subfolders by domain, every
+file states one thing, god files are prohibited outright, every file carries a soft and a hard size
+limit, and every module exposes a narrow public surface it declares in one place. All five bind from
+the first commit of Phase 0 and are checked on every change.
+
+*Why this is a decision rather than a preference:* this project is fifteen phases of accretion
+against a schema of 68 tables, sixteen source adapters, and two ordering surfaces. Every one of those
+is a plausible reason to add "just one more thing" to a module that already exists. Structure is the
+only quality property that no single commit destroys — a file crosses from reviewable to unreviewable
+across twenty correct changes, none of which is the culprit. A rule applied per change is therefore
+the only form of this rule that works.
+
+*Why size limits are soft first, hard second:* a single hard threshold is either loose enough to
+permit the drift or tight enough to be routinely overridden, and an override that becomes routine
+stops being read. Two thresholds separate two conversations: at the soft limit the author justifies
+once in the PR, and at the hard limit the author justifies to a second person and leaves the reason
+in the file.
+
+*Why the hard limit has an exception at all:* the same argument. A ceiling with no exception is
+overridden anyway — in a PR comment, off the record, leaving nothing in the file for the next reader.
+It also collides with the rest of this decision: a 750-line module with one responsibility often has
+exactly one available split, into `types` and `impls`, which is the layer-shaped division §24.6.1
+prohibits. A rule that forces what another rule forbids is decided by whichever reviewer is paying
+attention. Two signatures and a header comment cost more than a silent override and less than a bad
+split, and unlike either, they leave a record that a later reviewer can disagree with.
+
+*Why the limits are explicitly the weaker half of the rule:* a script can measure lines and cannot
+measure whether four unrelated helpers share a file. §24.6.2 and §24.6.3 bind at any size, and a
+green `wc -l` is not evidence that they hold.
+
+*Rejected:* a periodic refactoring phase, because it schedules the cleanup after every phase that
+depends on the structure is already written against the mess. Rejected: a lint rule as the sole
+control, because the failure this prevents — unrelated responsibilities in one module — is a
+semantic property no linter available for either surface can see. Requirement in §24.6; gates and
+checklist lines in the implementation plan's §A.1–§A.4.
+
 ### 22.4 Change requests against the frozen scope
 
 The scope ledger froze on 2026-08-08. Every entry below is a recorded, dated reopening — never a
@@ -8104,7 +8147,9 @@ The guidelines cover two independent surfaces that meet only at the generated AP
 
 Because the frontend is a static export with no JavaScript server runtime in production, a subset of standard SvelteKit guidance is structurally inapplicable here. §24.3 states the full frontend standard as a coherent reference; §24.4 is the authoritative carve-out that says exactly which parts of §24.3 do not apply to Afisharr and why, and what we do instead. Where the two sections conflict, §24.4 wins.
 
-§24.5 states the standards that are genuinely cross-cutting: they constrain both surfaces at once, or they constrain the seam between them.
+§24.5 states the standards that are genuinely cross-cutting: they constrain both surfaces at once, or they constrain the seam between them. §24.6 states the structural requirement — how the source tree divides, and how large one file may get — which binds every file on both surfaces.
+
+**Structure is a requirement, not a cleanup task.** §24.6 has the same force as every rule below it, and it is checked in the same pass, not in a later refactor. The reason it is named here, ahead of the surface-specific rules: every other rule in §24 is local to a few lines, and a reviewer catches a bad `unwrap()` by reading the diff. Structure is the one property a diff hides. A file grows past its limit one small, correct commit at a time, and no single commit is the one that broke it. So the limit is measured on every change, and a change that pushes a file past it splits the file in the same change (D-047).
 
 We write idiomatic code for each ecosystem on its own terms. We do not import habits from an adjacent ecosystem: not Go/Java-style `Arc<Mutex<…>>`-and-clone reflexes, not Python/TypeScript-style `unwrap()`-as-control-flow or stringly-typed errors, not C++-style inheritance trait-object trees, not Svelte-4-style `export let`/`$:`/`on:click`/slots, not React-style `forwardRef`/`asChild`/`useState`, not Node-style `dotenv`/`ts-node`/`jest`/`bcrypt`/hand-rolled connection pools. Every rule below exists to make the idiomatic, current pattern the only pattern that appears in the codebase.
 
@@ -9920,3 +9965,183 @@ What replaces all of the above, uniformly: **every dynamic read and write goes t
 **Dependencies are pinned and audited on both surfaces.** Rust dependencies go through `cargo deny`/`cargo machete`/`cargo audit` (§24.2.13); frontend dependencies are locked via the committed `bun.lock` and installed with `--frozen-lockfile` in CI (§24.3.12). Tool versions that ship formatting/linting changes in minor releases (Biome) are pinned exactly.
 
 **Testing is stratified by what is being verified, on both surfaces, and no single tool is asked to cover a target it is not built for:** unit/property/integration/doctest/benchmark tools on the Rust side (§24.2.12) map to unit/component/browser/e2e tools on the frontend side (§24.3.10) — `bun test` no more compiles a `.svelte` component than a Rust unit test replaces a `criterion` benchmark.
+
+### 24.6 Modular structure (normative, both surfaces)
+
+This section is the structural requirement named in §24.1. It applies to every file in the
+repository, on both surfaces, and it is checked on every change rather than in a periodic cleanup.
+Recorded as D-047.
+
+Five rules. They are one idea seen from five angles: a reader who opens one file should get one
+subject, and a reader who opens one folder should get one domain.
+
+#### 24.6.1 The source tree divides by feature or domain
+
+Every crate's `src/` divides into subfolders named after a domain — a thing the product has, or a
+job the product does. A flat `src/` holding twenty sibling files is not acceptable at any size, and
+neither is a folder named after a layer.
+
+| Divide by | Not by |
+|---|---|
+| `placement/`, `lifecycle/`, `render/`, `sources/trakt/` | `utils/`, `helpers/`, `common/`, `misc/`, `shared/` |
+| `definition/validation/` | `types/`, `models/`, `structs/`, `traits/`, `impls/` |
+| `collections/reconcile/` | `services/`, `managers/`, `handlers/` as a single catch-all |
+
+A layer name describes the shape of what is inside, so anything of that shape qualifies, so
+everything of that shape arrives. `utils/` is a god folder with the same failure mode as a god file:
+nothing is ever the wrong thing to put in it. The prohibited names above are prohibited as
+*catch-alls*, not as words — `crates/api/src/routes/` is a domain (the HTTP surface), while a
+`crates/core/src/services/` holding six unrelated subsystems is not. Likewise
+`crates/sources/src/trakt/types.rs`, holding the Trakt DTOs and nothing else, is a single-purpose
+file inside a domain; the rule bans `types/` as a way to *divide a crate*, not the word.
+
+**Where genuinely shared code goes.** This rule bans a name, not code reuse. Two domains that need
+the same function still share it — under a name that predicts what it does:
+
+| Instead of | Write |
+|---|---|
+| `utils.rs` holding `slugify`, `retry`, `parse_duration` | `text/slug.rs`, `net/retry.rs`, `time/duration.rs` |
+| `helpers.ts` holding `formatDate`, `debounce` | `format/date.ts`, `interaction/debounce.ts` |
+
+The shared layer is `crates/core/src/<named>/` on the backend and `web/src/lib/shared/<named>/` on
+the frontend. Each `<named>` is a domain in its own right — `text`, `time`, `format` — and is subject
+to every rule in §24.6 like any other. The test is one question: **does the folder name predict what
+is inside it?** `text/slug.rs` predicts. `utils.rs` does not, which is why everything ends up there.
+
+A helper used by exactly one domain does not go in the shared layer at all. It lives beside the code
+it serves, and it moves outward the first time a second domain needs it.
+
+Frontend structure follows the same rule against SvelteKit's own layout: routes stay in
+`src/routes/` as the framework requires, and everything they use lives in `src/lib/features/<domain>/`
+holding that domain's components, its `.svelte.ts` state, and its calls to the generated API client
+together. `src/lib/components/ui/` remains the shared primitive layer (§24.3.1) and holds nothing
+domain-specific.
+
+Where a domain genuinely spans crates, the crate boundary is the division and the folder names match
+across it: `crates/core/src/placement/` and `crates/api/src/routes/placement/` are the same domain
+seen from two surfaces, and they carry the same name for that reason.
+
+#### 24.6.2 One file states one thing
+
+Every file has a single responsibility. The check is a sentence: name what the file is for, in one
+sentence, without the word "and". If the honest sentence needs an "and", the file is two files and
+the split is already obvious — the "and" is the seam.
+
+One file holds one of: one aggregate and its invariants, one pipeline stage, one source adapter, one
+route group, one state machine, one component. It does not hold two of them because they are both
+small, and it does not hold two of them because they are both about the same feature — that is what
+the folder is for.
+
+#### 24.6.3 No god files
+
+A god file is any module that accumulates unrelated responsibilities. It is prohibited outright, at
+any line count, and it is the failure this section exists to prevent. In particular:
+
+- No `utils.rs`, `helpers.ts`, `common.rs`, `misc.rs`, or `shared.ts` — a name that means "things"
+  admits everything. A helper that is used twice belongs beside the thing it helps; a helper used by
+  four domains is its own named module in the shared layer, describing what it does (§24.6.1).
+- No `types.rs`/`models.ts` holding every type in a crate. A type lives with the code that owns its
+  invariants.
+- No `mod.rs`/`index.ts` carrying implementation. Those files declare and re-export (§24.6.5); logic
+  in them is logic with no name and no home.
+- No single `AppState`-adjacent module that grows a method per feature. Each feature owns its own
+  state and exposes an interface to the wiring layer.
+- No file that both defines a domain concept and performs I/O for it. Domain logic and its transport
+  are separate files, which is also what makes the domain logic testable without the transport.
+
+Size does not make a file a god file, and smallness does not exempt one. A 90-line module holding
+four unrelated helpers is already the thing this rule prohibits; it is just early.
+
+#### 24.6.4 The file-size limits, soft and hard
+
+Every file carries a soft limit and a hard limit, measured in physical lines including blanks and
+comments:
+
+| File | Soft | Hard |
+|---|---|---|
+| Rust `.rs`, non-test | 400 | 700 |
+| Rust test file (`tests/*.rs`, `#[cfg(test)]`-only file) | 600 | — |
+| `.svelte` component | 250 | 400 |
+| `.ts`, `.svelte.ts` | 300 | 500 |
+
+**At the soft limit**, split the file, or state in the change description why this one should not be
+split. One sentence is enough, and "we ran out of time" is not that sentence. This is the deviation
+mechanism §24.1 already grants to "should" rules, made explicit.
+
+**At the hard limit**, split the file, or take the exception in front of a second person. The
+exception costs two signatures and leaves a record in the file:
+
+1. The author writes a header comment on the file naming the category and why the split is worse —
+   `// STRUCTURE: over 700 lines. One state machine; a split separates the guards from the`
+   `// transitions they guard (§24.6.4).`
+2. A reviewer who is not the author agrees, in the change that introduces the comment.
+
+The comment stays in the file, so the next reader finds the decision already made instead of
+reopening it, and the next reviewer can disagree with a decision that is written down.
+
+Cases where the exception is the right answer, and the split is the worse code: a state machine whose
+transitions, guards, and allowlist read as one table (§17.8); an exhaustive `match` over a large
+enum, where splitting it hides the exhaustiveness the compiler is proving; one editor component whose
+sub-parts would share a dozen `$bindable` values and turn into prop-threading (§7.5). What these have
+in common is that the file is already one thing under §24.6.2 — the exception exists for files that
+are big, never for files that are two files.
+
+An absolute ceiling was considered and rejected, for the reason D-047 gives for two thresholds at
+all: a rule with no exception gets overridden anyway, in a PR comment, off the record, with nothing
+left in the file. Two signatures and a header comment is the same override made expensive and
+visible.
+
+Exempt from both limits, because their length carries no complexity and splitting them would hide
+the fact that they are one table:
+
+- Generated code: the OpenAPI TypeScript client, `.svelte-kit/`, `target/`, SQLx offline data.
+- The four registries (§13.2–§13.6) and other pure constant tables — a file of data literals with no
+  branching. A registry file that grows a `match` arm with logic in it stops being exempt.
+- SQL migration files (§19.3), which are append-only by construction and must not be rewritten.
+
+The limits are deliberately generous. They are a backstop that catches drift, not the primary
+control — a file can violate §24.6.2 and §24.6.3 at 120 lines, and those rules bind first. Passing
+`wc -l` is not evidence of a well-structured module.
+
+#### 24.6.5 Module boundaries are explicit and narrow
+
+Every module exposes the smallest public surface that its callers actually need, and that surface is
+written down in one place rather than emerging from whatever happened to be marked public.
+
+**Rust.** A parent declares children with private `mod x;` and re-exports the intended surface with
+`pub use x::{Thing, other_thing};`. `pub mod` is for a surface a caller is meant to navigate into,
+not the default. Inside a crate, `pub(crate)` is the default for anything the crate's own code
+shares; `pub` means "part of this crate's contract with the workspace" and nothing less. A crate's
+`lib.rs` is its entire public surface and reads as a list of what it exports — a reader answers
+"what can I call?" from that one file. A caller reaching three module levels into another crate is a
+boundary that was never drawn.
+
+**Frontend.** Each `src/lib/features/<domain>/` has one `index.ts` naming its exports. Other
+features import from that barrel and never from a deep path inside it, so a domain's internals stay
+free to move. Components that exist only to serve one parent live in that feature's folder and are
+not exported from its barrel.
+
+**Both.** A module's public surface is part of its diff. Widening one — adding a `pub`, adding a
+barrel export — is a reviewable decision with a reason, not a side effect of needing the symbol
+somewhere else. The usual right answer to "I need this private thing" is that the caller belongs
+inside the boundary, or that the boundary is wrong and should be redrawn deliberately.
+
+#### 24.6.6 How this is checked
+
+Structure is checked in review, backed by two commands that make drift visible. The implementation
+plan's Appendix A carries them as build gates (§A.1) and as checklist lines (§A.2, §A.3, §A.4).
+
+```bash
+# Rust files over the soft limit, worst first
+find crates -name '*.rs' -not -path '*/target/*' -print0 \
+  | xargs -0 wc -l | awk '$2 != "total" && $1 > 400' | sort -rn
+
+# Frontend files over their soft limits
+find web/src -name '*.svelte' -print0 \
+  | xargs -0 wc -l | awk '$2 != "total" && $1 > 250' | sort -rn
+find web/src \( -name '*.ts' -o -name '*.svelte.ts' \) -print0 \
+  | xargs -0 wc -l | awk '$2 != "total" && $1 > 300' | sort -rn
+```
+
+The commands find only §24.6.4. §24.6.1, §24.6.2, §24.6.3, and §24.6.5 are read by a human, which is
+why they are stated as sentences a reviewer can apply rather than thresholds a script can measure.
