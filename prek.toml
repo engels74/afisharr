@@ -1,0 +1,95 @@
+# SPDX-FileCopyrightText: 2026 Afisharr contributors
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
+# prek.toml — pre-commit hooks configuration
+# Docs: https://prek.j178.dev/configuration/
+#
+# Setup: `prek install` (default_install_hook_types below wires up both the
+#   pre-commit and commit-msg Git shims in one shot).
+# Run everything: `prek run --all-files` (do this after changing this file).
+#
+# The repository is documentation-only today. The Rust and frontend hooks below
+# are path-scoped to `crates/` and `web/`, so they stay inert until those trees
+# exist and fire automatically once they do. Adding them now means the gate is
+# already in place on the first commit of real code, rather than being
+# retrofitted onto a codebase that has already drifted past it.
+
+# One `prek install` installs both shims we rely on.
+default_install_hook_types = ["pre-commit", "commit-msg"]
+
+# Builtin hooks — fast, offline, Rust-native.
+# LICENSE is excluded from the whitespace and EOF fixers: it is the verbatim
+# AGPL-3.0 text and must not be reformatted.
+[[repos]]
+repo = "builtin"
+hooks = [
+  { id = "trailing-whitespace", exclude = "^LICENSE$" },
+  { id = "end-of-file-fixer", exclude = "^LICENSE$" },
+  { id = "mixed-line-ending", args = ["--fix=lf"], exclude = "^LICENSE$" },
+  { id = "check-merge-conflict" },
+  { id = "check-case-conflict" },
+  # 1 MB, not the 512 KB default. The guard exists to stop binaries and build
+  # artifacts entering the tree, and the PRD is a 500 KB text document that the
+  # project is built around. A limit that rejects the primary specification is
+  # measuring the wrong thing.
+  { id = "check-added-large-files", args = ["--maxkb=1024"] },
+  { id = "detect-private-key" },
+  { id = "check-json" },
+  { id = "check-toml" },
+  { id = "check-yaml" },
+  # Enforces branch-then-PR. Delete this line to keep committing to main.
+  { id = "no-commit-to-branch", args = ["--branch", "main"] },
+]
+
+# Conventional Commits — enforce Conventional Commit message format.
+[[repos]]
+repo = "https://github.com/compilerla/conventional-pre-commit"
+rev = "v4.4.0"
+hooks = [
+  { id = "conventional-pre-commit", stages = ["commit-msg"] },
+]
+
+# Secret / credential leak guard. Afisharr holds Plex tokens, *arr API keys, and
+# TMDB credentials; none may ever reach the tree (see the PRD, §19.5).
+[[repos]]
+repo = "https://github.com/gitleaks/gitleaks"
+rev = "v8.30.1"
+hooks = [
+  { id = "gitleaks" },
+]
+
+# Local hooks — project-specific gates.
+[[repos]]
+repo = "local"
+hooks = [
+  # DCO sign-off — every commit certifies the Developer Certificate of Origin
+  # (Q-016, closed as D-031). Commit with `git commit -s`. The GitHub DCO check
+  # on PRs is the authoritative gate; this is the fast local mirror.
+  { id = "dco-signoff", name = "DCO sign-off (Signed-off-by)", entry = "sh -c 'grep -qE \"^Signed-off-by: .+ <.+@.+>\" \"$1\" || { echo \"Commit message is missing a Signed-off-by line (DCO). Commit with: git commit -s\"; exit 1; }' --", language = "system", stages = ["commit-msg"] },
+
+  # Rust core — crates/ (rustfmt + clippy at deny-warnings).
+  { id = "cargo-fmt", name = "cargo fmt", entry = "cargo fmt --all", language = "system", types = ["rust"], files = "^crates/", pass_filenames = false },
+  { id = "cargo-clippy", name = "cargo clippy", entry = "cargo clippy --workspace --all-targets --all-features -- -D warnings", language = "system", types = ["rust"], files = "^crates/", pass_filenames = false },
+
+  # cargo-deny — advisory feed plus the licence allow-list. This is the machine
+  # check D-028 requires: AGPL-3.0-or-later obliges every dependency to be
+  # GPL-compatible, and a transitive crate can introduce an incompatible licence
+  # silently. Runs on manifest, lock, and deny.toml changes.
+  { id = "cargo-deny", name = "cargo deny", entry = "cargo deny check", language = "system", files = "(^|/)(Cargo\\.(toml|lock)|deny\\.toml)$", pass_filenames = false },
+
+  # SvelteKit SPA — web/ (formatting, linting, and Svelte type-checking).
+  #
+  # Biome replaces the Prettier + ESLint pair: one Rust binary, one config, one
+  # pass over the tree. `biome ci` checks formatting, lint rules, and import
+  # order together and never writes, which is what a gate should do.
+  #
+  # Caveat: Biome parses `.svelte` files natively from v2.3, but the template
+  # half of the file is behind `html.experimentalFullSupportEnabled` in
+  # biome.json. Turn that flag on in web/biome.json, or Biome touches only the
+  # `<script>` and `<style>` blocks and leaves the markup unformatted.
+  #
+  # svelte-check stays. Biome does not type-check Svelte, so it cannot replace
+  # this hook.
+  { id = "web-biome", name = "biome ci", entry = "bun run --cwd web lint", language = "system", files = "^web/", pass_filenames = false },
+  { id = "svelte-check", name = "svelte-check", entry = "bun run --cwd web check", language = "system", files = "^web/", pass_filenames = false },
+]
