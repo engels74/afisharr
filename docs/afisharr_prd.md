@@ -72,7 +72,7 @@ added.
 | §15–§16 | Placement and ordering; posters and overlays |
 | §17–§18 | The lifecycle state machine and acquisition policy |
 | §19 | The data model: 68 tables, conventions, migration, concurrency, retention |
-| §20 | Seven recurring failure patterns and all 95 invariants |
+| §20 | Seven recurring failure patterns and all 97 invariants |
 | §21 | Scale, budgets, security, platforms, backup, upgrade, privacy, licence, test strategy |
 | §22–§23 | Every decision of record with its reasoning; open questions |
 | §24 | The normative coding guidelines |
@@ -327,7 +327,7 @@ The largest source of complexity, and historically the largest source of bugs �
 | Global sync status | Master error plus timestamp | |
 | Logs page | Reads and filters the app log in-GUI | |
 | Dashboard | Overview of collections/activity | |
-| Setup wizard | First-run guided configuration | |
+| Setup wizard | First-run guided configuration, gated by a console bootstrap token and leased to one browser | Claim, resume, and recovery built new (D-045, D-046) |
 | About page | Version, build info | |
 | App-data warning | Warns on a misconfigured persistent volume | |
 | In-app search | Searches library/providers | Editor-scoped |
@@ -723,35 +723,55 @@ because the failure mode is what the design has to be tested against.
 
 **Target: under ten minutes, zero hand-written definitions** (§5.1).
 
-1. **Create an admin account.** Local credentials or Plex sign-in. Nothing else is reachable until
+1. **Claim the instance.** The operator reads a `xxxx-xxxx-xxxx` token from the server console, where
+   it was printed at startup, and enters it. The wizard is then leased to that browser for ten
+   minutes at a time. Nothing else on the instance responds until this completes. Mechanism and
+   parameters are §19.6.1; the reasoning is D-045.
+2. **Create an admin account.** Local credentials or Plex sign-in. Nothing else is reachable until
    this completes.
-2. **Connect to Plex.** PIN or OAuth flow, then server selection if the account owns several. The
+3. **Connect to Plex.** PIN or OAuth flow, then server selection if the account owns several. The
    connection is verified before the step completes — a wizard that accepts an unreachable server and
    fails four steps later has wasted the operator's time and their goodwill.
-3. **Select libraries.** Discovered movie and show libraries, with counts. Music and photo libraries
+4. **Select libraries.** Discovered movie and show libraries, with counts. Music and photo libraries
    are not offered, since they are non-goals.
-4. **Connect integrations.** TMDB is required. Everything else — Trakt, the `*arr` suite, Overseerr,
+5. **Connect integrations.** TMDB is required. Everything else — Trakt, the `*arr` suite, Overseerr,
    Tautulli — is optional, each with a test button that reports a specific failure rather than a red
    cross. Skipping is a first-class choice with a visible consequence: *"Skipping Radarr means
    collections cannot request missing films."*
-5. **Choose starter packs.** A small set of first-party collection and overlay packs, each with a
+6. **Choose starter packs.** A small set of first-party collection and overlay packs, each with a
    preview of what it produces. Nothing is enabled without an explicit choice; a pack requiring an
    integration that was skipped is shown as degraded with the reason, not hidden and not silently
    installed broken.
-6. **Report what is already there.** Afisharr lists the collections it found in the selected libraries,
+7. **Report what is already there.** Afisharr lists the collections it found in the selected libraries,
    with counts per library. **It adopts nothing and offers no bulk adoption control.** The step
    explains what adoption is, states that Afisharr leaves these collections alone until told otherwise,
    and links to the page where adoption happens. Decided as D-026.
-7. **Review and run.** A plain-language summary of what the first sync will do, including counts —
+8. **Review and run.** A plain-language summary of what the first sync will do, including counts —
    how many collections will be created, whether posters will be replaced, whether placeholder files
    will be written and where. Then the first sync, with live progress.
 
-**The failure mode this journey exists to prevent** is the operator reaching step 7 without
-understanding that Afisharr is about to overwrite every poster in their library. Step 7 is a consent
+**The failure mode this journey exists to prevent** is the operator reaching step 8 without
+understanding that Afisharr is about to overwrite every poster in their library. Step 8 is a consent
 step wearing a summary's clothing, and it must state the irreversible-looking parts plainly — along
 with the fact that they are, in fact, reversible.
 
-**Step 6 has no "adopt all" button, and that is the point.** An operator with sixty hand-made
+**The second failure mode is the one step 1 exists for**, and it is not a usability failure: an
+instance that is reachable before it is configured belongs to whoever loads it first. D-029 says
+plainly that the instance may face the internet, so an unclaimed wizard is an open offer of an admin
+account and, one step later, of a Plex token that authorises deletion. The console token is the
+cheapest available proof that the person at the keyboard is the person who started the container.
+
+**Step 1 costs one paste, and the ten-minute target absorbs it.** The token is on screen in the same
+terminal that just ran `docker compose up`, which is where an operator installing a self-hosted
+service already is.
+
+**The journey is resumable and re-runnable.** Which step it resumes at is derived from what is
+actually in the database, never from anything the browser sends (D-046, §7.14). An operator who
+closes the tab at step 5 reopens at step 5. An operator whose container restarted at step 5 signs in
+with the admin account they created at step 2 and continues; the console token is gone by then, and
+recovery does not need it.
+
+**Step 7 has no "adopt all" button, and that is the point.** An operator with sixty hand-made
 collections is exactly the operator for whom one click is most tempting and most alarming. Bulk
 adoption five minutes after install is the fastest way to make someone feel they lost control of
 their own library, and a first impression is the worst moment to spend that trust — even though
@@ -1070,7 +1090,55 @@ disappeared from the server; a changed server machine identifier (blocking, per 
 
 ### 7.14 Setup wizard
 
-Covered as journey §5.1. Resumable, and re-runnable later without destroying existing configuration.
+**Purpose:** journey §5.1. Eight steps — Claim, Admin, Plex, Libraries, Integrations, Packs, Report,
+Review — resumable, and re-runnable later without destroying existing configuration.
+
+**The resume step is derived, never carried.** The wizard asks the server which step it is on and
+the server answers from state, returning the first step whose evidence is absent. A step index in a
+query string, a cookie, or a client-held draft would let a caller name the step they would like to
+be on, which on the claim step means naming step 2 (D-046).
+
+| Resumes at | When |
+| --- | --- |
+| 1 Claim | no active `setup:claim` lease matching this browser's cookie |
+| 2 Admin | no admin user row exists |
+| 3 Plex | no `plex_server` row, or the `plex.token` secret is absent |
+| 4 Libraries | no library is selected |
+| 5 Integrations | the TMDB credential is absent — it is the one required integration |
+| 6 Packs | `packs` is not in `instance.setup_acked_steps` |
+| 7 Report | `existingCollections` is not in `instance.setup_acked_steps` |
+| 8 Review | everything above is satisfied |
+
+Steps 6 and 7 complete by acknowledgement because neither necessarily writes configuration: choosing
+no starter packs is a valid choice, and the report writes nothing by design (D-026). §19.5 carries
+the column.
+
+**Re-running it later is a different mode, and says so.** The wizard reached from Settings on a
+configured instance edits configuration and never asks for a token — the operator is already
+authenticated, and a claim is meaningless once `setup_completed_at` is set. It shows current values
+as current values rather than as empty fields, and completing it destroys nothing the operator did
+not change.
+
+**Special states:**
+
+- **Blocked** — the wizard is claimed by another browser and this one does not hold the claim. The
+  response says `blocked`, names the reason, and carries the time the claim expires; the client
+  renders the shared Blocked component (§8.1) with that time. It does not invent a state and it does
+  not relax a gate. This is the one genuinely stranded case: before an admin exists, all three doors
+  are shut — the wizard steps refuse without a claim, a fresh claim refuses because one is held, and
+  recovery refuses because there is no account to recover with. The only correct answer is to say
+  when the wait ends.
+- **Recovery available** — an admin account exists, setup is incomplete, and no claim is active. The
+  claim step offers admin sign-in alongside the token field.
+- **Token expired or wrong** — one message for wrong, expired, malformed, and empty, because
+  distinguishing them tells a guesser which of the four they achieved. The message says where a fresh
+  token comes from: restart the container and read the console.
+- **Rate limited** — 429 with the retry time shown, per §21.4.3.
+- **Integration unreachable at its step** — the step reports the specific failure and offers to skip
+  where skipping is allowed, per journey step 5. It never accepts an unverified connection.
+
+**Acceptance:** I-UX-8 for the ten-minute target, I-SEC-8 for the claim, I-UX-10 for the derived
+resume.
 
 ### 7.15 Teardown
 
@@ -3428,10 +3496,19 @@ WHERE leases.expires_at < ?3;                  -- only steal an expired lease
 Long tasks heartbeat; a task whose lease has expired must abort rather than complete, because another
 holder may have started. Lease names are hierarchical so scope is explicit:
 `pass:collection:<definition_id>`, `pass:placement:<library_id>` (placement is serialised per
-library, per the placement model), `pass:lifecycle:<library_id>`, `job:<job_id>`.
+library, per the placement model), `pass:lifecycle:<library_id>`, `job:<job_id>`, `setup:claim`.
 
 Startup clears leases whose `owner` names this process instance (they are ours, from before the
 crash) and leaves the rest to expire.
+
+**`setup:claim` is a lease held by a browser rather than by a task.** The setup wizard is exclusive
+to one browser for ten minutes at a time (§19.6.1), and that is the same property this table already
+provides: one holder, an expiry, and a steal that only fires once the expiry passes. Its `owner`
+column carries the SHA-256 of the claim cookie value rather than a process instance id, so startup's
+"clear leases owned by this process" step never matches it and the claim survives a restart until it
+expires on its own. Renewal is a heartbeat that also moves `expires_at`. No second table exists for
+this, and no plaintext credential is stored: the row proves a claim the same way `sessions` proves a
+session.
 
 **No transaction spans network I/O.**
 
@@ -3475,6 +3552,9 @@ CREATE TABLE instance (
     locale              TEXT    NOT NULL DEFAULT 'en',
     app_version         TEXT    NOT NULL,             -- last binary that opened this database
     first_started_at    INTEGER NOT NULL,
+    setup_completed_at  INTEGER,                      -- NULL until the wizard finishes
+    setup_acked_steps   TEXT    NOT NULL DEFAULT '[]' -- JSON array of acknowledged wizard steps
+                        CHECK (json_valid(setup_acked_steps)),
     updated_at          INTEGER NOT NULL
 ) STRICT;
 ```
@@ -3487,6 +3567,15 @@ value a well-meaning "reset configuration" feature deletes.
 `timezone` is instance-level because the engine's date operators are day-aligned in it, and the
 lifecycle model computes phase from a civil-date difference. Changing it changes what existing
 definitions mean, so a change is recorded in `settings_history`.
+
+`setup_completed_at` and `setup_acked_steps` carry onboarding state, and they are here rather than in
+`settings` for two reasons. They are installation facts, not configuration the operator tunes, and
+the startup path reads `setup_completed_at` before the settings body is deserialised — the console
+banner in §19.6.1 depends on it. `setup_acked_steps` exists because two wizard steps complete by
+acknowledgement rather than by writing configuration: choosing no starter packs is a valid choice,
+and the existing-collections report writes nothing at all (D-026). Without a recorded
+acknowledgement, a resume derived from state alone could never move past either one. The column is a
+JSON array of step names, never a partial-progress percentage.
 
 **Settings.**
 
@@ -3686,6 +3775,100 @@ The returned token goes to `secrets`, never here. Rows are deleted an hour after
 `client_identifier` is stored per-row and checked against the instance value, because a pin issued
 under a different client identifier yields a token that will not work and the failure is otherwise
 opaque.
+
+#### 19.6.1 First-run bootstrap and the setup claim
+
+D-029 assumes the instance may be reachable from the internet. On such an instance, "the first person
+to load the page becomes the administrator" is not a first-run flow — it is a race, and the operator
+loses it to anyone who scans the port first. The wizard then hands that stranger a Plex token, which
+§21.4.1 names the crown jewel because it authorises deletion. Two mechanisms close this, recorded as
+D-045 and D-046.
+
+**The bootstrap token proves console access.** The claim converts that one-time proof into an
+exclusive, time-boxed lease on the wizard, bound to one browser.
+
+**The token.**
+
+| Property | Value |
+| --- | --- |
+| Shape | `xxxx-xxxx-xxxx` — three segments of four characters |
+| Alphabet | 36 characters, lowercase ASCII letters and digits |
+| Entropy | 12 × log₂(36) ≈ 62 bits |
+| Source | OS CSPRNG, with rejection sampling |
+| Storage | Process memory only |
+| Lifetime | 15 minutes |
+
+It is generated on startup whenever `instance.setup_completed_at` is `NULL`, printed to stdout with
+the setup URL, and held in memory for fifteen minutes. It never reaches the database, never reaches
+`logs/afisharr.log`, and never reaches the client. Only one token is live at a time; minting replaces
+any predecessor.
+
+**Rejection sampling is not a detail.** Bytes at or above `252` — the largest multiple of 36 that
+fits in a byte — are discarded and redrawn rather than reduced modulo 36. Without that, the first
+four characters of the alphabet appear more often than the rest, and the 62 bits above are a claim
+the generator does not honour.
+
+**Three events end a token's life:** its fifteen minutes elapse; the process restarts, since the
+value lives in memory and a restart prints a new banner; or setup completes, which clears it. The
+banner states all three. Horizontal replicas are not a supported deployment (D-037, and the write
+actor in §19.4 already assumes one process), so there is no case where one replica prints a token a
+second replica cannot verify.
+
+**Validation, not consumption.** A submitted token is checked and left live. The check is ordered:
+a token must exist, it must be unexpired, its length must match, and only then is it compared in
+constant time against the live value. Length is checked first because it bounds the work a caller can
+force; the comparison is constant-time because a byte-at-a-time compare leaks the mismatch position.
+Leaving the token live is what makes a lost claim cookie recoverable inside the fifteen-minute
+window; consuming it would strand the operator on their own console.
+
+**The claim.** One browser holds the wizard at a time, for ten minutes, sliding on every gated
+request:
+
+| Where | What | Meaning |
+| --- | --- | --- |
+| `leases` row named `setup:claim` | `owner` = SHA-256 of the cookie value | the claim itself (§19.4) |
+| | `expires_at` | ten minutes from the last gated request |
+| Browser cookie `afisharr_setup_claim` | the cookie value | the holder's half of the pair |
+
+A claim is active when the lease row is unexpired **and** the request's cookie hashes to its `owner`.
+Both halves are required, so a stolen database row proves nothing and a stolen cookie outlives its
+lease by nothing.
+
+Cookie flags are `HttpOnly`, `Secure` (over HTTPS, judged by the trusted-proxy list of §21.4.3),
+`SameSite=Lax`, `Path=/api/setup`, `Max-Age=600`. `Lax` rather than `Strict` because the Plex OAuth
+variant may return the operator by top-level navigation, and `Strict` would withhold the cookie on
+exactly that request; CSRF protection is always on regardless (§21.4.2), so `Lax` costs nothing here.
+
+**Ten minutes, against the token's fifteen, is deliberate.** The claim must expire while the token
+that created it is still usable. An operator whose browser died at step 3 waits out the claim and
+re-enters a token they already have. Reverse the two and they wait for the claim, then discover the
+token expired while they waited, and must restart the container to get another.
+
+**Renewal is not a separate mechanism.** Every claim-gated request that succeeds moves `expires_at`
+ten minutes out and re-sets the cookie's `Max-Age`. An operator who keeps working never meets the
+timeout; one who walks away releases the wizard without doing anything.
+
+**Recovery once an admin exists.** From the moment the admin account is created, the wizard accepts
+a second credential: those admin credentials. Presenting them when setup is incomplete and no claim
+is active mints a claim without the token. This is what makes an interrupted setup survive a restart
+— the token is gone, but the account is not.
+
+**Release.** Completing the wizard writes `instance.setup_completed_at`, deletes the `setup:claim`
+lease, clears the in-memory token, and expires the cookie. From then on the banner prints nothing on
+restart and the setup endpoints return 404 rather than a form.
+
+**Where setup events land.** Each wizard step appends a `job_run_events` row under one `job_runs` row
+whose `trigger` is `Api` (§19.15) — claim taken, admin created, Plex connected, libraries selected,
+integrations configured, packs chosen, collections reported, setup completed. They are **not** written
+to the lifecycle audit record: §21.4.8 states that the audit exists to explain what the engine did,
+not as forensics against the operator, and setup steps are operator actions. The logs page therefore
+reads them with the filters it already has, and no new surface is invented for them.
+
+**What this does not protect against.** An attacker who can read the server's console output can
+claim the instance, and so can one who can read the process's memory. Both already imply a
+compromised host, which §21.4.5 states is outside what encryption at rest defends. The mechanism
+raises the bar from "reachable" to "console-readable", which is the boundary that actually separates
+the operator from everyone else.
 
 ---
 
@@ -6453,6 +6636,18 @@ these are build-failing properties like any other.
 - *Test:* block SSE; assert each live surface loads correct data and shows the indicator.
 - *Source:* *the interface design*, §8.
 
+**I-UX-10 — The wizard's step is derived from state, not from the client.**
+- *Statement:* the step the setup wizard resumes at is computed from the database by the table in
+  §7.14. No request parameter, cookie, or client-held draft can move it, and a step whose evidence is
+  absent is never reported as complete.
+- *Prevents:* the client naming the step it would like to be on, which on the claim step means
+  skipping the claim. Also prevents a resumed wizard that believes a step is done because the browser
+  remembers doing it, on an instance where the write failed.
+- *Test:* for each step, seed the database at that step's evidence level and assert the derived step.
+  Then request every other step index directly and assert the server answers with the derived one.
+  Assert a client that reports step 8 against an empty database is answered with step 1.
+- *Source:* §7.14; D-046.
+
 ### 20.14 Security
 
 D-029 assumes a publicly reachable instance, which turns several things that would be hardening on a
@@ -6533,6 +6728,23 @@ private network into correctness properties.
   Assert no feed shape can introduce a parameter name the shipped registry does not declare.
 - *Source:* *the data model*, §11.5; *the product spec*, §8; D-041.
 
+**I-SEC-8 — An unconfigured instance grants nothing without console proof.**
+- *Statement:* while `instance.setup_completed_at` is `NULL`, every route except health and the claim
+  endpoint refuses. The claim endpoint mints a claim only for a caller presenting the live bootstrap
+  token or, once an admin exists, that admin's credentials. No admin account, Plex connection, or
+  secret is ever written on behalf of a caller holding neither.
+- *Prevents:* the race that D-029 makes real — a reachable instance whose first visitor becomes its
+  administrator and, one wizard step later, holds a Plex token that authorises deletion. Also
+  prevents the quieter version, where a second browser hijacks a wizard the operator is halfway
+  through.
+- *Test:* against a fresh instance, drive every wizard endpoint with no claim and assert refusal on
+  each. Assert an expired token, a wrong token, a malformed token, and an empty token are refused
+  with one indistinguishable response. Assert a claim held by one cookie makes a second cookie's
+  claim attempt fail with the retry time and no state change. Assert the token never appears in
+  `logs/afisharr.log`, in any table, or in any response body. Assert a restart while setup is
+  incomplete invalidates the previous token.
+- *Source:* §19.6.1; §21.4.2; D-029, D-045.
+
 ### 20.15 Performance and resource bounds
 
 D-030 sets the scale target at 200,000 items and 2,000 collections. These three are the bounds whose
@@ -6598,7 +6810,7 @@ a completeness it does not have.
 | Source adapters individually | Partial | One adapter family swept on 2026-08-09 (internal audit notes, §5.6), which produced I-SRC-8, I-DATA-12, and I-DATA-13. The remaining adapters are unswept, and the shared rails are still only as good as each adapter's own honesty |
 | External-response caching | Yes | 2026-08-09. Produced I-DATA-12 and I-PERF-4 |
 | Scheduling and job orchestration | No | |
-| Auth, sessions, permissions | No | |
+| Auth, sessions, permissions | Partial | First run swept on 2026-08-09, against the onboarding design of a sibling project. Produced I-SEC-8 and I-UX-10, D-045 and D-046, and §19.6.1. Session lifetime, API-key scoping, and the Plex PIN flow are still unswept |
 | The frontend | No | Out of scope for this document |
 
 The unswept rows are not a gap in the invariants that exist; they are unknown unknowns. Two are worth
@@ -6884,6 +7096,10 @@ deletion. Every control below exists primarily to keep it.
 | CSRF | Always on, no toggle (see *Decisions of record*) |
 | API keys | Hashed at rest, scoped, individually revocable, last-used timestamp shown |
 | First run | No default credentials. Nothing is reachable until the admin account exists (see *The interface*) |
+| First-run proof | A 62-bit bootstrap token, printed to the console at startup while setup is incomplete, held in memory for 15 minutes, compared in constant time, validated rather than consumed (§19.6.1) |
+| Setup claim | The wizard is leased to one browser for 10 minutes, sliding on each gated request. Stored as the `setup:claim` lease with the SHA-256 of the cookie as `owner`, never the cookie itself |
+| Claim cookie | `afisharr_setup_claim`; `HttpOnly`, `Secure` over HTTPS, `SameSite=Lax`, `Path=/api/setup`, `Max-Age=600` |
+| Setup recovery | Once the admin account exists, admin credentials mint a claim without the token, so an interrupted setup survives the restart that destroys the token |
 
 #### 21.4.3 Rate limiting, and the trap that makes it decorative
 
@@ -6894,8 +7110,14 @@ that reaches a third-party service on the caller's behalf.
 | --- | --- | --- |
 | Login, per account | 5 failures in 15 min | Lock 15 min, exponential to 24 h |
 | Login, per IP | 20 failures in 15 min | Throttle, then block |
+| Setup claim and setup recovery, per IP | 5 attempts in 15 min | 429 with `Retry-After` |
 | API, authenticated | 600 requests/min | 429 with `Retry-After` |
 | Endpoints that call a provider | 60 requests/min | 429; protects the operator's provider quota, not us |
+
+**The setup-claim limiter is consulted after the already-claimed check, not before.** An instance
+already claimed by another browser answers 409 without touching the limiter, so an operator
+refreshing the page does not spend the attempts they will need once the claim expires. The limiter
+guards the token comparison, which is the only step where guessing gains anything.
 
 **The trap named in D-029 is discharged here.** `trustProxy` decides whether
 `X-Forwarded-For` is honoured. If it is on and the instance is reachable directly rather than only
@@ -7571,7 +7793,7 @@ that milestone designed against an assumed answer is that milestone built twice.
 
 *The plan carries no dates and no capacity figures*, deliberately. Both would be fabrications against
 work that has not started, and D-034 warned specifically against a plan compressed to fit a shape
-that no longer applies. Exit criteria are invariants instead, all 95 assigned exactly once.
+that no longer applies. Exit criteria are invariants instead, all 97 assigned exactly once.
 
 **D-040 — Source capability flags belong to the rung that answered, not to the source.** *Raised by
 CR-3, 2026-08-09.* A source declares an ordered ladder of endpoints — a structured API first, a
@@ -7623,6 +7845,43 @@ concrete definitions; the resolved values are stored so a pack upgrade can re-ma
 properties survive if substitution happens before storage and neither survives if it happens after.
 This also keeps one rule intact that nothing else protects: what the GUI shows is what runs, with no
 resolution step between them. Manifest in §12.8; schema in §19.10; tested by I-DEF-8.
+
+**D-045 — First run is claimed with a bootstrap token printed to the console.** *Raised by the
+first-run sweep, 2026-08-09.* An unconfigured instance prints a `xxxx-xxxx-xxxx` token to stdout at
+startup and refuses every route but health until a caller returns it. Returning it leases the wizard
+to that browser for ten minutes at a time.
+
+*Why this is a correctness decision rather than hardening:* D-029 already commits to an
+internet-reachable instance. Under that commitment, "the first visitor creates the admin account" is
+not a convenience — it is an unauthenticated grant of the Plex token, which §21.4.1 names as the
+asset that authorises deletion. The console is the one channel an attacker who merely found the port
+cannot read, and reading it costs the real operator one glance at the terminal they just used.
+
+*Why validated and not consumed:* a consumed token strands an operator who loses the cookie, on the
+console where the proof already lives. It stays live for its fifteen minutes so the same paste works
+twice.
+
+*Why the claim TTL is shorter than the token's:* a stranded claim must expire while the token that
+created it is still usable, or the recovery path needs a container restart. Ten against fifteen.
+
+*Rejected:* an environment variable holding a fixed admin password, because it leaks into process
+listings and container inspection, and because a value that never rotates is a permanent credential
+for a one-time act. Rejected: no gate at all with a warning in the README, because the failure is
+silent and total. Mechanism in §19.6.1; tested by I-SEC-8.
+
+**D-046 — The wizard's resume point is derived from state; recovery is by admin credentials.**
+*Raised by the first-run sweep, 2026-08-09.* The server computes which wizard step is next from what
+the database contains, and the client cannot name a step. Once the admin account exists, those
+credentials mint a claim without the token.
+
+*Why derived:* a client-supplied step is a request to skip the steps before it, and the first step
+is the claim. The same rule that makes the wizard tamper-resistant also makes it honest after a
+crash — a step whose write failed is not complete because the browser remembers completing it.
+
+*Why recovery exists:* the token dies with the process, and a container that restarts mid-wizard is
+ordinary. Without a second path, the operator's own account — created at step 2 and sitting in the
+database — would be unable to open the wizard that created it. Resume table in §7.14; tested by
+I-UX-10.
 
 ### 22.4 Change requests against the frozen scope
 

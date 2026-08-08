@@ -17,7 +17,7 @@ whatever capacity turns out to be real. Recorded as D-039. Do not add dates.
 ## How to read this
 
 **Exit criteria are invariants, not opinions.** Every phase names the invariants from *Invariants* in
-the PRD that must pass before it is done. All 95 are assigned exactly once (*Invariant coverage*), so no invariant is
+the PRD that must pass before it is done. All 97 are assigned exactly once (*Invariant coverage*), so no invariant is
 orphaned and none is claimed twice. A phase whose invariants pass is finished; one whose invariants
 do not is not, however complete it looks.
 
@@ -231,12 +231,19 @@ a unique index. Both are cheap now and are table rebuilds later.
 **Size:** `L`. Everything reachable, and everything that makes reachable safe. D-029 assumes the
 instance is on the internet, so this is not hardening added later.
 
-**Exit invariants:** `I-SEC-1`, `I-SEC-2`, `I-SEC-3`, `I-UX-1`, `I-UX-2`, `I-UX-3`, `I-UX-7`, `I-UX-9`.
+**Exit invariants:** `I-SEC-1`, `I-SEC-2`, `I-SEC-3`, `I-SEC-8`, `I-UX-1`, `I-UX-2`, `I-UX-3`,
+`I-UX-7`, `I-UX-9`.
 
 **Not here:** any page with real data behind it.
 
 **Why i18n now:** `I-UX-7` forbids hard-coded user-facing strings. Extraction added after fifteen pages
 exist is a mechanical sweep over every one of them; added now it is a habit.
+
+**Why the bootstrap claim is here rather than with the wizard in Phase 13:** the first-run
+admin-account page ships in this phase (Task 1.11), and the moment it exists on a reachable instance
+it is an unauthenticated grant of administrator. The gate has to arrive with the page it guards, not
+with the wizard built around it eleven phases later. Task 1.12 builds the mechanism; Phase 13 builds
+the eight-step journey on top of it.
 
 ### Task 1.1 Axum routing and error model
 - **Build:** the HTTP surface's spine — routing, a structured error model, and the health route.
@@ -259,14 +266,15 @@ exist is a mechanical sweep over every one of them; added now it is a habit.
   1. Implement local login: Argon2id password hashing at PHC-string parameters tuned to roughly 250 ms
      on the reference machine.
   2. Implement the first-run rule: no default credentials, nothing reachable until the admin account
-     exists.
+     exists, and no admin account creatable without the setup claim built in Task 1.12.
   3. Implement the Plex PIN login flow: create a pin resource, present the code, poll until a token
      appears or the pin expires, checking `client_identifier` against the instance value.
   4. Implement the Plex OAuth variant of the same flow, sharing the polling machinery.
   5. Store the returned token in `secrets`, never in `plex_pin_logins`.
-- **Done when:** a fresh instance rejects every route except first-run admin creation; a completed PIN
-  or OAuth flow produces a working session; and a pin issued under a mismatched `client_identifier`
-  fails visibly rather than yielding a token that silently does not work.
+- **Done when:** a fresh instance rejects every route except health and the claim endpoint, and
+  rejects first-run admin creation itself without an active claim; a completed PIN or OAuth flow
+  produces a working session; and a pin issued under a mismatched `client_identifier` fails visibly
+  rather than yielding a token that silently does not work.
 
 ### Task 1.3 Sessions and API keys
 - **Build:** session lifecycle and revocable, scoped API keys.
@@ -368,9 +376,10 @@ exist is a mechanical sweep over every one of them; added now it is a habit.
   3. Implement a small, non-modal disconnection indicator distinct from every other state.
   4. Ensure every SSE-fed surface is correct after a plain page load with no stream connected at all —
      the stream accelerates, it is never the only source of truth.
-- **Done when:** a client that misses events during a disconnect and then reconnects ends up identical
-  to a client that loaded the page fresh, verified by a reconnect-and-refetch test; the disconnection
-  indicator appears within one missed heartbeat.
+- **Done when:** `I-UX-9` passes — with SSE blocked, every surface the stream feeds still renders
+  correct data on load and the disconnection is visible; a client that misses events during a
+  disconnect and then reconnects ends up identical to a client that loaded the page fresh, verified by
+  a reconnect-and-refetch test; the disconnection indicator appears within one missed heartbeat.
 
 ### Task 1.10 The i18n catalogue and extraction
 - **Build:** the message-catalogue framework, shipping English, with interpolation and plural rules.
@@ -392,13 +401,58 @@ exist is a mechanical sweep over every one of them; added now it is a habit.
   1. Route Dashboard, Collections, Design, Home Screen, Lifecycle, and Doctor, plus a Settings area
      with its sub-page navigation, organised around the object the operator is thinking about rather
      than the owning subsystem.
-  2. Build the first-run admin-account creation page, reachable only when no admin exists.
-  3. Build the login page covering both local credentials and the Plex PIN/OAuth flow from Task 1.2.
-  4. Render every shell page in the "nothing created yet" Empty treatment, since no page carries real
+  2. Build the claim page — the token field, the recovery affordance once an admin exists, and the
+     Blocked treatment carrying the retry time — against the endpoints from Task 1.12.
+  3. Build the first-run admin-account creation page, reachable only with an active claim and only
+     when no admin exists.
+  4. Build the login page covering both local credentials and the Plex PIN/OAuth flow from Task 1.2.
+  5. Render every shell page in the "nothing created yet" Empty treatment, since no page carries real
      data until a later phase populates it.
-- **Done when:** `I-UX-9` passes — a fresh instance boots directly to first-run admin creation, refuses
-  every other route until an admin exists, and every one of the six destinations plus Settings resolves
-  to a routed page rather than a 404.
+- **Done when:** a fresh instance boots directly to the claim page, refuses every other route until
+  the instance is claimed and an admin exists, and every one of the six destinations plus Settings
+  resolves to a routed page rather than a 404.
+
+### Task 1.12 The bootstrap token and the setup claim
+- **Build:** the console-printed bootstrap token, the setup claim leased to one browser, and the
+  recovery path that replaces the token once an admin account exists. Specified in PRD §19.6.1;
+  decided as D-045 and D-046.
+- **Where:** `crates/afisharr` (banner, token state); `crates/api` (claim, recovery, and the claim
+  gate); `crates/core` (`setup:claim` lease, derived resume step).
+- **Subtasks:**
+  1. Implement token generation: three four-character segments from a 36-character lowercase
+     alphanumeric alphabet, drawn from the OS CSPRNG with rejection sampling — discard and redraw any
+     byte at or above 252 rather than reducing modulo 36, or the 62-bit claim is false.
+  2. Hold the token in process memory with a 15-minute expiry, replacing any predecessor. Assert by
+     test that it reaches no table, no response body, and no line of `logs/afisharr.log`.
+  3. Print the banner from the startup sequence built in Task 0.3, only when
+     `instance.setup_completed_at` is `NULL`: the token, the setup URL composed from the configured
+     host and port, and the three events that end the token's life.
+  4. Implement validation as check-and-keep, not consume: exists, unexpired, length matches, then a
+     constant-time comparison. One error response covers wrong, expired, malformed, and empty.
+  5. Implement the claim as a `setup:claim` lease whose `owner` is the SHA-256 of the cookie value,
+     with a 10-minute expiry, and set `afisharr_setup_claim` with `HttpOnly`, `Secure` over HTTPS,
+     `SameSite=Lax`, `Path=/api/setup`, and `Max-Age=600`.
+  6. Implement the claim gate as middleware over every setup endpoint: renew on success, refuse with
+     the Blocked response and the claim's expiry time otherwise. Renewal moves both the lease expiry
+     and the cookie's `Max-Age`.
+  7. Order the claim endpoint as: holder renews and succeeds; held-elsewhere returns Blocked before
+     the rate limiter is consulted; then the limiter from Task 1.4 at 5 attempts per IP per 15
+     minutes; then the token comparison.
+  8. Implement recovery: admin credentials mint a claim when setup is incomplete, an admin exists,
+     and no claim is active. Verify the password with the Argon2id path from Task 1.2; return the
+     same response for an unknown username and a wrong password.
+  9. Implement the derived resume step from the table in PRD §7.14, reading `instance.setup_acked_steps`
+     for the two acknowledgement-only steps, and reject any client-supplied step index outright.
+  10. Append one `job_run_events` row per setup step under a single `Api`-triggered `job_runs` row —
+      not the lifecycle audit record, which PRD §21.4.8 reserves for what the engine did.
+  11. Implement release: completing setup writes `instance.setup_completed_at`, deletes the lease,
+      clears the in-memory token, and expires the cookie. The setup endpoints answer 404 thereafter.
+- **Done when:** `I-SEC-8` passes — every wizard endpoint refuses without a claim on a fresh
+  instance; wrong, expired, malformed, and empty tokens are indistinguishable in the response; a
+  second cookie's claim attempt against a held claim returns the retry time and changes no state; the
+  token appears in no table, no response, and no log file; and a restart with setup incomplete
+  invalidates the previous token. `I-UX-10` is claimed in Phase 13, where the wizard the resume step
+  serves is built.
 
 ---
 
@@ -2096,32 +2150,49 @@ Size `M`.
 
 Size `L`.
 
-**Exit invariants:** I-UX-5, I-UX-8, I-DEF-4, I-DEF-8.
+**Exit invariants:** I-UX-5, I-UX-8, I-UX-10, I-DEF-4, I-DEF-8.
 
 **Why I-UX-8 is a timed test, not a review:** onboarding reaches a populated library within the
 target the PRD states, or it fails — asserted on step count and blocking calls, not on a reviewer's
 impression.
 
+**Why I-UX-10 lands here and not in Phase 1:** Task 1.12 builds the derived resume step, but a
+derivation is only testable against the steps it derives, and those ship in this phase. The claim
+gate itself is claimed as I-SEC-8 in Phase 1, where it guards the first-run page.
+
 ### Task 13.1 The setup wizard, including report-and-adopt-nothing
 
-- **Build:** the resumable, re-runnable wizard journey, including D-026's report-and-adopt-nothing
-  step — it lists existing collections per library, explains what adoption is, states plainly that
-  Afisharr leaves those collections alone, and links to where adoption happens, with no bulk-adopt
-  control anywhere in the wizard.
+- **Build:** the resumable, re-runnable eight-step wizard journey on top of the claim mechanism from
+  Task 1.12, including D-026's report-and-adopt-nothing step — it lists existing collections per
+  library, explains what adoption is, states plainly that Afisharr leaves those collections alone,
+  and links to where adoption happens, with no bulk-adopt control anywhere in the wizard.
 - **Where:** crates/api, web/
 - **Subtasks:**
-  1. Build the wizard steps against the onboarding journey; resumable mid-flow and re-runnable later
-     without destroying existing configuration.
-  2. Implement the report-and-adopt-nothing step per D-026: enumerate existing collections per
+  1. Build the eight wizard steps against the onboarding journey — Claim, Admin, Plex, Libraries,
+     Integrations, Packs, Report, Review — resumable mid-flow and re-runnable later without
+     destroying existing configuration.
+  2. Wire every step to the derived resume endpoint from Task 1.12 rather than to any client-held
+     step index, and write `packs` and `existingCollections` into `instance.setup_acked_steps` as
+     their steps complete — both complete by acknowledgement, so nothing else marks them done.
+  3. Build the Blocked treatment for the claimed-elsewhere case: the shared Blocked component from
+     Task 1.8, carrying the claim's expiry as a local time. No gate is relaxed to produce it.
+  4. Build the re-run mode reached from Settings: no token, no claim, current values shown as current
+     values, and completion that destroys nothing the operator did not change.
+  5. Implement the report-and-adopt-nothing step per D-026: enumerate existing collections per
      library, explain adoption in plain language, link to the per-library / per-collection adoption
      control built in Phase 6 and Phase 7, and provide no bulk-adopt affordance anywhere in the
      wizard — the operator with many hand-made collections is the one for whom one click is most
      tempting and most alarming, and a first impression is the worst moment to spend that trust.
-  3. Script the first-run journey against a fixture server end to end: connect Plex, select
-     libraries, complete the wizard, run the first sync.
+  6. Script the first-run journey against a fixture server end to end: claim with the console token,
+     create the admin, connect Plex, select libraries, complete the wizard, run the first sync.
+  7. Script the two interruption paths against the same fixture: close the tab mid-wizard and resume
+     at the same step, and restart the process mid-wizard and resume through admin recovery with the
+     console token already dead.
 - **Done when:** I-UX-8 passes — the scripted first-run journey against a fixture server completes
   the wizard and the first sync inside the target stated in the PRD, asserted on step count and
-  blocking calls rather than wall time.
+  blocking calls rather than wall time; and I-UX-10 passes — for each step, a database seeded at that
+  step's evidence level derives that step, and a client requesting any other step index is answered
+  with the derived one.
 
 ### Task 13.2 Packs: install, upgrade, fork
 
@@ -2311,14 +2382,14 @@ Size `M`.
 ## Invariant coverage
 
 Every invariant in *Invariants* in the PRD, assigned exactly once. This table is the completeness
-check: 95 invariants, 95 assignments, no orphans and no duplicates. An invariant added to the PRD
+check: 97 invariants, 97 assignments, no orphans and no duplicates. An invariant added to the PRD
 without a row here goes silently unassigned, which looks exactly like being covered — so add the row
 in the same change that adds the invariant.
 
 | Phase | Invariants | Count |
 | --- | --- | --- |
 | 0 | `I-DATA-2`, `I-DATA-3`, `I-DATA-5`, `I-DATA-6`, `I-DATA-7`, `I-DATA-8`, `I-DATA-10`, `I-DATA-11` | 8 |
-| 1 | `I-SEC-1`, `I-SEC-2`, `I-SEC-3`, `I-UX-1`, `I-UX-2`, `I-UX-3`, `I-UX-7`, `I-UX-9` | 8 |
+| 1 | `I-SEC-1`, `I-SEC-2`, `I-SEC-3`, `I-SEC-8`, `I-UX-1`, `I-UX-2`, `I-UX-3`, `I-UX-7`, `I-UX-9` | 9 |
 | 2 | `I-ID-5` | 1 |
 | 3 | `I-DEF-1`, `I-DEF-2`, `I-DEF-3`, `I-DEF-5`, `I-DEF-6`, `I-DEF-7` | 6 |
 | 4 | `I-ID-1`, `I-ID-2`, `I-ID-3`, `I-ID-4`, `I-EVID-8`, `I-DATA-4`, `I-PERF-1` | 7 |
@@ -2330,9 +2401,9 @@ in the same change that adds the invariant.
 | 10 | `I-ACQ-1` to `I-ACQ-5` | 5 |
 | 11 | `I-REV-3`, `I-REV-4` | 2 |
 | 12 | `I-SEC-5`, `I-SEC-6` | 2 |
-| 13 | `I-UX-5`, `I-UX-8`, `I-DEF-4`, `I-DEF-8` | 4 |
+| 13 | `I-UX-5`, `I-UX-8`, `I-UX-10`, `I-DEF-4`, `I-DEF-8` | 5 |
 | 14 | — (the release lane in full) | 0 |
-| | **Total** | **95** |
+| | **Total** | **97** |
 
 **A mechanism may be built in one phase and its invariant claimed in a later one.** The split is
 deliberate and is preserved above. Sort-title capture is built in Phase 7, but `I-REV-1` is claimed
@@ -2353,7 +2424,7 @@ D-034 recorded why the previous plan was deleted. Each requirement, and where it
 | Lifecycle needs persisted state, an append-only audit, and crash-safe intents | Phase 9, with the evidence group as its exit criteria |
 | Teardown crosses four subsystems and needs its own fixtures | Phase 11, with fixtures built earlier and reused |
 | Theme music, local assets, and i18n appeared in no phase | i18n in Phase 1; local assets in Phase 8; theme music and extras in Phase 13 |
-| The invariants replaced the external references the old plan relied on | Every phase's exit criterion is invariants. All 95 assigned, *Invariant coverage* |
+| The invariants replaced the external references the old plan relied on | Every phase's exit criterion is invariants. All 97 assigned, *Invariant coverage* |
 
 **Two constraints D-034 named explicitly.** The teardown fixtures are worth building before Phase 11
 and are — they are needed from Phase 6 onward to test reversibility of anything. And the plan is not
