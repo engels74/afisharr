@@ -53,9 +53,43 @@ fn a_malformed_override_stops_the_start_rather_than_falling_back_to_a_file() {
         !output.status.success(),
         "a malformed key must not be silently replaced"
     );
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains(KEY_ENV_VAR), "{stderr}");
     assert!(
         !directory.path().join("secrets.key").exists(),
         "falling back to a generated key would make every stored credential undecryptable \
          the moment the operator fixed their variable"
+    );
+}
+
+/// A variable this process cannot read is set, not absent.
+///
+/// `std::env::var` reports "not set" and "set to bytes that are not text" as
+/// the same `Err`, and falling through to the file path would mint a fresh key
+/// — after which every stored credential is undecryptable the moment the
+/// operator fixes their variable.
+#[cfg(unix)]
+#[test]
+fn an_override_that_is_not_text_stops_the_start_rather_than_minting_a_key() {
+    use std::{ffi::OsString, os::unix::ffi::OsStringExt};
+
+    let directory = TempDir::new().expect("a scratch directory");
+
+    let output = Command::new(env!("CARGO_BIN_EXE_afisharr"))
+        .args(["db", "check"])
+        .env("AFISHARR_DATA_DIR", directory.path())
+        .env(KEY_ENV_VAR, OsString::from_vec(vec![0xff, 0xfe, 0xfd]))
+        .output()
+        .expect("running the afisharr binary");
+
+    assert!(
+        !output.status.success(),
+        "a key variable that cannot be read must not be treated as unset"
+    );
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains(KEY_ENV_VAR), "{stderr}");
+    assert!(
+        !directory.path().join("secrets.key").exists(),
+        "falling back to a generated key would orphan every stored credential"
     );
 }

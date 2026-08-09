@@ -195,3 +195,26 @@ fn an_empty_data_directory_override_stops_the_start() {
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(stderr.contains("AFISHARR_DATA_DIR"), "{stderr}");
 }
+
+/// The same door for every variable: set-but-unreadable is not unset.
+#[cfg(unix)]
+#[test]
+fn an_override_that_is_not_text_stops_the_start() {
+    use std::{ffi::OsString, os::unix::ffi::OsStringExt};
+
+    let directory = TempDir::new().unwrap();
+
+    let output = Command::new(env!("CARGO_BIN_EXE_afisharr"))
+        .args(["db", "check"])
+        .env("AFISHARR_DATA_DIR", directory.path())
+        .env("AFISHARR_TRUST_PROXY", OsString::from_vec(vec![0xff, 0xfe]))
+        .output()
+        .expect("running the afisharr binary");
+
+    assert!(
+        !output.status.success(),
+        "a proxy list that cannot be read must not be read as an empty one"
+    );
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("AFISHARR_TRUST_PROXY"), "{stderr}");
+}

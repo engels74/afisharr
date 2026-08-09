@@ -32,7 +32,8 @@ pub enum SecretError {
         found: usize,
     },
 
-    /// `AFISHARR_SECRET_KEY` was set but was not 64 hex characters.
+    /// `AFISHARR_SECRET_KEY` was set to something other than 64 hex characters,
+    /// including a value this process cannot read as text.
     #[error("AFISHARR_SECRET_KEY must be 64 lowercase hex characters")]
     KeyEncoding,
 

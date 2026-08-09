@@ -27,12 +27,19 @@ const KEY_FILE_MODE: u32 = 0o600;
 /// run it through `spawn_blocking`; it happens once, at startup.
 ///
 /// # Errors
-/// Returns [`SecretError::KeyEncoding`] or [`SecretError::KeyLength`] when the
-/// override is malformed, and [`SecretError::KeyFile`] when the file cannot be
-/// read or created.
+/// Returns [`SecretError::KeyEncoding`] when the override is not 64 hex
+/// characters, including when it is not text at all; [`SecretError::KeyLength`]
+/// when the override or the file holds the wrong number of bytes;
+/// [`SecretError::KeyFile`] when the file cannot be read or created; and
+/// [`SecretError::Entropy`] when a fresh key cannot be generated.
 pub fn load_or_create(path: impl AsRef<Path>) -> Result<SecretKey, SecretError> {
-    if let Ok(encoded) = std::env::var(KEY_ENV_VAR) {
-        return from_hex(&encoded);
+    if let Some(encoded) = std::env::var_os(KEY_ENV_VAR) {
+        // `var_os`, because `var` folds "set but not text" into "not set" and
+        // this function would then fall through and mint a fresh key. Every
+        // stored credential becomes undecryptable the moment the operator fixes
+        // their variable, which is the outcome D-032 exists to prevent.
+        let encoded = encoded.to_str().ok_or(SecretError::KeyEncoding)?;
+        return from_hex(encoded);
     }
 
     let path = path.as_ref();

@@ -19,6 +19,12 @@ const ENV_PREFIX: &str = "AFISHARR_";
 /// file that silently overrode those edits on the next restart would make the
 /// settings page lie about the running configuration.
 ///
+/// The exceptions are the values decided before the row can be read, and they
+/// are exceptions of ordering rather than of intent: `logging`, because the log
+/// is opened before the database, and `backup.retainedPreMigration`, because
+/// the pre-migration prune runs before the row is loaded. Both keep being read
+/// from here on every start, and a settings surface offering them has to say so.
+///
 /// # Errors
 /// Returns an error naming the file when it cannot be read, or naming the field
 /// when it holds something the typed document rejects.
@@ -61,7 +67,7 @@ fn apply_environment(body: &mut SettingsBody) -> Result<()> {
             .parse()
             .with_context(|| format!("{ENV_PREFIX}PORT is not a port number"))?;
     }
-    if let Ok(value) = std::env::var(format!("{ENV_PREFIX}TRUST_PROXY")) {
+    if let Some(value) = override_text("TRUST_PROXY")? {
         // A list, never a boolean (D-029): comma-separated addresses or CIDRs,
         // and an empty value means nothing is trusted rather than everything.
         body.http.trust_proxy = value
@@ -90,18 +96,32 @@ fn apply_environment(body: &mut SettingsBody) -> Result<()> {
 /// # Errors
 /// Returns an error naming the variable when it is set to an empty value.
 fn override_value(field: &str) -> Result<Option<String>> {
+    let Some(value) = override_text(field)? else {
+        return Ok(None);
+    };
+    if value.trim().is_empty() {
+        bail!("{ENV_PREFIX}{field} is set to nothing; unset it to keep the configured value");
+    }
+    Ok(Some(value))
+}
+
+/// The value `AFISHARR_<field>` holds, refused when it is not text.
+///
+/// `std::env::var` reports "not set" and "set to bytes this process cannot
+/// read" as the same `Err`, so reading through it discards a value the operator
+/// did set. `TRUST_PROXY` reads through here rather than through
+/// [`override_value`] because its empty value is a deliberate answer (D-029).
+///
+/// # Errors
+/// Returns an error naming the variable when its value is not valid UTF-8.
+fn override_text(field: &str) -> Result<Option<String>> {
     let name = format!("{ENV_PREFIX}{field}");
     let Some(value) = std::env::var_os(&name) else {
         return Ok(None);
     };
-    // `var_os` rather than `var`, which folds "not set" and "not text" into one
-    // `Err` and would drop a value the operator did set.
     let Some(value) = value.to_str() else {
         bail!("{name} is set to something that is not text");
     };
-    if value.trim().is_empty() {
-        bail!("{name} is set to nothing; unset it to keep the configured value");
-    }
     Ok(Some(value.to_owned()))
 }
 
