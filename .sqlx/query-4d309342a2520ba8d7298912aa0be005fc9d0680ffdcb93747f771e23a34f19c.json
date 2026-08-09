@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT INTO definitions\n                 (id, kind, handle, name, schema_version, registry_version, body_json, body_hash,\n                  origin_kind, origin_pack, origin_pack_version, created_at, updated_at)\n             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, 0, 0)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 11
+    },
+    "nullable": []
+  },
+  "hash": "4d309342a2520ba8d7298912aa0be005fc9d0680ffdcb93747f771e23a34f19c"
+}

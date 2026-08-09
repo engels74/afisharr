@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "UPDATE lifecycle_intents SET owner = NULL, lease_expires_at = NULL\n             WHERE state NOT IN ('Confirmed', 'Abandoned')\n               AND (owner = ?1 OR lease_expires_at < ?2)\n               AND (owner IS NOT NULL OR lease_expires_at IS NOT NULL)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": []
+  },
+  "hash": "7fe403d671f621d6f9f2505a41732c681a761df6a64de3436c9fdfc1082270fa"
+}

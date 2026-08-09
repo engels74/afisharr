@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "UPDATE definitions SET name = 'Edited behind the projection'",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": []
+  },
+  "hash": "b96c817127c84fa67331cc602883a9cd225395dc2edc905c43bc37e148b9987e"
+}

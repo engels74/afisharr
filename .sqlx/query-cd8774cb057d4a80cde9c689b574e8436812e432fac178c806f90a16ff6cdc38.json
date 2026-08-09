@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT INTO placement_participants\n                 (id, type, library_id, hub_identifier, title, is_deletable,\n                  first_seen_at, last_seen_at)\n             VALUES (?1, 'NativeHub', ?2, 'home.continue', 'Continue Watching', 0, 0, 0)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": []
+  },
+  "hash": "cd8774cb057d4a80cde9c689b574e8436812e432fac178c806f90a16ff6cdc38"
+}

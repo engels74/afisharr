@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "UPDATE library_item_state SET state_hash = ?2 WHERE library_item_id = ?1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": []
+  },
+  "hash": "21a10551c38c186548f37cb90abea3f1fc75a882de0e0e622720eb09bd1f45e8"
+}

@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT INTO principals (id, kind, plex_account_id, label, created_at)\n             VALUES (?1, 'PlexUser', ?2, 'A household member', 0)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": []
+  },
+  "hash": "f0a32968458da8de36625e73d85872543b5ad7a92048234b61d60d35cd5b63ad"
+}

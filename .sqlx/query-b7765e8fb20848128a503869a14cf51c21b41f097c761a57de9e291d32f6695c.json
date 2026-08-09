@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT OR IGNORE INTO lifecycle_policies (version, body_json, created_at)\n                      VALUES (1, '{}', 0)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": []
+  },
+  "hash": "b7765e8fb20848128a503869a14cf51c21b41f097c761a57de9e291d32f6695c"
+}

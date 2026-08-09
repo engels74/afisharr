@@ -1,0 +1,146 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT id, body_json, kind, handle, name, schema_version, registry_version,\n                    body_hash, origin_kind, origin_pack, origin_pack_version\n             FROM definitions WHERE id > ?1 ORDER BY id LIMIT ?2",
+  "describe": {
+    "columns": [
+      {
+        "name": "id",
+        "ordinal": 0,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "definitions",
+            "name": "id"
+          }
+        }
+      },
+      {
+        "name": "body_json",
+        "ordinal": 1,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "definitions",
+            "name": "body_json"
+          }
+        }
+      },
+      {
+        "name": "kind",
+        "ordinal": 2,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "definitions",
+            "name": "kind"
+          }
+        }
+      },
+      {
+        "name": "handle",
+        "ordinal": 3,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "definitions",
+            "name": "handle"
+          }
+        }
+      },
+      {
+        "name": "name",
+        "ordinal": 4,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "definitions",
+            "name": "name"
+          }
+        }
+      },
+      {
+        "name": "schema_version",
+        "ordinal": 5,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "definitions",
+            "name": "schema_version"
+          }
+        }
+      },
+      {
+        "name": "registry_version",
+        "ordinal": 6,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "definitions",
+            "name": "registry_version"
+          }
+        }
+      },
+      {
+        "name": "body_hash",
+        "ordinal": 7,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "definitions",
+            "name": "body_hash"
+          }
+        }
+      },
+      {
+        "name": "origin_kind",
+        "ordinal": 8,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "definitions",
+            "name": "origin_kind"
+          }
+        }
+      },
+      {
+        "name": "origin_pack",
+        "ordinal": 9,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "definitions",
+            "name": "origin_pack"
+          }
+        }
+      },
+      {
+        "name": "origin_pack_version",
+        "ordinal": 10,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "definitions",
+            "name": "origin_pack_version"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      true,
+      true
+    ]
+  },
+  "hash": "d630cc5dc5b5922a1f1475b32781ede914e2899d1ad90153219ad9e69273df86"
+}

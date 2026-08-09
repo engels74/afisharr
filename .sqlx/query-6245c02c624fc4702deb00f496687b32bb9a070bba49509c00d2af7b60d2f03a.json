@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT INTO lifecycle_subjects\n                 (id, library_id, media_type, season_number, primary_id_space, primary_id_value,\n                  title, phase, acquisition, presence, release_date_basis, policy_version,\n                  next_evaluation_at, created_at, updated_at)\n             VALUES (?1, ?2, 'movie', ?3, ?4, ?5, 'Dune: Part Two',\n                     'Released', 'Available', 'Real', 'digital', 1, 0, 0, 0)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 5
+    },
+    "nullable": []
+  },
+  "hash": "6245c02c624fc4702deb00f496687b32bb9a070bba49509c00d2af7b60d2f03a"
+}
