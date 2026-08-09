@@ -3,15 +3,23 @@
 
 //! # afisharr-plex
 //!
-//! The Plex client.
+//! The Plex client: the protocol surface Afisharr actually calls, and no more.
 //!
-//! Libraries, collections, hubs, labels, media streams, artwork, and
-//! filter-metadata discovery.
+//! Phase 1 needs one part of it — the plex.tv PIN and OAuth token exchange
+//! behind the login flow — so [`pin`] is what exists here. The library, item,
+//! collection, hub, label, artwork, and filter-metadata calls arrive with the
+//! rest of the protocol surface, along with the adversarial fake they are
+//! tested against (D-036).
 //!
-//! Built in Phase 2; this crate carries only its identity until then.
+//! Every request leaves through the one instrumented outbound client in
+//! `afisharr-sources` (PRD §21.2.5). This crate owns the protocol; it does not
+//! own a transport.
 
 /// The version of this crate in the running build.
 ///
 /// Reported in the boot log so a support bundle names every component present,
 /// rather than one number that only describes the binary.
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
+
+pub mod identity;
+pub mod pin;
