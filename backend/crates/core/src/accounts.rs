@@ -11,13 +11,15 @@
 
 mod error;
 mod password;
+mod rotation;
 mod store;
 mod user;
 
 pub use error::AccountError;
 pub use password::{PARAMETERS, hash, verify};
+pub use rotation::{PasswordRotation, RotatePassword};
 pub use store::{
-    CreateUser, CreateUserOutcome, SetPassword, TouchLastLogin, UpsertPlexUser, admin_exists,
-    find_by_id, find_by_plex_account, find_by_username,
+    CreateUser, CreateUserOutcome, TouchLastLogin, UpsertPlexUser, admin_exists, find_by_id,
+    find_by_plex_account, find_by_username,
 };
 pub use user::{User, UserKind};

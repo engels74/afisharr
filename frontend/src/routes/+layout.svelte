@@ -9,10 +9,11 @@
 	import type { Snippet } from 'svelte';
 	import { goto } from '$app/navigation';
 	import { page } from '$app/state';
+	import { api } from '$lib/api/client';
 	import { LoadingState } from '$lib/components/state';
-	import { createSession } from '$lib/features/auth';
+	import { session } from '$lib/features/auth';
 	import { isBareRoute, LOGIN, NavShell } from '$lib/features/navigation';
-	import { sourceHref } from '$lib/shared/provenance';
+	import { recordProvenance, sourceHref } from '$lib/shared/provenance';
 	import { StreamConnection } from '$lib/shared/stream';
 
 	interface Props {
@@ -27,7 +28,6 @@
 	 */
 	const bare = $derived(isBareRoute(page.url.pathname));
 
-	const session = createSession();
 	const stream = new StreamConnection();
 
 	/**
@@ -50,9 +50,33 @@
 	});
 
 	$effect(() => {
-		if (!bare && session.state.kind === 'signedOut') {
+		// Not while an answer is in flight: `signedOut` recorded on the route
+		// before this one is still the state during the request that will
+		// replace it, and acting on it here is what sends an operator who has
+		// just signed in back to the sign-in page (P1).
+		if (!bare && !session.refreshing && session.state.kind === 'signedOut') {
 			void goto(LOGIN, { replaceState: true });
 		}
+	});
+
+	/**
+	 * Records what this instance is running, for the footer's source link.
+	 *
+	 * Asked from here rather than from the root route, because the root route
+	 * runs on a visit to `/` and on nothing else: a browser opened on
+	 * `/dashboard`, or reloaded anywhere inside the shell, never renders it.
+	 * The layout is the one component every visit passes through, and the link
+	 * is an AGPL §13 obligation that has to resolve to the running version on
+	 * all of them, not only on the visits that happened to start at the root
+	 * (D-028).
+	 */
+	async function loadProvenance() {
+		const { data } = await api.GET('/api/health');
+		recordProvenance({ version: data?.version });
+	}
+
+	$effect(() => {
+		void loadProvenance();
 	});
 
 	let elapsed = $state(0);

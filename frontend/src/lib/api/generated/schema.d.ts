@@ -194,11 +194,13 @@ export interface paths {
         put?: never;
         /**
          * Changes the signed-in account's password.
-         * @description Everything PRD §21.4.2 asks for happens here and happens together: the
-         *     current password is re-verified, the new hash is written, every other
-         *     session for the account is revoked, and this session's identifier is
-         *     rotated. Rotation is not decoration — a session identifier that survives a
-         *     password change survives the theft the change was made to end.
+         * @description Everything PRD §21.4.2 asks for happens here and happens together, in one
+         *     transaction: the current password is re-verified, the new hash is written,
+         *     every session for the account is revoked, and a replacement is inserted for
+         *     the browser that asked. Rotation is not decoration — a session identifier
+         *     that survives a password change survives the theft the change was made to
+         *     end — and a rotation split across separate commits has a window in which
+         *     exactly that is true.
          */
         post: operations["change_password"];
         delete?: never;
@@ -748,7 +750,14 @@ export interface components {
         };
         /** @description What the interface asks for when it starts a Plex sign-in. */
         StartPin: {
-            /** @description Where plex.tv returns the operator, for the OAuth variant. */
+            /**
+             * @description Where plex.tv returns the operator, for the OAuth variant.
+             *
+             *     It must name this instance. plex.tv redirects to whatever this asks
+             *     for, so a target anywhere else turns the endpoint into a redirector
+             *     wearing a legitimate `app.plex.tv/auth` URL, and the operator who
+             *     completes the sign-in lands on somebody else's page.
+             */
             forwardUrl?: string | null;
             /**
              * @description `pin` shows a four-character code; `oauth` sends the operator to
@@ -876,7 +885,7 @@ export interface operations {
                     "application/json": components["schemas"]["PinStarted"];
                 };
             };
-            /** @description The request body was not readable */
+            /** @description The request body was not readable, or the return target is not this instance */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -1291,6 +1300,15 @@ export interface operations {
             };
             /** @description The current password was not accepted */
             401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description That account has no password to change */
+            409: {
                 headers: {
                     [name: string]: unknown;
                 };

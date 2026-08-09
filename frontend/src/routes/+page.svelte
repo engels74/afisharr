@@ -8,7 +8,6 @@
 	import { LoadingState } from '$lib/components/state';
 	import { readSession } from '$lib/features/auth';
 	import { landingFor } from '$lib/features/navigation';
-	import { recordProvenance } from '$lib/shared/provenance';
 
 	let startedAt = Date.now();
 	let elapsed = $state(0);
@@ -25,8 +24,10 @@
 	 * and whose stream reconnects and fails, with no sign-in page in sight.
 	 */
 	async function route() {
+		// Health is read for the landing decision only. The source link's
+		// provenance is recorded by the layout, which every visit passes
+		// through — this route runs on a visit to `/` and on nothing else.
 		const { data } = await api.GET('/api/health');
-		recordProvenance({ version: data?.version });
 		const setupCompleted = data?.setupCompleted ?? false;
 		const signedIn =
 			setupCompleted && (await readSession()).outcome === 'ok';

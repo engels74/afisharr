@@ -127,6 +127,42 @@ async fn the_oauth_variant_shares_the_flow_and_adds_a_sign_in_url() {
 }
 
 #[tokio::test]
+async fn an_oauth_sign_in_will_not_return_the_operator_to_another_site() {
+    // The open redirect this closes: the caller posts any `forwardUrl` it
+    // likes, the endpoint embeds it in a genuine `app.plex.tv/auth` URL, and
+    // whoever completes the sign-in lands on the attacker's page carrying
+    // Afisharr's name and Plex's.
+    let stub = PlexTvStub::start().await;
+    let instance = TempInstance::new();
+    let running = configured(&instance, &stub).await;
+
+    let refused = browser()
+        .post(format!("{}/api/auth/plex/pin", running.base_url))
+        .json(&serde_json::json!({
+            "oauth": true,
+            "forwardUrl": "https://evil.example/steal",
+        }))
+        .send()
+        .await
+        .expect("the start route must answer");
+    assert_eq!(refused.status(), StatusCode::BAD_REQUEST);
+    let body: serde_json::Value = refused.json().await.expect("a JSON body");
+    assert_eq!(body["code"], "invalid");
+    assert_eq!(body["pointer"], "/forwardUrl");
+
+    // And nothing was spent on it: no attempt reached plex.tv, so nothing is
+    // left behind for the refused request either.
+    assert_eq!(
+        stub.pins_created(),
+        0,
+        "a refused return target must not create a pin"
+    );
+
+    running.stop().await;
+    stub.stop().await;
+}
+
+#[tokio::test]
 async fn a_pin_under_a_mismatched_client_identifier_fails_visibly() {
     // The failure this prevents: a token plex.tv accepts once and refuses
     // afterwards, which reads as an intermittent Plex outage for as long as

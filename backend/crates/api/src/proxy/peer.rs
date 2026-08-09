@@ -30,6 +30,15 @@ impl Scheme {
     pub const fn is_secure(self) -> bool {
         matches!(self, Self::Https)
     }
+
+    /// How the scheme is spelled in a URL this instance builds.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Http => "http",
+            Self::Https => "https",
+        }
+    }
 }
 
 /// The facts about a request's origin that every gate is keyed on.

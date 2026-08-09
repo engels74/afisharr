@@ -149,6 +149,51 @@ async fn an_idle_stream_beats_with_an_event_a_listener_can_observe() {
     running.stop().await;
 }
 
+#[tokio::test]
+async fn a_stop_does_not_wait_for_a_browser_holding_the_stream_open() {
+    // The body of an event stream never ends on its own, and a graceful
+    // shutdown waits for every response already in flight. Without an end of
+    // its own, one open tab holds the process until the container kills it,
+    // and `start::run` never reaches `database.close()`.
+    let instance = TempInstance::new();
+    let (running, client) = signed_in(&instance).await;
+
+    let response = client
+        .get(format!("{}/api/stream", running.base_url))
+        .send()
+        .await
+        .expect("the stream route must answer");
+
+    // Read to the end of the opening event, then keep the reader: the body is
+    // still in flight when the stop signal arrives, which is the whole case.
+    let mut lines = sse_lines(response);
+    while let Some(line) = lines
+        .next_line()
+        .await
+        .expect("the stream must be readable")
+    {
+        if line.is_empty() {
+            break;
+        }
+    }
+
+    let started = std::time::Instant::now();
+    tokio::time::timeout(std::time::Duration::from_mins(1), running.stop())
+        .await
+        .expect("a stop must finish while a client holds the stream open");
+    let took = started.elapsed();
+
+    // Inside the drain window rather than at its deadline: the streams are
+    // ended, not waited out. A stop that took the whole grace period would
+    // mean the cancellation did nothing and the bounded fallback carried it.
+    assert!(
+        took < std::time::Duration::from_secs(5),
+        "the stop waited out the drain window instead of ending the stream: {took:?}"
+    );
+
+    drop(lines);
+}
+
 /// Reads the first complete event off an SSE response.
 async fn first_event(response: reqwest::Response) -> String {
     first_events(response, 1).await.remove(0)
@@ -167,12 +212,7 @@ async fn first_two_events(response: reqwest::Response) -> [String; 2] {
 /// deliberately kept, so a test that expects a dispatchable event fails loudly
 /// rather than blocking until its timeout.
 async fn first_events(response: reqwest::Response, wanted: usize) -> Vec<String> {
-    let stream = response.bytes_stream();
-    let reader = tokio_util::io::StreamReader::new(futures_util::TryStreamExt::map_err(
-        stream,
-        std::io::Error::other,
-    ));
-    let mut lines = tokio::io::BufReader::new(reader).lines();
+    let mut lines = sse_lines(response);
 
     let mut events = Vec::with_capacity(wanted);
     let mut event = String::new();
@@ -194,4 +234,18 @@ async fn first_events(response: reqwest::Response, wanted: usize) -> Vec<String>
         event.push('\n');
     }
     events
+}
+
+/// The lines of an SSE response, as a reader the caller keeps alive.
+///
+/// Returned rather than consumed, because one test needs the body to still be
+/// in flight while something else happens to the server.
+fn sse_lines(
+    response: reqwest::Response,
+) -> tokio::io::Lines<tokio::io::BufReader<impl tokio::io::AsyncRead>> {
+    let reader = tokio_util::io::StreamReader::new(futures_util::TryStreamExt::map_err(
+        response.bytes_stream(),
+        std::io::Error::other,
+    ));
+    tokio::io::BufReader::new(reader).lines()
 }

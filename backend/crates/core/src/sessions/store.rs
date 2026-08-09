@@ -159,44 +159,6 @@ impl WriteOperation for RevokeSession {
     }
 }
 
-/// Revokes every session an account holds, and reports how many.
-///
-/// A password change runs this (PRD §21.4.2). `keep` names the session that
-/// performed the change, so the operator who just rotated their own password
-/// is not signed out of the tab they did it in — every other session, on every
-/// other device, is gone.
-#[derive(Debug)]
-pub struct RevokeAllForUser {
-    /// The account whose sessions are being revoked.
-    pub user_id: String,
-    /// A session digest to spare, if any.
-    pub keep: Option<String>,
-    /// The instant of the revocation.
-    pub at: Timestamp,
-}
-
-impl WriteOperation for RevokeAllForUser {
-    type Output = u64;
-
-    async fn execute(self, conn: &mut SqliteConnection) -> Result<u64, sqlx::Error> {
-        let at = self.at.as_millis();
-        // IFNULL rather than two statements: `keep` being absent must revoke
-        // everything, and a digest never equals the empty string.
-        let keep = self.keep.unwrap_or_default();
-        let affected = sqlx::query!(
-            "UPDATE sessions SET revoked_at = ?3
-             WHERE user_id = ?1 AND revoked_at IS NULL AND id <> ?2",
-            self.user_id,
-            keep,
-            at
-        )
-        .execute(&mut *conn)
-        .await?
-        .rows_affected();
-        Ok(affected)
-    }
-}
-
 /// The `sessions` row exactly as `SQLite` returns it.
 struct Row {
     id: String,

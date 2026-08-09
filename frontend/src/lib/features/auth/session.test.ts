@@ -16,8 +16,11 @@ let answer: AuthResult<SignedIn> = {
 	problem: { code: 'unauthenticated', message: 'Sign in to continue.' },
 } as AuthResult<SignedIn>;
 
+/** What one call to `readSession` does, so a test can hold one open. */
+let respond = (): Promise<AuthResult<SignedIn>> => Promise.resolve(answer);
+
 mock.module('./auth-client', () => ({
-	readSession: () => Promise.resolve(answer),
+	readSession: () => respond(),
 }));
 
 const { createSession } = await import('./session.svelte');
@@ -31,6 +34,30 @@ const OPERATOR: SignedIn = {
 describe('what the interface knows about who is signed in', () => {
 	beforeEach(() => {
 		answer = { outcome: 'ok', value: OPERATOR };
+		respond = () => Promise.resolve(answer);
+	});
+
+	test('an answer in flight is not an answer', async () => {
+		// What the shell guard reads before it acts on `signedOut`: the refusal
+		// recorded on the route before this one is still the state during the
+		// request that will replace it, and redirecting on it sends the
+		// operator who has just signed in back to the sign-in page (P1).
+		let land: (result: AuthResult<SignedIn>) => void = () => {};
+		respond = () =>
+			new Promise<AuthResult<SignedIn>>((resolve) => {
+				land = resolve;
+			});
+
+		const session = createSession();
+		expect(session.refreshing).toBe(false);
+
+		const asked = session.refresh();
+		expect(session.refreshing).toBe(true);
+
+		land({ outcome: 'ok', value: OPERATOR });
+		await asked;
+		expect(session.refreshing).toBe(false);
+		expect(session.state.kind).toBe('signedIn');
 	});
 
 	test('nothing has been asked before the first refresh', () => {

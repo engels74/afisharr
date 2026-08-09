@@ -5,9 +5,7 @@
 
 use afisharr_core::{
     entropy,
-    sessions::{
-        ABSOLUTE_LIFETIME_MILLIS, CreateSession, RevokeAllForUser, RevokeSession, SessionToken,
-    },
+    sessions::{ABSOLUTE_LIFETIME_MILLIS, CreateSession, RevokeSession, SessionToken},
 };
 use axum_extra::extract::cookie::Cookie;
 
@@ -45,7 +43,6 @@ pub async fn issue(
     user_agent: Option<String>,
 ) -> AppResult<IssuedSession> {
     let token = SessionToken::generate();
-    let csrf = csrf_cookie(client.scheme);
 
     state
         .database()
@@ -61,18 +58,30 @@ pub async fn issue(
         .map_err(AppError::internal)?;
 
     Ok(IssuedSession {
-        cookies: vec![
-            set(
-                SESSION_COOKIE,
-                token.value().to_owned(),
-                "/",
-                ABSOLUTE_LIFETIME_MILLIS / 1000,
-                client.scheme,
-                true,
-            ),
-            csrf,
-        ],
+        cookies: cookies_for(&token, client.scheme),
     })
+}
+
+/// The two cookies that carry `token`, without writing anything.
+///
+/// Separate from [`issue`] for the one caller that must not write the session
+/// row from here: a password rotation inserts the replacement inside the same
+/// transaction as the change that made it necessary, and the browser is handed
+/// a credential only once that transaction has committed. Building the pair in
+/// a second place would be a second answer to the path, the lifetime, and the
+/// `HttpOnly` flag the double-submit check depends on (P7).
+pub(crate) fn cookies_for(token: &SessionToken, scheme: Scheme) -> Vec<Cookie<'static>> {
+    vec![
+        set(
+            SESSION_COOKIE,
+            token.value().to_owned(),
+            "/",
+            ABSOLUTE_LIFETIME_MILLIS / 1000,
+            scheme,
+            true,
+        ),
+        csrf_cookie(scheme),
+    ]
 }
 
 /// A fresh CSRF cookie.
@@ -116,28 +125,6 @@ pub async fn revoke(
         expire(SESSION_COOKIE, "/", scheme),
         expire(CSRF_COOKIE, "/", scheme),
     ])
-}
-
-/// Revokes every session a user holds except the one named, and reports how
-/// many went.
-///
-/// # Errors
-/// Returns [`AppError`] when the revocation could not be written.
-pub(crate) async fn revoke_others(
-    state: &ApiState,
-    user_id: &str,
-    keep: Option<String>,
-) -> AppResult<u64> {
-    state
-        .database()
-        .writer()
-        .submit(RevokeAllForUser {
-            user_id: user_id.to_owned(),
-            keep,
-            at: state.clock().now(),
-        })
-        .await
-        .map_err(AppError::internal)
 }
 
 /// A 256-bit value, hex-encoded, for the CSRF cookie.

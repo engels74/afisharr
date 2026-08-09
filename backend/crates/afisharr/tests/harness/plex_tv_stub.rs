@@ -10,7 +10,7 @@
 
 use std::sync::{
     Arc, Mutex,
-    atomic::{AtomicBool, Ordering},
+    atomic::{AtomicBool, AtomicUsize, Ordering},
 };
 
 use axum::{
@@ -32,6 +32,8 @@ pub struct PlexTvScript {
     pub account_id: Mutex<i64>,
     /// The account's username.
     pub username: Mutex<String>,
+    /// How many pins have been asked for.
+    pub pins_created: AtomicUsize,
 }
 
 impl Default for PlexTvScript {
@@ -41,6 +43,7 @@ impl Default for PlexTvScript {
             authorized: AtomicBool::new(false),
             account_id: Mutex::new(4242),
             username: Mutex::new("operator-on-plex".to_owned()),
+            pins_created: AtomicUsize::new(0),
         }
     }
 }
@@ -92,6 +95,11 @@ impl PlexTvStub {
         self.script.authorized.store(true, Ordering::SeqCst);
     }
 
+    /// How many pins this stub has been asked to create.
+    pub fn pins_created(&self) -> usize {
+        self.script.pins_created.load(Ordering::SeqCst)
+    }
+
     /// Says the pin was created under a different client identifier.
     pub fn report_client_identifier(&self, identifier: &str) {
         *self
@@ -136,6 +144,8 @@ async fn create_pin(
     State(script): State<Arc<PlexTvScript>>,
     headers: HeaderMap,
 ) -> (StatusCode, Json<serde_json::Value>) {
+    script.pins_created.fetch_add(1, Ordering::SeqCst);
+
     // plex.tv echoes the identifier the caller sent unless the script says to
     // report a different one, which is the mismatch case.
     let sent = headers

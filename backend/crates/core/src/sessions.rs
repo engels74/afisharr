@@ -14,7 +14,6 @@ mod token;
 
 pub use lifetime::{ABSOLUTE_LIFETIME_MILLIS, IDLE_TIMEOUT_MILLIS, Session, Validity};
 pub use store::{
-    CreateSession, RevokeAllForUser, RevokeSession, TouchSession, count_active, find_by_digest,
-    list_for_user,
+    CreateSession, RevokeSession, TouchSession, count_active, find_by_digest, list_for_user,
 };
 pub use token::SessionToken;

@@ -92,7 +92,23 @@ pub async fn stream(
             .data(r#"{"heartbeat":true}"#))
     });
 
-    let body = tokio_stream::once(Ok(opened)).chain(published.merge(heartbeat));
+    // Ended by the shutdown signal, not only by the client hanging up. A
+    // graceful stop waits for every response already in flight, and this body
+    // is one that never finishes on its own: without an end of its own, a
+    // single tab holding `/api/stream` open keeps the process past its
+    // container's grace period and into a forced kill, with the database never
+    // closed.
+    //
+    // `Option` because `merge` carries one item type and `map_while` stops at
+    // the first `None`, which is what the close resolves into.
+    let hub = state.stream().clone();
+    let events = tokio_stream::once(Ok(opened))
+        .chain(published.merge(heartbeat))
+        .map(Some);
+    let closed = tokio_stream::once(())
+        .then(move |()| hub.closed())
+        .map(|()| None);
+    let body = events.merge(closed).map_while(|event| event);
 
     Sse::new(body)
 }

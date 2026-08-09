@@ -12,15 +12,20 @@
 
 use afisharr_core::{identifier::Id, plex_pin};
 use afisharr_plex::pin::{AuthorizationUrl, Mode, PinError};
-use axum::{Json, extract::State};
+use axum::{
+    Json,
+    extract::State,
+    http::{HeaderMap, header::HOST},
+};
 use axum_extra::extract::CookieJar;
 use serde::{Deserialize, Serialize};
+use url::Url;
 use utoipa::ToSchema;
 
 use crate::{
     authentication::session,
     error::{AppError, AppResult, ErrorCode, JsonBody, Problem},
-    proxy::ClientContext,
+    proxy::{ClientContext, Scheme},
     ratelimit::{Bucket, Decision},
     security::{PLEX_PIN_COOKIE, PLEX_PIN_COOKIE_PATH, set},
     state::ApiState,
@@ -34,6 +39,11 @@ pub struct StartPin {
     /// plex.tv's hosted sign-in.
     pub oauth: bool,
     /// Where plex.tv returns the operator, for the OAuth variant.
+    ///
+    /// It must name this instance. plex.tv redirects to whatever this asks
+    /// for, so a target anywhere else turns the endpoint into a redirector
+    /// wearing a legitimate `app.plex.tv/auth` URL, and the operator who
+    /// completes the sign-in lands on somebody else's page.
     pub forward_url: Option<String>,
 }
 
@@ -59,7 +69,7 @@ pub struct PinStarted {
     request_body = StartPin,
     responses(
         (status = 200, description = "A pin was created", body = PinStarted),
-        (status = 400, description = "The request body was not readable", body = Problem),
+        (status = 400, description = "The request body was not readable, or the return target is not this instance", body = Problem),
         (status = 429, description = "Too many attempts", body = Problem),
         (status = 502, description = "plex.tv could not be reached", body = Problem),
     ),
@@ -68,6 +78,7 @@ pub async fn start_plex_pin(
     State(state): State<ApiState>,
     client: ClientContext,
     jar: CookieJar,
+    headers: HeaderMap,
     JsonBody(request): JsonBody<StartPin>,
 ) -> AppResult<(CookieJar, Json<PinStarted>)> {
     // A pin creation reaches plex.tv on the caller's behalf, so it counts
@@ -92,6 +103,25 @@ pub async fn start_plex_pin(
     } else {
         Mode::Pin
     };
+
+    // Judged before plex.tv is called and before a row is stored: a return
+    // target this instance will not stand behind is a bad request, not a
+    // reason to spend an upstream call and leave an attempt behind.
+    let forward_to = match (mode, request.forward_url.as_deref()) {
+        (Mode::OAuth, Some(forward_to)) if returns_here(forward_to, client.scheme, &headers) => {
+            Some(forward_to)
+        }
+        (Mode::OAuth, Some(_)) => {
+            return Err(AppError::new(
+                Problem::new(
+                    ErrorCode::Invalid,
+                    "A Plex sign-in can only return to this instance.",
+                )
+                .at("/forwardUrl"),
+            ));
+        }
+        _ => None,
+    };
     let resource = state
         .plex()
         .create_pin(request.oauth)
@@ -115,14 +145,14 @@ pub async fn start_plex_pin(
         .await
         .map_err(AppError::internal)?;
 
-    let authorization_url = match (mode, request.forward_url.as_deref()) {
-        (Mode::OAuth, Some(forward_to)) => Some(
+    let authorization_url = match forward_to {
+        Some(forward_to) => Some(
             AuthorizationUrl::build(state.plex().identity(), &resource.code, forward_to)
                 .map_err(AppError::internal)?
                 .as_str()
                 .to_owned(),
         ),
-        _ => None,
+        None => None,
     };
 
     // Two cookies, and neither of them signs anybody in. The first binds this
@@ -150,6 +180,39 @@ pub async fn start_plex_pin(
             expires_at: stored.expires_at.as_millis(),
         }),
     ))
+}
+
+/// Whether `forward_to` sends the operator back to this instance.
+///
+/// The origin is taken from the request rather than from the body, because the
+/// body is the attacker's half of this: plex.tv redirects to whatever the
+/// `forwardUrl` names, and it does so from a real `app.plex.tv/auth` URL that
+/// this endpoint minted, so an unchecked target is an open redirect signed by
+/// Afisharr. Scheme comes from the resolved client context — the one place
+/// that decides whether a forwarded `https` is believable (`I-SEC-1`) — and the
+/// authority from `Host`, which is the same value the CSRF check binds a
+/// declared `Origin` to (P7).
+///
+/// Origins are compared as origins, not as strings: `https://host` and
+/// `https://host:443` are one instance, and a target with an opaque origin —
+/// `javascript:`, `data:` — is not one at all.
+fn returns_here(forward_to: &str, scheme: Scheme, headers: &HeaderMap) -> bool {
+    let Some(host) = headers.get(HOST).and_then(|value| value.to_str().ok()) else {
+        // Nothing to compare against, so nothing is provably this instance.
+        return false;
+    };
+    // A `Host` carrying a path, a query, or userinfo is not an authority, and
+    // parsing it as one would let the extra part choose the origin.
+    if host.is_empty() || host.contains(['/', '\\', '@', '?', '#']) {
+        return false;
+    }
+    let (Ok(here), Ok(target)) = (
+        Url::parse(&format!("{}://{host}", scheme.as_str())),
+        Url::parse(forward_to),
+    ) else {
+        return false;
+    };
+    target.origin().is_tuple() && target.origin() == here.origin()
 }
 
 /// Renders a plex.tv failure in the operator's terms.
@@ -208,5 +271,87 @@ mod tests {
             "{}",
             error.problem().message
         );
+    }
+
+    fn host(value: &str) -> HeaderMap {
+        let mut headers = HeaderMap::new();
+        if !value.is_empty() {
+            headers.insert(
+                HOST,
+                axum::http::HeaderValue::from_str(value).expect("a valid header"),
+            );
+        }
+        headers
+    }
+
+    #[test]
+    fn a_return_to_this_instance_is_allowed() {
+        assert!(returns_here(
+            "http://afisharr.example/login",
+            Scheme::Http,
+            &host("afisharr.example"),
+        ));
+        assert!(returns_here(
+            "https://afisharr.example:8484/login?x=1",
+            Scheme::Https,
+            &host("afisharr.example:8484"),
+        ));
+    }
+
+    #[test]
+    fn a_return_to_somebody_else_is_refused() {
+        // The hole this closes: the caller posts `forwardUrl`, the endpoint
+        // embeds it in a genuine `app.plex.tv/auth` URL, and whoever finishes
+        // the sign-in lands on the attacker's page.
+        for target in [
+            "https://evil.example",
+            "https://evil.example/afisharr.example",
+            "https://afisharr.example.evil.example/login",
+            "https://afisharr.example@evil.example/login",
+            "//evil.example/login",
+            "javascript:alert(1)",
+            "data:text/html,<script></script>",
+            "not a url",
+        ] {
+            assert!(
+                !returns_here(target, Scheme::Https, &host("afisharr.example")),
+                "{target} must not be treated as this instance"
+            );
+        }
+    }
+
+    #[test]
+    fn a_default_port_and_its_spelling_are_one_instance() {
+        assert!(returns_here(
+            "https://afisharr.example:443/login",
+            Scheme::Https,
+            &host("afisharr.example"),
+        ));
+    }
+
+    #[test]
+    fn the_scheme_the_request_arrived_over_is_part_of_the_comparison() {
+        // A plaintext hop must not mint a return to an `https` origin it cannot
+        // prove it is, and vice versa: the scheme comes from the resolved
+        // client context, which is where a forwarded claim is judged.
+        assert!(!returns_here(
+            "https://afisharr.example/login",
+            Scheme::Http,
+            &host("afisharr.example"),
+        ));
+        assert!(!returns_here(
+            "http://afisharr.example/login",
+            Scheme::Https,
+            &host("afisharr.example"),
+        ));
+    }
+
+    #[test]
+    fn a_request_with_no_host_to_compare_against_proves_nothing() {
+        assert!(!returns_here(
+            "https://afisharr.example/login",
+            Scheme::Https,
+            &host(""),
+        ));
     }
 }

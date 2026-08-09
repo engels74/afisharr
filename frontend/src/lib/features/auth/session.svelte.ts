@@ -20,6 +20,15 @@ export type SessionState =
 export interface Session {
 	/** What is known right now. */
 	readonly state: SessionState;
+	/**
+	 * Whether an answer is in flight.
+	 *
+	 * The shell guard reads this before it acts on `signedOut`, because a
+	 * refusal recorded on the previous route is still the state during the
+	 * request that will replace it — and redirecting on it sends the operator
+	 * who has just signed in straight back to the sign-in page.
+	 */
+	readonly refreshing: boolean;
 	/** Asks the API who is signed in. */
 	refresh(): Promise<void>;
 	/** Records a sign-in that just happened, without a second round trip. */
@@ -38,18 +47,28 @@ export interface Session {
  */
 export function createSession(): Session {
 	let state = $state<SessionState>({ kind: 'unknown' });
+	let inFlight = $state(0);
 
 	return {
 		get state() {
 			return state;
 		},
 
+		get refreshing() {
+			return inFlight > 0;
+		},
+
 		async refresh(): Promise<void> {
-			const result = await readSession();
-			state =
-				result.outcome === 'ok'
-					? { kind: 'signedIn', account: result.value }
-					: { kind: 'signedOut' };
+			inFlight += 1;
+			try {
+				const result = await readSession();
+				state =
+					result.outcome === 'ok'
+						? { kind: 'signedIn', account: result.value }
+						: { kind: 'signedOut' };
+			} finally {
+				inFlight -= 1;
+			}
 		},
 
 		adopt(account: SignedIn): void {
@@ -61,3 +80,19 @@ export function createSession(): Session {
 		},
 	};
 }
+
+/**
+ * The session this document is signed in with.
+ *
+ * One value at module scope, because a session is a fact about the browsing
+ * context rather than about a component. The two halves of a sign-in happen in
+ * different places — the login route learns who the operator is, the layout
+ * decides what to render — and a session held per component would leave the
+ * layout redirecting on the refusal it recorded before the sign-in it never
+ * heard about (P1). Same shape, and the same reason, as the provenance the
+ * footer reads.
+ *
+ * {@link createSession} stays exported for tests, which need one that starts
+ * with nothing asked.
+ */
+export const session = createSession();

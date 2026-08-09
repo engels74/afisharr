@@ -238,36 +238,6 @@ impl WriteOperation for UpsertPlexUser {
     }
 }
 
-/// Replaces one account's password hash.
-#[derive(Debug)]
-pub struct SetPassword {
-    /// The account being changed.
-    pub user_id: String,
-    /// The new Argon2id PHC string.
-    pub password_hash: String,
-    /// The instant of the write.
-    pub at: Timestamp,
-}
-
-impl WriteOperation for SetPassword {
-    type Output = bool;
-
-    async fn execute(self, conn: &mut SqliteConnection) -> Result<bool, sqlx::Error> {
-        let at = self.at.as_millis();
-        let affected = sqlx::query!(
-            "UPDATE users SET password_hash = ?2, updated_at = ?3
-             WHERE id = ?1 AND kind = 'Local'",
-            self.user_id,
-            self.password_hash,
-            at
-        )
-        .execute(&mut *conn)
-        .await?
-        .rows_affected();
-        Ok(affected == 1)
-    }
-}
-
 /// Records that an account signed in.
 #[derive(Debug)]
 pub struct TouchLastLogin {

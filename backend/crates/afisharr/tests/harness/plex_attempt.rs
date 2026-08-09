@@ -41,7 +41,9 @@ impl Attempt {
     pub async fn start_in(client: Client, running: &RunningInstance, oauth: bool) -> Self {
         let mut body = serde_json::json!({ "oauth": oauth });
         if oauth {
-            body["forwardUrl"] = serde_json::json!("https://afisharr.example/login");
+            // This instance's own address, which is what a browser sends and
+            // the only target the endpoint forwards an operator back to.
+            body["forwardUrl"] = serde_json::json!(format!("{}/login", running.base_url));
         }
         let response = client
             .post(format!("{}/api/auth/plex/pin", running.base_url))

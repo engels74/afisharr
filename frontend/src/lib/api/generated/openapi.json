@@ -128,7 +128,7 @@
             }
           },
           "400": {
-            "description": "The request body was not readable",
+            "description": "The request body was not readable, or the return target is not this instance",
             "content": {
               "application/json": {
                 "schema": {
@@ -584,7 +584,7 @@
           "settings"
         ],
         "summary": "Changes the signed-in account's password.",
-        "description": "Everything PRD §21.4.2 asks for happens here and happens together: the\ncurrent password is re-verified, the new hash is written, every other\nsession for the account is revoked, and this session's identifier is\nrotated. Rotation is not decoration — a session identifier that survives a\npassword change survives the theft the change was made to end.",
+        "description": "Everything PRD §21.4.2 asks for happens here and happens together, in one\ntransaction: the current password is re-verified, the new hash is written,\nevery session for the account is revoked, and a replacement is inserted for\nthe browser that asked. Rotation is not decoration — a session identifier\nthat survives a password change survives the theft the change was made to\nend — and a rotation split across separate commits has a window in which\nexactly that is true.",
         "operationId": "change_password",
         "requestBody": {
           "content": {
@@ -619,6 +619,16 @@
           },
           "401": {
             "description": "The current password was not accepted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "That account has no password to change",
             "content": {
               "application/json": {
                 "schema": {
@@ -1681,7 +1691,7 @@
               "string",
               "null"
             ],
-            "description": "Where plex.tv returns the operator, for the OAuth variant."
+            "description": "Where plex.tv returns the operator, for the OAuth variant.\n\nIt must name this instance. plex.tv redirects to whatever this asks\nfor, so a target anywhere else turns the endpoint into a redirector\nwearing a legitimate `app.plex.tv/auth` URL, and the operator who\ncompletes the sign-in lands on somebody else's page."
           },
           "oauth": {
             "type": "boolean",

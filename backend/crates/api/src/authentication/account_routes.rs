@@ -11,8 +11,8 @@
 #![allow(clippy::missing_errors_doc)]
 
 use afisharr_core::{
-    accounts::{self, SetPassword},
-    sessions::{self, Session},
+    accounts::{self, PasswordRotation, RotatePassword},
+    sessions::{self, Session, SessionToken},
 };
 use axum::{
     Json,
@@ -82,11 +82,13 @@ pub struct SessionView {
 
 /// Changes the signed-in account's password.
 ///
-/// Everything PRD §21.4.2 asks for happens here and happens together: the
-/// current password is re-verified, the new hash is written, every other
-/// session for the account is revoked, and this session's identifier is
-/// rotated. Rotation is not decoration — a session identifier that survives a
-/// password change survives the theft the change was made to end.
+/// Everything PRD §21.4.2 asks for happens here and happens together, in one
+/// transaction: the current password is re-verified, the new hash is written,
+/// every session for the account is revoked, and a replacement is inserted for
+/// the browser that asked. Rotation is not decoration — a session identifier
+/// that survives a password change survives the theft the change was made to
+/// end — and a rotation split across separate commits has a window in which
+/// exactly that is true.
 #[utoipa::path(
     post,
     path = "/api/settings/password",
@@ -96,6 +98,7 @@ pub struct SessionView {
         (status = 200, description = "The password is changed", body = PasswordChanged),
         (status = 400, description = "The new password was refused", body = Problem),
         (status = 401, description = "The current password was not accepted", body = Problem),
+        (status = 409, description = "That account has no password to change", body = Problem),
     ),
 )]
 pub async fn change_password(
@@ -144,44 +147,51 @@ pub async fn change_password(
     let hashed = accounts::hash(request.new_password)
         .await
         .map_err(AppError::internal)?;
-    state
+
+    // One transaction, and the cookies are attached only after it commits. The
+    // three writes are the rotation guarantee: a password that changed while
+    // the identifiers it protected stayed valid has ended nothing, including
+    // the theft the operator performed it to end (PRD §21.4.2).
+    let replacement = SessionToken::generate();
+    let rotated = state
         .database()
         .writer()
-        .submit(SetPassword {
+        .submit(RotatePassword {
             user_id: user.id.clone(),
             password_hash: hashed,
+            current_session: caller.session_digest().map(str::to_owned),
+            replacement_digest: replacement.digest().to_owned(),
+            user_agent: headers
+                .get(USER_AGENT)
+                .and_then(|value| value.to_str().ok())
+                .map(str::to_owned),
+            ip: Some(client.address.to_string()),
             at: state.clock().now(),
         })
         .await
         .map_err(AppError::internal)?;
 
-    // Every session for the account, including the one making this request:
-    // the replacement is minted below, so the identifier the operator's browser
-    // held before the change is worthless afterwards.
-    let sessions_revoked = session::revoke_others(&state, &user.id, None).await?;
-
-    let issued = session::issue(
-        &state,
-        &user.id,
-        client,
-        headers
-            .get(USER_AGENT)
-            .and_then(|value| value.to_str().ok())
-            .map(str::to_owned),
-    )
-    .await?;
+    let PasswordRotation::Rotated { others_revoked } = rotated else {
+        // The account was read and its current password verified a moment ago,
+        // so finding no local row to change means it was deleted or disabled in
+        // between. Nothing was written.
+        return Err(AppError::of(
+            ErrorCode::Conflict,
+            "That account can no longer be changed. Sign in again.",
+        ));
+    };
 
     let mut jar = jar;
-    for cookie in issued.cookies {
+    for cookie in session::cookies_for(&replacement, client.scheme) {
         jar = jar.add(cookie);
     }
     Ok((
         jar,
         Json(PasswordChanged {
-            // The rotated-away session is this one, and reporting it as
-            // "revoked elsewhere" would overstate what happened on other
-            // devices by exactly one.
-            sessions_revoked: sessions_revoked.saturating_sub(1),
+            // The caller's own rotated-away session is not one of these:
+            // counting it would overstate what happened on other devices by
+            // exactly one, and an API-key caller has none to count at all.
+            sessions_revoked: others_revoked,
         }),
     ))
 }

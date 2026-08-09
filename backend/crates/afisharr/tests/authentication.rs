@@ -240,6 +240,25 @@ async fn a_password_change_revokes_every_other_session() {
     let unrevoked = live.iter().filter(|s| s.revoked_at.is_none()).count();
     assert_eq!(unrevoked, 1, "exactly one session should survive");
 
+    // The password and the revocations are one commit, so the new password is
+    // in force exactly where the old identifiers are not: a change that landed
+    // by halves would leave one of these two assertions false.
+    let returning = browser();
+    assert_eq!(
+        returning
+            .post(format!("{}/api/auth/login", running.base_url))
+            .json(&serde_json::json!({
+                "username": "operator",
+                "password": "a different long enough password",
+            }))
+            .send()
+            .await
+            .expect("the login route must answer")
+            .status(),
+        StatusCode::OK,
+        "the new password must be the one in force"
+    );
+
     running.stop().await;
 }
 
