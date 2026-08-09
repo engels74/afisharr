@@ -31,16 +31,15 @@ pub struct LogGuard {
 /// with the jobs surface. Two different readers, two different stores.
 ///
 /// # Errors
-/// Returns an error when the log directory cannot be created.
+/// Returns an error when the log directory cannot be created, or when the
+/// configured filter is not a tracing directive.
 pub fn init(directory: &Path, filter: &str) -> Result<LogGuard> {
     std::fs::create_dir_all(directory)
         .with_context(|| format!("creating the log directory {}", directory.display()))?;
 
     let (writer, guard) = tracing_appender::non_blocking(rolling::daily(directory, "afisharr.log"));
 
-    let filter = EnvFilter::try_new(filter)
-        .or_else(|_| EnvFilter::try_new("info"))
-        .with_context(|| format!("the log filter '{filter}' is not a tracing directive"))?;
+    let filter = parse_filter(filter)?;
 
     tracing_subscriber::registry()
         .with(filter)
@@ -49,4 +48,36 @@ pub fn init(directory: &Path, filter: &str) -> Result<LogGuard> {
         .init();
 
     Ok(LogGuard { worker: guard })
+}
+
+/// Parses a configured `logging.level` into a filter, or refuses it.
+///
+/// A directive that will not parse is an operator's typo, and the rest of the
+/// configuration surface rejects those rather than ignoring them
+/// (`deny_unknown_fields` on `SettingsBody`). Falling back to a default here
+/// would start the instance under a filter nobody asked for, with no signal
+/// that the configured one had been discarded.
+fn parse_filter(filter: &str) -> Result<EnvFilter> {
+    EnvFilter::try_new(filter)
+        .with_context(|| format!("the log filter '{filter}' is not a tracing directive"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_directive_the_filter_understands_is_accepted() {
+        assert!(parse_filter("afisharr_core=debug,info").is_ok());
+    }
+
+    #[test]
+    fn a_directive_that_will_not_parse_is_an_error_naming_it() {
+        let error = format!(
+            "{:#}",
+            parse_filter("afisharr_core=verbose")
+                .expect_err("an unparseable filter must not be silently replaced")
+        );
+        assert!(error.contains("afisharr_core=verbose"), "{error}");
+    }
 }
