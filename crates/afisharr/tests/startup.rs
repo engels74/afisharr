@@ -97,9 +97,10 @@ async fn the_client_identifier_survives_a_restart_unchanged() {
     let instance = TempInstance::new();
 
     let first = instance.boot().await;
-    let (instance_id, client_identifier) = (
+    let (instance_id, client_identifier, first_started_at) = (
         first.instance.instance_id.clone(),
         first.instance.client_identifier.clone(),
+        first.instance.first_started_at,
     );
     first.database.close().await;
 
@@ -109,12 +110,11 @@ async fn the_client_identifier_survives_a_restart_unchanged() {
         second.instance.client_identifier, client_identifier,
         "plex.tv binds tokens to this value; regenerating it orphans every one of them"
     );
-    assert_eq!(second.instance.first_started_at, first_started_at(&second));
+    assert_eq!(
+        second.instance.first_started_at, first_started_at,
+        "the installation's first start is recorded once, not reset by every restart"
+    );
     second.database.close().await;
-}
-
-fn first_started_at(booted: &afisharr::startup::Booted) -> afisharr_core::time::Timestamp {
-    booted.instance.first_started_at
 }
 
 #[tokio::test]

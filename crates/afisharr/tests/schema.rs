@@ -149,9 +149,22 @@ async fn a_second_whole_title_subject_for_one_identity_is_rejected_by_the_index(
         .await
         .expect_err("a second subject for the same identity must be refused");
 
+    let database_error = match &refusal {
+        afisharr_core::storage::StorageError::Statement(error) => error
+            .as_database_error()
+            .expect("the refusal must carry SQLite's own error, not a wrapper"),
+        other => panic!("the refusal must come from the statement: {other:?}"),
+    };
     assert!(
-        refusal.to_string().contains("statement") || format!("{refusal:?}").contains("UNIQUE"),
-        "the refusal must come from the index, not from application code: {refusal:?}"
+        database_error.is_unique_violation(),
+        "the refusal must come from the index, not from application code: {database_error:?}"
+    );
+    assert!(
+        database_error
+            .message()
+            .contains("ux_lifecycle_subjects__identity"),
+        "the refusal must name the identity index rather than any other unique constraint: \
+         {database_error:?}"
     );
 
     let subjects: i64 = sqlx::query_scalar("SELECT count(*) FROM lifecycle_subjects")
