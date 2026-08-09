@@ -8,7 +8,10 @@ use std::fmt;
 use thiserror::Error;
 use ulid::Ulid;
 
-use crate::time::{Clock, Timestamp};
+use crate::{
+    entropy,
+    time::{Clock, Timestamp},
+};
 
 /// Why a string is not a ULID.
 #[derive(Debug, Error, PartialEq, Eq)]
@@ -84,11 +87,7 @@ impl fmt::Display for Id {
 
 /// The 80 random bits of a ULID, drawn from the OS CSPRNG.
 fn rand_128() -> u128 {
-    let mut bytes = [0u8; 16];
-    // getrandom fails only when the OS entropy source is unavailable, which on
-    // every supported platform (PRD §21.5) means the process cannot continue.
-    getrandom::fill(&mut bytes).expect("the OS CSPRNG is available on every supported platform");
-    u128::from_be_bytes(bytes)
+    u128::from_be_bytes(entropy::bytes::<16>())
 }
 
 #[cfg(test)]

@@ -16,15 +16,22 @@
 /// rather than one number that only describes the binary.
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 
+pub mod accounts;
+pub mod api_keys;
 pub mod backup;
 pub mod digest;
+pub mod entropy;
+pub mod filesystem;
 pub mod identifier;
 pub mod instance;
 pub mod integrity;
 pub mod leases;
 pub mod lifecycle;
+pub mod locale;
 pub mod projection;
 pub mod secrets;
+pub mod sessions;
 pub mod settings;
+pub mod setup;
 pub mod storage;
 pub mod time;

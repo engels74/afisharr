@@ -5,6 +5,24 @@
 # AGPL-3.0-or-later, so every dependency must be GPL-compatible, and a
 # transitive crate can introduce an incompatible licence without anyone noticing.
 
+# The graph is the platforms PRD §21.5 ships, and no others. Left unscoped,
+# cargo-deny resolves every target in the lockfile — Android, wasm, and the
+# rest — and can refuse the tree over a crate that is never compiled into
+# anything Afisharr publishes. That is a licence check reporting on software
+# the project does not distribute, which is the one thing it must not do.
+#
+# `linux/armv7` is deliberately absent: §21.5 records it as unsupported.
+[graph]
+targets = [
+  "x86_64-unknown-linux-gnu",
+  "aarch64-unknown-linux-gnu",
+  "x86_64-unknown-linux-musl",
+  "aarch64-unknown-linux-musl",
+  "aarch64-apple-darwin",
+  "x86_64-apple-darwin",
+  "x86_64-pc-windows-msvc",
+]
+
 [advisories]
 yanked = "deny"
 

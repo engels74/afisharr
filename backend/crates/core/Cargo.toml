@@ -14,6 +14,7 @@ repository.workspace = true
 authors.workspace = true
 
 [dependencies]
+argon2.workspace = true
 chacha20poly1305 = { workspace = true }
 getrandom.workspace = true
 hex.workspace = true
@@ -22,6 +23,7 @@ serde = { workspace = true }
 serde_json = { workspace = true }
 sha2.workspace = true
 sqlx = { workspace = true }
+subtle.workspace = true
 thiserror = { workspace = true }
 # `fs` is used directly by `backup` and `storage`. Declared rather than taken
 # from sqlx's `runtime-tokio`, which enables it today: a crate that compiles on

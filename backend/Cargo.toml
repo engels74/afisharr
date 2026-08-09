@@ -22,16 +22,29 @@ afisharr-render = { path = "crates/render", version = "0.1.0" }
 afisharr-sources = { path = "crates/sources", version = "0.1.0" }
 
 anyhow = "1.0"
+argon2 = "0.5.3"
+axum = "0.8.9"
+axum-extra = { version = "0.12.6", features = ["cookie"] }
 chacha20poly1305 = "0.11"
 clap = { version = "4.6", features = ["derive"] }
 getrandom = "0.4"
 hex = "0.4"
+ipnet = "2.12.1"
+mime_guess = "2.0.5"
+# rustls rather than the platform's TLS: PRD §21.5 supports Linux, macOS, and
+# Windows from one build, and a native-tls dependency makes the container image
+# carry an OpenSSL the base layer may not ship.
+reqwest = { version = "0.13.4", default-features = false, features = [
+  "json",
+  "rustls",
+] }
 # rusqlite is present for exactly one thing: SQLite's online backup API, which
 # PRD §19.3 requires instead of a file copy and which sqlx does not expose
 # without raw FFI (forbidden by `unsafe_code = "forbid"`). Pinned to the release
 # that shares `libsqlite3-sys` 0.35 with sqlx 0.9 — `links` permits only one
 # build of the C library in the graph.
 rusqlite = { version = "0.37", features = ["backup"] }
+rust-embed = { version = "8.12.0", features = ["interpolate-folder-path"] }
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.151"
 sha2 = "0.11"
@@ -41,13 +54,18 @@ sqlx = { version = "0.9", default-features = false, features = [
   "runtime-tokio",
   "sqlite",
 ] }
+subtle = "2.6.1"
 thiserror = "2.0"
 tokio = { version = "1.52", features = ["macros", "rt-multi-thread", "sync"] }
+tokio-stream = { version = "0.1.19", features = ["sync"] }
 toml = "1.1"
+tower = "0.5.3"
 tracing = "0.1"
 tracing-appender = "0.2"
 tracing-subscriber = { version = "0.3.23", features = ["env-filter", "json"] }
 ulid = "3.0"
+url = "2.5.8"
+utoipa = { version = "5.5.0", features = ["axum_extras"] }
 
 [workspace.lints.rust]
 unsafe_code = "forbid"
