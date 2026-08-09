@@ -6,6 +6,7 @@
 	import { goto } from '$app/navigation';
 	import { api } from '$lib/api/client';
 	import { LoadingState } from '$lib/components/state';
+	import { landingFor } from '$lib/features/navigation';
 	import { recordProvenance } from '$lib/shared/provenance';
 
 	let startedAt = Date.now();
@@ -20,9 +21,7 @@
 	async function route() {
 		const { data } = await api.GET('/api/health');
 		recordProvenance({ version: data?.version });
-		await goto(data?.setupCompleted ? '/dashboard' : '/setup', {
-			replaceState: true,
-		});
+		await goto(landingFor(data?.setupCompleted ?? false), { replaceState: true });
 	}
 
 	$effect(() => {

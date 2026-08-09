@@ -34,7 +34,29 @@ async fn a_page_route_is_answered_by_the_embedded_shell() {
 
     // A deep link on a full page load: the shell answers, and the client
     // router reads the URL and renders the right route.
-    for path in ["/", "/dashboard", "/settings/plex", "/setup"] {
+    // Every one of the six primary destinations plus Settings and its
+    // sub-pages, plus the first-run journey: Task 1.11 asks that each resolves
+    // to a routed page rather than a 404.
+    for path in [
+        "/",
+        "/dashboard",
+        "/collections",
+        "/design",
+        "/home-screen",
+        "/lifecycle",
+        "/doctor",
+        "/settings",
+        "/settings/plex",
+        "/settings/integrations",
+        "/settings/libraries",
+        "/settings/users",
+        "/settings/general",
+        "/settings/teardown",
+        "/settings/about",
+        "/setup",
+        "/setup/admin",
+        "/login",
+    ] {
         let response = client
             .get(format!("{}{path}", running.base_url))
             .send()

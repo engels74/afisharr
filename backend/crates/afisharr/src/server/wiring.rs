@@ -39,6 +39,23 @@ fn user_agent(version: &str) -> String {
 /// as HTTP headers, when the outbound transport cannot be constructed, or when
 /// the enabled asset roots cannot be read.
 pub async fn build_state(booted: &Booted, bootstrap: Arc<TokenStore>) -> Result<ApiState> {
+    build_state_against(booted, bootstrap, None).await
+}
+
+/// The same, with plex.tv's API root chosen by the caller.
+///
+/// `None` is plex.tv, and is what the binary passes. The parameter exists
+/// because the PIN exchange is otherwise untestable without the real service,
+/// and because the adversarial fake (D-036) is what every phase from Phase 4
+/// onward tests against.
+///
+/// # Errors
+/// As [`build_state`].
+pub async fn build_state_against(
+    booted: &Booted,
+    bootstrap: Arc<TokenStore>,
+    plex_base: Option<&str>,
+) -> Result<ApiState> {
     let clock: Arc<dyn Clock> = Arc::new(SystemClock);
 
     let trusted_proxies = TrustedProxies::parse(&booted.settings.body.http.trust_proxy)
@@ -78,7 +95,10 @@ pub async fn build_state(booted: &Booted, bootstrap: Arc<TokenStore>) -> Result<
         },
         secret_key: Arc::clone(&booted.secret_key),
         bootstrap,
-        plex: PlexTvClient::new(outbound, plex_identity),
+        plex: match plex_base {
+            Some(base) => PlexTvClient::against(outbound, plex_identity, base),
+            None => PlexTvClient::new(outbound, plex_identity),
+        },
         trusted_proxies,
         asset_roots,
         assets,

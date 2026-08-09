@@ -11,4 +11,4 @@ mod listener;
 mod wiring;
 
 pub use listener::{Serving, serve};
-pub use wiring::build_state;
+pub use wiring::{build_state, build_state_against};

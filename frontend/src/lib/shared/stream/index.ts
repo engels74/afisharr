@@ -12,7 +12,12 @@
 import DisconnectionIndicator from './disconnection-indicator.svelte';
 
 export type { StreamStatus } from './backoff';
-export { BASE_DELAY_MS, backoffDelayMs, MAX_DELAY_MS } from './backoff';
+export {
+	BASE_DELAY_MS,
+	backoffDelayMs,
+	MAX_DELAY_MS,
+	watchdogDelayMs,
+} from './backoff';
 export type { TopicHandler } from './connection.svelte';
 export { StreamConnection } from './connection.svelte';
 export { DisconnectionIndicator };

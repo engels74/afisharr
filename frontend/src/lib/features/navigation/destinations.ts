@@ -56,3 +56,19 @@ export function isActive(destination: Destination, pathname: string): boolean {
 		pathname === destination.href || pathname.startsWith(`${destination.href}/`)
 	);
 }
+
+/**
+ * Where a bare visit to `/` lands.
+ *
+ * An unclaimed instance boots to the claim page and nowhere else (D-045): the
+ * six destinations behind it are refused anyway, and sending an operator to a
+ * dashboard that answers `setupRequired` teaches them the product is broken
+ * rather than unconfigured.
+ *
+ * A function rather than a branch inside the route, because "where does a
+ * fresh instance land" is the question Task 1.11 is answerable on, and a
+ * branch inside a component is a question nothing can ask.
+ */
+export function landingFor(setupCompleted: boolean): string {
+	return setupCompleted ? '/dashboard' : '/setup';
+}

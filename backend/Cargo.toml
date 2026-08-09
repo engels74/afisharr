@@ -51,7 +51,14 @@ reqwest = { version = "0.13.4", default-features = false, features = [
 # that shares `libsqlite3-sys` 0.35 with sqlx 0.9 — `links` permits only one
 # build of the C library in the graph.
 rusqlite = { version = "0.37", features = ["backup"] }
-rust-embed = { version = "8.12.0", features = ["interpolate-folder-path"] }
+# `debug-embed` so a debug build serves the same bytes a release build does.
+# Without it rust-embed reads `frontend/build` off disk in debug, and the one
+# thing that must not differ between the two is the document the CSP hash is
+# computed from (§21.4.4).
+rust-embed = { version = "8.12.0", features = [
+  "debug-embed",
+  "interpolate-folder-path",
+] }
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.151"
 serde_urlencoded = "0.7.1"

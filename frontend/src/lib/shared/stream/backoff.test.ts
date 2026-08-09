@@ -2,7 +2,12 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 import { describe, expect, test } from 'bun:test';
-import { BASE_DELAY_MS, backoffDelayMs, MAX_DELAY_MS } from './backoff';
+import {
+	BASE_DELAY_MS,
+	backoffDelayMs,
+	MAX_DELAY_MS,
+	watchdogDelayMs,
+} from './backoff';
 
 /** A deterministic "random" so the bands can be asserted exactly. */
 const lowest = () => 0;
@@ -40,5 +45,23 @@ describe('reconnection backoff', () => {
 		const high = backoffDelayMs(5, highest);
 		expect(low).toBeLessThan(high);
 		expect(high / low).toBeCloseTo(2, 1);
+	});
+});
+
+describe('the disconnection watchdog', () => {
+	test('fires just past one missed heartbeat at the server default', () => {
+		// 15s between beats: the next is due at 15s, and 18s is past it.
+		expect(watchdogDelayMs(15_000)).toBe(18_000);
+	});
+
+	test('scales with whatever interval the server states', () => {
+		expect(watchdogDelayMs(5000)).toBe(6000);
+		expect(watchdogDelayMs(30_000)).toBe(36_000);
+	});
+
+	test('never fires before the heartbeat it is waiting for', () => {
+		for (const heartbeat of [10, 100, 1000, 15_000, 60_000]) {
+			expect(watchdogDelayMs(heartbeat)).toBeGreaterThan(heartbeat);
+		}
 	});
 });

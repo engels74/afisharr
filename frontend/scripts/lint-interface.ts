@@ -16,6 +16,10 @@
  *    a page that re-derives one from `response.status` or from an array's
  *    length reintroduces in the client exactly the flattening the engine was
  *    built to avoid.
+ * 3. **No hand-written request** (§24.5). The generated client is the sole
+ *    contract between the two surfaces. A `fetch` with an ad hoc URL is a
+ *    second description of the API, and the one that drifts is the one nobody
+ *    regenerated.
  */
 
 import { Glob } from 'bun';
@@ -56,6 +60,10 @@ const STATUS_SWITCH = /switch\s*\(\s*[A-Za-z_$][\w$]*\.status\s*\)/;
 /** Deciding a display state from how many things came back. */
 const LENGTH_BRANCH =
 	/\b(?:if|\?|&&|\|\|)\s*\(?\s*[A-Za-z_$][\w$.]*\.length\s*(?:===|!==|==|!=|>|<|>=|<=)\s*0/;
+
+/** A request made without the generated client. */
+const HAND_WRITTEN_REQUEST =
+	/\b(?:fetch|XMLHttpRequest|axios)\s*\(|new\s+XMLHttpRequest\b/;
 
 /** A line the author has explicitly exempted, with a reason. */
 const ALLOW = /afisharr-lint-ignore:\s*(\S+)\s+(.+)/;
@@ -126,6 +134,13 @@ function check(file: string, contents: string): Finding[] {
 			}
 		}
 
+		if (HAND_WRITTEN_REQUEST.test(source)) {
+			record(
+				'no-hand-written-request',
+				'a request made without the generated client',
+			);
+		}
+
 		if (STATUS_BRANCH.test(source) || STATUS_SWITCH.test(source)) {
 			record('no-status-branch', 'a display decision read from an HTTP status');
 		}
@@ -160,8 +175,9 @@ async function main(): Promise<number> {
 	}
 	console.error(
 		`\n${findings.length} interface-rule violation(s).\n` +
-			'Route user-facing text through the catalogue (t/tn), and read the state ' +
-			'the API returned instead of inferring one.\n' +
+			'Route user-facing text through the catalogue (t/tn), read the state the ' +
+			'API returned instead of inferring one, and call the API through the ' +
+			'generated client.\n' +
 			'A line that genuinely must be exempt carries ' +
 			'`afisharr-lint-ignore: <rule> <reason>`.',
 	);

@@ -6,5 +6,11 @@
 import NavShell from './nav-shell.svelte';
 
 export type { Destination } from './destinations';
-export { isActive, PRIMARY, SETTINGS, SETTINGS_SUBPAGES } from './destinations';
+export {
+	isActive,
+	landingFor,
+	PRIMARY,
+	SETTINGS,
+	SETTINGS_SUBPAGES,
+} from './destinations';
 export { NavShell };

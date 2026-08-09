@@ -19,9 +19,11 @@ const FINGERPRINTED: &str = "_app/immutable/";
 
 /// The built SPA, as files.
 ///
-/// `debug-embed` is not enabled: a debug build reads `frontend/build` from disk
-/// at runtime, so `bun run dev`-style iteration does not need a Rust rebuild,
-/// while the release binary carries the bytes.
+/// `debug-embed` is on, so a debug build carries the same bytes a release build
+/// does. Reading from disk in debug would make the one thing that must not
+/// differ between the two — the document the CSP hash is computed from — differ
+/// between them. `build.rs` reruns on the directory, so a `bun run build`
+/// followed by `cargo build` picks the new bundle up.
 #[derive(Embed)]
 #[folder = "$CARGO_MANIFEST_DIR/../../../frontend/build"]
 struct BuiltSpa;

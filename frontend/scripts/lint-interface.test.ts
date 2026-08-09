@@ -87,6 +87,28 @@ describe('the inferred-state rule', () => {
 	});
 });
 
+describe('the generated-client rule', () => {
+	test('catches a hand-written fetch', () => {
+		const findings = check('a.ts', "const r = await fetch('/api/health');");
+		expect(rules(findings)).toEqual(['no-hand-written-request']);
+	});
+
+	test('catches an XMLHttpRequest', () => {
+		const findings = check('a.ts', 'const x = new XMLHttpRequest();');
+		expect(rules(findings)).toEqual(['no-hand-written-request']);
+	});
+
+	test('passes a call through the generated client', () => {
+		const findings = check('a.ts', "await api.GET('/api/health');");
+		expect(findings).toEqual([]);
+	});
+
+	test('passes the word fetch in prose', () => {
+		const findings = check('a.ts', '// refetch on reconnect, never replay');
+		expect(findings).toEqual([]);
+	});
+});
+
 describe('what counts as user-facing text', () => {
 	test('a sentence does', () => {
 		expect(isUserFacing('Nothing has run yet.')).toBe(true);

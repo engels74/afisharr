@@ -7,11 +7,15 @@ exact = true
 
 [test]
 preload = ["./test-setup.ts"]
-# `*.svelte.test.ts` is the browser lane's suffix, whatever it covers —
-# components and rune modules alike. That lane is `vitest.config.ts`, which is
-# where `vitest-browser-svelte` is set up. `bun test` matches any `*.test.ts`,
-# so without this the first such file runs twice: once in chromium and once
+# `*.svelte.test.ts` is the browser lane's suffix, and it means one thing: the
+# test renders a component. That lane is `vitest.config.ts`, where
+# `vitest-browser-svelte` is set up. `bun test` matches any `*.test.ts`, so
+# without this a component test would run twice — once in chromium and once
 # here under happy-dom, where rendering was never wired.
+#
+# A rune module's test keeps the plain `.test.ts` suffix even though the module
+# it covers is `x.svelte.ts`, because it belongs in this lane (§24.3.10) and the
+# suffix is what the two lanes divide on.
 pathIgnorePatterns = ["**/*.svelte.test.ts"]
 coverage = true
 coverageReporter = ["text", "lcov"]

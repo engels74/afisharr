@@ -3,7 +3,13 @@
 
 import { describe, expect, test } from 'bun:test';
 import { en } from '$lib/shared/i18n/catalogue.en';
-import { isActive, PRIMARY, SETTINGS, SETTINGS_SUBPAGES } from './destinations';
+import {
+	isActive,
+	landingFor,
+	PRIMARY,
+	SETTINGS,
+	SETTINGS_SUBPAGES,
+} from './destinations';
 
 describe('the navigation model', () => {
 	test('there are six primary destinations plus settings', () => {
@@ -51,5 +57,21 @@ describe('active marking', () => {
 
 	test('an unrelated path is not active', () => {
 		expect(isActive(SETTINGS, '/doctor')).toBe(false);
+	});
+});
+
+describe('where a bare visit lands', () => {
+	test('an unclaimed instance boots directly to the claim page', () => {
+		expect(landingFor(false)).toBe('/setup');
+	});
+
+	test('a configured instance boots to the dashboard', () => {
+		expect(landingFor(true)).toBe('/dashboard');
+	});
+
+	test('the landing is one of the routes the shell actually serves', () => {
+		const routed = [...PRIMARY.map((entry) => entry.href), '/setup'];
+		expect(routed).toContain(landingFor(true));
+		expect(routed).toContain(landingFor(false));
 	});
 });

@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2026 Afisharr contributors
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-import { backoffDelayMs, type StreamStatus } from './backoff';
+import { backoffDelayMs, type StreamStatus, watchdogDelayMs } from './backoff';
 
 /** A handler for one topic's events. */
 export type TopicHandler = (payload: unknown) => void;
@@ -11,9 +11,6 @@ interface StreamOpened {
 	heartbeatSeconds: number;
 	topics: string[];
 }
-
-/** How much longer than the heartbeat to wait before saying so. */
-const WATCHDOG_SLACK_MS = 3000;
 
 /**
  * The one multiplexed connection.
@@ -137,14 +134,13 @@ export class StreamConnection {
 	 * Restarts the "one missed heartbeat" timer.
 	 *
 	 * The interval comes from the server's opening event rather than from a
-	 * constant here, so the two cannot drift apart. The slack absorbs a slow
-	 * network without hiding a dead connection.
+	 * constant here, so the two cannot drift apart.
 	 */
 	#armWatchdog(): void {
 		clearTimeout(this.#watchdog);
 		this.#watchdog = setTimeout(() => {
 			this.status = 'disconnected';
-		}, this.#heartbeatMs + WATCHDOG_SLACK_MS);
+		}, watchdogDelayMs(this.#heartbeatMs));
 	}
 
 	#dropAndRetry(url: string): void {

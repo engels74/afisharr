@@ -35,6 +35,19 @@ impl RunningInstance {
 
     /// The same, with a settings document of the test's own.
     pub async fn start_with(instance: &TempInstance, configured: SettingsBody) -> Self {
+        Self::start_full(instance, configured, None).await
+    }
+
+    /// The same, pointed at a stand-in for plex.tv.
+    pub async fn start_against_plex(instance: &TempInstance, plex_base: &str) -> Self {
+        Self::start_full(instance, SettingsBody::default(), Some(plex_base)).await
+    }
+
+    async fn start_full(
+        instance: &TempInstance,
+        configured: SettingsBody,
+        plex_base: Option<&str>,
+    ) -> Self {
         let booted = instance.boot_with(configured).await;
 
         let bootstrap = Arc::new(TokenStore::empty());
@@ -44,7 +57,7 @@ impl RunningInstance {
             .is_none()
             .then(|| bootstrap.mint(&SystemClock));
 
-        let state = server::build_state(&booted, Arc::clone(&bootstrap))
+        let state = server::build_state_against(&booted, Arc::clone(&bootstrap), plex_base)
             .await
             .expect("the router's state must assemble");
         let serving = server::serve("127.0.0.1", 0)

@@ -13,11 +13,13 @@
 )]
 
 mod fixtures;
+mod plex_tv_stub;
 mod running_instance;
 mod temp_instance;
 
 pub use fixtures::{
     InsertIdMapping, InsertLifecycleSubject, InsertPlexPrincipal, InsertVisibility, seed_library,
 };
+pub use plex_tv_stub::PlexTvStub;
 pub use running_instance::RunningInstance;
 pub use temp_instance::TempInstance;
