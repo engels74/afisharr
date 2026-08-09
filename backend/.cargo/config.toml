@@ -1,0 +1,15 @@
+# SPDX-FileCopyrightText: 2026 Afisharr contributors
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
+[env]
+# The sqlx query macros check every statement against a schema at compile time.
+# They go live only when DATABASE_URL is set and SQLX_OFFLINE is not true, so a
+# fresh clone and CI already read the committed metadata in `.sqlx/` without
+# this setting. What it adds is a guard for the developer who does have
+# DATABASE_URL exported, from a shell profile or another project's .env: without
+# it, their macros check against that database instead of the committed data,
+# and the mismatch shows up for nobody else.
+#
+# `scripts/dev-database.sh` sets DATABASE_URL and SQLX_OFFLINE=false together to
+# force the live check. Neither alone is enough.
+SQLX_OFFLINE = "true"

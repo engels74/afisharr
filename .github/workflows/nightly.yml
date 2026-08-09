@@ -31,11 +31,19 @@ env:
   CARGO_TERM_COLOR: always
   SQLX_OFFLINE: "true"
 
+# Every job below runs cargo, so every one sets `working-directory: backend`.
+# Cargo and rustup find `.cargo/config.toml` and `rust-toolchain.toml` by
+# walking up from the working directory and never descend; both live in
+# `backend/`.
+
 jobs:
   crash-injection:
     name: crash-injection
     runs-on: ubuntu-latest
     timeout-minutes: 60
+    defaults:
+      run:
+        working-directory: backend
     steps:
       - uses: actions/checkout@v5
       - uses: ./.github/actions/rust
@@ -61,6 +69,9 @@ jobs:
     name: property-tests
     runs-on: ubuntu-latest
     timeout-minutes: 60
+    defaults:
+      run:
+        working-directory: backend
     steps:
       - uses: actions/checkout@v5
       - uses: ./.github/actions/rust
@@ -83,6 +94,9 @@ jobs:
     name: teardown
     runs-on: ubuntu-latest
     timeout-minutes: 60
+    defaults:
+      run:
+        working-directory: backend
     steps:
       - uses: actions/checkout@v5
       - uses: ./.github/actions/rust
@@ -106,6 +120,9 @@ jobs:
     name: performance-at-scale
     runs-on: ubuntu-latest
     timeout-minutes: 60
+    defaults:
+      run:
+        working-directory: backend
     steps:
       - uses: actions/checkout@v5
       - uses: ./.github/actions/rust

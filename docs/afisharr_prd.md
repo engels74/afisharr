@@ -604,24 +604,38 @@ migration to add per-user targeting, this decision was not honoured.
 Single binary. Axum HTTP API plus an embedded SvelteKit static SPA. SQLite via SQLx with migrations.
 OpenAPI via utoipa generating the TypeScript client. SSE for job progress and source health.
 
+The two surfaces get one directory each, and neither keeps anything at the repository root.
+
 ```
-crates/core      domain model, definition schema, reconciliation engine,
-                 filter/order pipeline, lifecycle state machine, scheduling
-crates/sources   one module per provider behind a common SourceBuilder trait;
-                 each with typed client, rate limiter, circuit breaker,
-                 response validation, health status
-crates/plex      Plex client: libraries, collections, hubs, labels,
-                 media streams, artwork, filter-metadata discovery
-crates/render    poster and overlay renderer, element model, layers,
-                 font handling, content-addressed cache
-crates/packs     pack format (manifest, definitions, assets) and installer
-crates/api       Axum routes, auth and sessions, SSE, OpenAPI
-crates/afisharr     binary: wiring, embedded SPA, migrations, CLI entrypoints
-web/             SvelteKit 2, Svelte 5, UnoCSS (presetWind4), shadcn-svelte,
-                 adapter-static, Bun tooling
+backend/           the Cargo workspace, and everything scoped to it:
+                   Cargo.toml, Cargo.lock, rust-toolchain.toml, rustfmt.toml,
+                   clippy.toml, deny.toml, .cargo/config.toml, .sqlx/
+  crates/core      domain model, definition schema, reconciliation engine,
+                   filter/order pipeline, lifecycle state machine, scheduling
+  crates/sources   one module per provider behind a common SourceBuilder trait;
+                   each with typed client, rate limiter, circuit breaker,
+                   response validation, health status
+  crates/plex      Plex client: libraries, collections, hubs, labels,
+                   media streams, artwork, filter-metadata discovery
+  crates/render    poster and overlay renderer, element model, layers,
+                   font handling, content-addressed cache
+  crates/packs     pack format (manifest, definitions, assets) and installer
+  crates/api       Axum routes, auth and sessions, SSE, OpenAPI
+  crates/afisharr  binary: wiring, embedded SPA, migrations, CLI entrypoints
+frontend/          SvelteKit 2, Svelte 5, UnoCSS (presetWind4), shadcn-svelte,
+                   adapter-static, Bun tooling
+scripts/           the gates that span both surfaces, so they belong to neither
+docs/              this document and the implementation plan
+.github/           the merge, nightly, and release lanes (§A.5 of the plan)
 ```
 
 Rust toolchain pinned at 1.97.1, edition 2024.
+
+**Every cargo command runs from `backend/`.** Cargo discovers `.cargo/config.toml` and rustup
+discovers `rust-toolchain.toml` by walking *up* from the working directory, and neither ever
+descends. A cargo step left at the repository root gets the default toolchain and no `[env]` block,
+silently. The offline query data needs no such care: sqlx resolves `.sqlx/` through `cargo metadata`
+→ `workspace_root`, which follows the manifest rather than the working directory.
 
 **Inside each crate, the same division continues.** A crate's `src/` divides into subfolders named
 after a domain, not after a layer; every file states one thing; no module collects unrelated
@@ -3395,7 +3409,7 @@ already the indirection point at which a blob backend could be added.
 
 | System | Migrates | Mechanism | Trigger |
 | --- | --- | --- | --- |
-| **Schema migrations** | Table shape | Numbered SQL files under `crates/afisharr/migrations/`, run by `sqlx migrate` | Application startup |
+| **Schema migrations** | Table shape | Numbered SQL files under `backend/crates/afisharr/migrations/`, run by `sqlx migrate` | Application startup |
 | **Document migrations** | Definition body JSON | In-code, per `kind`, keyed on `schema_version` (see *The definition layer*) | On load of an individual definition |
 
 **A schema migration never rewrites `body_json`.** This rule exists because the two systems have
@@ -7035,7 +7049,7 @@ lifecycle component ships".
 
 Every outbound HTTP request — source adapters, the Plex client, the `*arr` clients, artwork
 downloads, the volatile-parameter feed, and dataset imports — goes through one client in
-`crates/sources`. Two properties follow, and neither is achievable per adapter.
+`backend/crates/sources`. Two properties follow, and neither is achievable per adapter.
 
 **Every request is timed, for free.** The budgets in §21.2.1 and §21.2.2 are dominated by external
 calls, so per-request duration, per-host totals, and retry counts are what make a missed budget
@@ -7641,7 +7655,7 @@ the visual identity a starting point. It sits in the `*arr` family at eight char
 Prowlarr and Readarr.
 
 The name is now the binary (`afisharr`), the configuration directory, the database file
-(`afisharr.db`), the crate (`crates/afisharr`), the pack namespace root (`afisharr.core/…`), and every
+(`afisharr.db`), the crate (`backend/crates/afisharr`), the pack namespace root (`afisharr.core/…`), and every
 document filename. `afisharr` was free on crates.io, npm, and as a GitHub organisation when checked on
 2026-08-08. The repository directory itself is unchanged and is the owner's to rename.
 
@@ -10099,10 +10113,11 @@ neither is a folder named after a layer.
 A layer name describes the shape of what is inside, so anything of that shape qualifies, so
 everything of that shape arrives. `utils/` is a god folder with the same failure mode as a god file:
 nothing is ever the wrong thing to put in it. The prohibited names above are prohibited as
-*catch-alls*, not as words — `crates/api/src/routes/` is a domain (the HTTP surface), while a
-`crates/core/src/services/` holding six unrelated subsystems is not. Likewise
-`crates/sources/src/trakt/types.rs`, holding the Trakt DTOs and nothing else, is a single-purpose
-file inside a domain; the rule bans `types/` as a way to *divide a crate*, not the word.
+*catch-alls*, not as words — `backend/crates/api/src/routes/` is a domain (the HTTP surface), while a
+`backend/crates/core/src/services/` holding six unrelated subsystems is not. Likewise
+`backend/crates/sources/src/trakt/types.rs`, holding the Trakt DTOs and nothing else, is a
+single-purpose file inside a domain; the rule bans `types/` as a way to *divide a crate*, not the
+word.
 
 **Where genuinely shared code goes.** This rule bans a name, not code reuse. Two domains that need
 the same function still share it — under a name that predicts what it does:
@@ -10112,10 +10127,11 @@ the same function still share it — under a name that predicts what it does:
 | `utils.rs` holding `slugify`, `retry`, `parse_duration` | `text/slug.rs`, `net/retry.rs`, `time/duration.rs` |
 | `helpers.ts` holding `formatDate`, `debounce` | `format/date.ts`, `interaction/debounce.ts` |
 
-The shared layer is `crates/core/src/<named>/` on the backend and `web/src/lib/shared/<named>/` on
-the frontend. Each `<named>` is a domain in its own right — `text`, `time`, `format` — and is subject
-to every rule in §24.6 like any other. The test is one question: **does the folder name predict what
-is inside it?** `text/slug.rs` predicts. `utils.rs` does not, which is why everything ends up there.
+The shared layer is `backend/crates/core/src/<named>/` on the backend and
+`frontend/src/lib/shared/<named>/` on the frontend. Each `<named>` is a domain in its own right —
+`text`, `time`, `format` — and is subject to every rule in §24.6 like any other. The test is one
+question: **does the folder name predict what is inside it?** `text/slug.rs` predicts. `utils.rs`
+does not, which is why everything ends up there.
 
 A helper used by exactly one domain does not go in the shared layer at all. It lives beside the code
 it serves, and it moves outward the first time a second domain needs it.
@@ -10127,8 +10143,8 @@ together. `src/lib/components/ui/` remains the shared primitive layer (§24.3.1)
 domain-specific.
 
 Where a domain genuinely spans crates, the crate boundary is the division and the folder names match
-across it: `crates/core/src/placement/` and `crates/api/src/routes/placement/` are the same domain
-seen from two surfaces, and they carry the same name for that reason.
+across it: `backend/crates/core/src/placement/` and `backend/crates/api/src/routes/placement/` are
+the same domain seen from two surfaces, and they carry the same name for that reason.
 
 #### 24.6.2 One file states one thing
 
@@ -10242,13 +10258,13 @@ plan's Appendix A carries them as build gates (§A.1) and as checklist lines (§
 
 ```bash
 # Rust files over the soft limit, worst first
-find crates -name '*.rs' -not -path '*/target/*' -print0 \
+find backend/crates -name '*.rs' -not -path '*/target/*' -print0 \
   | xargs -0 wc -l | awk '$2 != "total" && $1 > 400' | sort -rn
 
 # Frontend files over their soft limits
-find web/src -name '*.svelte' -print0 \
+find frontend/src -name '*.svelte' -print0 \
   | xargs -0 wc -l | awk '$2 != "total" && $1 > 250' | sort -rn
-find web/src \( -name '*.ts' -o -name '*.svelte.ts' \) -print0 \
+find frontend/src \( -name '*.ts' -o -name '*.svelte.ts' \) -print0 \
   | xargs -0 wc -l | awk '$2 != "total" && $1 > 300' | sort -rn
 ```
 

@@ -59,19 +59,19 @@ report() {
 	return 0
 }
 
-find crates -name '*.rs' \
+find backend/crates -name '*.rs' \
 	-not -path '*/target/*' \
 	-not -path '*/migrations/*' \
 	-not -path '*/tests/*' 2>/dev/null |
 	sort | report 'Rust (non-test)' 400 || status=1
 
-find crates -path '*/tests/*' -name '*.rs' -not -path '*/target/*' 2>/dev/null |
+find backend/crates -path '*/tests/*' -name '*.rs' -not -path '*/target/*' 2>/dev/null |
 	sort | report 'Rust (test)' 600 || status=1
 
-find web/src -name '*.svelte' 2>/dev/null |
+find frontend/src -name '*.svelte' 2>/dev/null |
 	sort | report 'Svelte components' 250 || status=1
 
-find web/src \( -name '*.ts' -o -name '*.svelte.ts' \) \
+find frontend/src \( -name '*.ts' -o -name '*.svelte.ts' \) \
 	-not -path '*/.svelte-kit/*' \
 	-not -path '*/generated/*' 2>/dev/null |
 	sort | report 'TypeScript and rune modules' 300 || status=1

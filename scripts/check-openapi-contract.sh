@@ -20,21 +20,22 @@ set -euo pipefail
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$root"
 
-generated_client="web/src/lib/api/generated"
+generated_client="frontend/src/lib/api/generated"
 
-if ! grep -q '^utoipa' crates/api/Cargo.toml 2>/dev/null; then
+if ! grep -q '^utoipa' backend/crates/api/Cargo.toml 2>/dev/null; then
 	if [ -e "$generated_client" ]; then
-		echo "A generated client exists at $generated_client but crates/api declares no" >&2
-		echo "utoipa dependency. One of the two is wrong; the annotations are the source" >&2
-		echo "of truth (§24.5)." >&2
+		echo "A generated client exists at $generated_client but backend/crates/api" >&2
+		echo "declares no utoipa dependency. One of the two is wrong; the annotations are" >&2
+		echo "the source of truth (§24.5)." >&2
 		exit 1
 	fi
-	echo "No OpenAPI surface yet: crates/api declares no utoipa dependency and no"
-	echo "generated client exists. Nothing to diff."
+	echo "No OpenAPI surface yet: backend/crates/api declares no utoipa dependency and"
+	echo "no generated client exists. Nothing to diff."
 	exit 0
 fi
 
-echo "crates/api now declares utoipa, so this lane must regenerate the client and" >&2
-echo "diff it against the committed one. Extend scripts/check-openapi-contract.sh" >&2
-echo "in the change that introduced the OpenAPI surface (§A.5, §24.5)." >&2
+echo "backend/crates/api now declares utoipa, so this lane must regenerate the" >&2
+echo "client and diff it against the committed one. Extend" >&2
+echo "scripts/check-openapi-contract.sh in the change that introduced the OpenAPI" >&2
+echo "surface (§A.5, §24.5)." >&2
 exit 1
