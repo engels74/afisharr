@@ -5,6 +5,8 @@
 
 use std::path::{Path, PathBuf};
 
+use anyhow::{Result, bail};
+
 /// The variable that moves the data directory, as a container mount does.
 pub const DATA_DIR_ENV_VAR: &str = "AFISHARR_DATA_DIR";
 
@@ -27,11 +29,21 @@ impl DataPaths {
     }
 
     /// The layout named by `AFISHARR_DATA_DIR`, defaulting to `./data`.
-    #[must_use]
-    pub fn from_env() -> Self {
-        Self::new(
-            std::env::var_os(DATA_DIR_ENV_VAR).map_or_else(|| PathBuf::from("data"), Into::into),
-        )
+    ///
+    /// # Errors
+    /// Returns an error when the variable is set to nothing. That is what a
+    /// compose file writes when the value it meant to interpolate was missing,
+    /// and taking it would resolve the database, the instance key, and the
+    /// backups against the working directory — outside the mount, and outside
+    /// the unit an operator backs up (PRD §21.6.1).
+    pub fn from_env() -> Result<Self> {
+        let Some(configured) = std::env::var_os(DATA_DIR_ENV_VAR) else {
+            return Ok(Self::new("data"));
+        };
+        if configured.to_string_lossy().trim().is_empty() {
+            bail!("{DATA_DIR_ENV_VAR} is set to nothing; unset it to use ./data");
+        }
+        Ok(Self::new(configured))
     }
 
     /// The data directory itself.

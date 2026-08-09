@@ -6,7 +6,7 @@
 use std::path::Path;
 
 use afisharr_core::settings::SettingsBody;
-use anyhow::{Context, Result};
+use anyhow::{Context, Result, bail};
 
 /// Prefix for the environment overrides this loader understands.
 const ENV_PREFIX: &str = "AFISHARR_";
@@ -44,19 +44,19 @@ pub fn load(config_file: &Path) -> Result<SettingsBody> {
 /// reintroduce the partial, unvalidated writes that PRD §19.5 rejects a
 /// key-value settings table for.
 fn apply_environment(body: &mut SettingsBody) -> Result<()> {
-    if let Ok(value) = std::env::var(format!("{ENV_PREFIX}TIMEZONE")) {
+    if let Some(value) = override_value("TIMEZONE")? {
         body.instance.timezone = value;
     }
-    if let Ok(value) = std::env::var(format!("{ENV_PREFIX}LOCALE")) {
+    if let Some(value) = override_value("LOCALE")? {
         body.instance.locale = value;
     }
-    if let Ok(value) = std::env::var(format!("{ENV_PREFIX}DEVICE_NAME")) {
+    if let Some(value) = override_value("DEVICE_NAME")? {
         body.instance.device_name = value;
     }
-    if let Ok(value) = std::env::var(format!("{ENV_PREFIX}BIND_ADDRESS")) {
+    if let Some(value) = override_value("BIND_ADDRESS")? {
         body.http.bind_address = value;
     }
-    if let Ok(value) = std::env::var(format!("{ENV_PREFIX}PORT")) {
+    if let Some(value) = override_value("PORT")? {
         body.http.port = value
             .parse()
             .with_context(|| format!("{ENV_PREFIX}PORT is not a port number"))?;
@@ -71,10 +71,38 @@ fn apply_environment(body: &mut SettingsBody) -> Result<()> {
             .map(str::to_owned)
             .collect();
     }
-    if let Ok(value) = std::env::var(format!("{ENV_PREFIX}LOG_LEVEL")) {
+    if let Some(value) = override_value("LOG_LEVEL")? {
         body.logging.level = value;
     }
     Ok(())
+}
+
+/// The override for `field`, refused when it is set to nothing.
+///
+/// An empty variable is what a compose file writes when the value it meant to
+/// interpolate was not there, and none of these fields has a meaningful empty
+/// value: an empty log filter parses and switches logging off entirely, and an
+/// empty timezone, locale, device name, or bind address is not one. Taking it
+/// silently is the same failure as taking a filter that would not parse.
+/// `TRUST_PROXY` reads its own variable because there empty is the deliberate
+/// answer — nothing is trusted (D-029).
+///
+/// # Errors
+/// Returns an error naming the variable when it is set to an empty value.
+fn override_value(field: &str) -> Result<Option<String>> {
+    let name = format!("{ENV_PREFIX}{field}");
+    let Some(value) = std::env::var_os(&name) else {
+        return Ok(None);
+    };
+    // `var_os` rather than `var`, which folds "not set" and "not text" into one
+    // `Err` and would drop a value the operator did set.
+    let Some(value) = value.to_str() else {
+        bail!("{name} is set to something that is not text");
+    };
+    if value.trim().is_empty() {
+        bail!("{name} is set to nothing; unset it to keep the configured value");
+    }
+    Ok(Some(value.to_owned()))
 }
 
 #[cfg(test)]

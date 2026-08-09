@@ -37,7 +37,7 @@ impl Cli {
     /// Returns whatever the command failed with, with the context that names
     /// which step of the start it was.
     pub async fn run(self) -> Result<()> {
-        let paths = DataPaths::from_env();
+        let paths = DataPaths::from_env()?;
         let configured = crate::configuration::load(&paths.config_file())?;
 
         // Logging is initialised from the configured level before anything can
