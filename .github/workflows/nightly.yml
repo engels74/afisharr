@@ -48,8 +48,10 @@ jobs:
       # there are none.
       - name: crash-injection suite
         run: |
-          if cargo nextest list --workspace --all-features -E 'test(crash_injection)' \
-            | grep -q 'crash_injection'; then
+          # Captured rather than piped: a pipeline's status is grep's, so a
+          # tree that does not compile would read as "no such tests" and pass.
+          listed=$(cargo nextest list --workspace --all-features -E 'test(crash_injection)')
+          if printf '%s' "$listed" | grep -q 'crash_injection'; then
             cargo nextest run --workspace --all-features -E 'test(crash_injection)'
           else
             echo "No crash-injection tests exist yet (I-DATA-1 is claimed in Phase 9)."
@@ -68,7 +70,10 @@ jobs:
       # different commitments; the generated ones live here.
       - name: property suite
         run: |
-          if cargo nextest list --workspace --all-features -E 'test(prop_)' | grep -q 'prop_'; then
+          # Captured rather than piped: a pipeline's status is grep's, so a
+          # tree that does not compile would read as "no such tests" and pass.
+          listed=$(cargo nextest list --workspace --all-features -E 'test(prop_)')
+          if printf '%s' "$listed" | grep -q 'prop_'; then
             cargo nextest run --workspace --all-features -E 'test(prop_)'
           else
             echo "No property tests exist yet."
@@ -88,7 +93,10 @@ jobs:
       # apply-then-reverse cycle. Built in Phase 11.
       - name: teardown suite
         run: |
-          if cargo nextest list --workspace --all-features -E 'test(teardown)' | grep -q 'teardown'; then
+          # Captured rather than piped: a pipeline's status is grep's, so a
+          # tree that does not compile would read as "no such tests" and pass.
+          listed=$(cargo nextest list --workspace --all-features -E 'test(teardown)')
+          if printf '%s' "$listed" | grep -q 'teardown'; then
             cargo nextest run --workspace --all-features -E 'test(teardown)'
           else
             echo "No teardown tests exist yet (I-REV-4 is claimed in Phase 11)."
@@ -107,7 +115,10 @@ jobs:
       # and 2,000 collections across several libraries.
       - name: performance suite
         run: |
-          if cargo nextest list --workspace --all-features -E 'test(perf_)' | grep -q 'perf_'; then
+          # Captured rather than piped: a pipeline's status is grep's, so a
+          # tree that does not compile would read as "no such tests" and pass.
+          listed=$(cargo nextest list --workspace --all-features -E 'test(perf_)')
+          if printf '%s' "$listed" | grep -q 'perf_'; then
             cargo nextest run --workspace --all-features -E 'test(perf_)'
           else
             echo "No at-scale performance tests exist yet."

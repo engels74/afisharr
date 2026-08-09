@@ -51,7 +51,10 @@ jobs:
       # Built in Phase 12.
       - name: restore suite
         run: |
-          if cargo nextest list --workspace --all-features -E 'test(restore)' | grep -q 'restore'; then
+          # Captured rather than piped: a pipeline's status is grep's, so a
+          # tree that does not compile would read as "no such tests" and pass.
+          listed=$(cargo nextest list --workspace --all-features -E 'test(restore)')
+          if printf '%s' "$listed" | grep -q 'restore'; then
             cargo nextest run --workspace --all-features -E 'test(restore)'
           else
             echo "No restore tests exist yet (I-SEC-5 and I-SEC-6 are claimed in Phase 12)."
@@ -83,8 +86,10 @@ jobs:
       # by last_used_at. Built in Phase 8.
       - name: render-cache suite
         run: |
-          if cargo nextest list --workspace --all-features -E 'test(render_cache)' \
-            | grep -q 'render_cache'; then
+          # Captured rather than piped: a pipeline's status is grep's, so a
+          # tree that does not compile would read as "no such tests" and pass.
+          listed=$(cargo nextest list --workspace --all-features -E 'test(render_cache)')
+          if printf '%s' "$listed" | grep -q 'render_cache'; then
             cargo nextest run --workspace --all-features -E 'test(render_cache)'
           else
             echo "No render-cache tests exist yet (I-PERF-2 is claimed in Phase 8)."

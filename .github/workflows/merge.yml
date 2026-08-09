@@ -91,12 +91,26 @@ jobs:
       # runs, and this step fails the moment one appears.
       - name: assert no crate has taken an unsafe exception
         run: |
-          if grep -rn --include='*.rs' -E '^\s*#!\[allow\(unsafe_code' crates; then
+          # grep exits 1 for "no match" and 2 for "could not scan". Only the
+          # first is an answer; treating both as one reports a scan that never
+          # ran as a clean tree.
+          status=0
+          exceptions=$(grep -rn --include='*.rs' -E '^\s*#!\[allow\(unsafe_code' crates) || status=$?
+          case "$status" in
+          0)
+            printf '%s\n' "$exceptions" >&2
             echo "A crate has allowed unsafe_code. Extend this lane to run" >&2
             echo "cargo +nightly miri test against it (§A.5, §24.2.9)." >&2
             exit 1
-          fi
-          echo "unsafe_code is forbidden workspace-wide; nothing to check."
+            ;;
+          1)
+            echo "unsafe_code is forbidden workspace-wide; nothing to check."
+            ;;
+          *)
+            echo "The unsafe_code scan could not run (grep exited $status)." >&2
+            exit 1
+            ;;
+          esac
 
   structure:
     name: structure
