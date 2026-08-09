@@ -21,8 +21,8 @@ the repository carry the stack-level coding guidelines, and both are normative:
 
 | File | Read it before touching |
 | --- | --- |
-| `.augment/rules/backend-rust-dev-pro.md` | Any Rust: `crates/**` — tokio, axum, SQLx, serde, errors, concurrency |
-| `.augment/rules/frontend-dev-pro.md` | Any frontend: `web/**` — Bun, Svelte 5 runes, SvelteKit 2, UnoCSS `presetWind4`, shadcn-svelte |
+| `.augment/rules/backend-rust-dev-pro.md` | Any Rust: `backend/crates/**` — tokio, axum, SQLx, serde, errors, concurrency |
+| `.augment/rules/frontend-dev-pro.md` | Any frontend: `frontend/**` — Bun, Svelte 5 runes, SvelteKit 2, UnoCSS `presetWind4`, shadcn-svelte |
 
 This is a read-first obligation, not a review-time check, and it binds every author, human or agent.
 Both stacks compile the previous generation's idiom without complaint, so the gates in §A.1 stay
@@ -79,35 +79,54 @@ done.
 
 ### Where the code lands
 
+The repository holds two surfaces, one directory each, and nothing of either at the root.
+
 ```
-crates/core      domain model, definition schema, reconciliation engine,
-                 filter/order pipeline, lifecycle state machine, scheduling
-crates/sources   one module per provider behind a common SourceBuilder trait;
-                 each with typed client, rate limiter, circuit breaker,
-                 response validation, health status
-crates/plex      Plex client: libraries, collections, hubs, labels,
-                 media streams, artwork, filter-metadata discovery
-crates/render    poster and overlay renderer, element model, layers,
-                 font handling, content-addressed cache
-crates/packs     pack format (manifest, definitions, assets) and installer
-crates/api       Axum routes, auth and sessions, SSE, OpenAPI
-crates/afisharr  binary: wiring, embedded SPA, migrations, CLI entrypoints
-web/             SvelteKit 2, Svelte 5, UnoCSS (presetWind4), shadcn-svelte,
-                 adapter-static, Bun tooling
+backend/           the Cargo workspace, and everything scoped to it:
+                   Cargo.toml, Cargo.lock, rust-toolchain.toml, rustfmt.toml,
+                   clippy.toml, deny.toml, .cargo/config.toml, .sqlx/
+  crates/core      domain model, definition schema, reconciliation engine,
+                   filter/order pipeline, lifecycle state machine, scheduling
+  crates/sources   one module per provider behind a common SourceBuilder trait;
+                   each with typed client, rate limiter, circuit breaker,
+                   response validation, health status
+  crates/plex      Plex client: libraries, collections, hubs, labels,
+                   media streams, artwork, filter-metadata discovery
+  crates/render    poster and overlay renderer, element model, layers,
+                   font handling, content-addressed cache
+  crates/packs     pack format (manifest, definitions, assets) and installer
+  crates/api       Axum routes, auth and sessions, SSE, OpenAPI
+  crates/afisharr  binary: wiring, embedded SPA, migrations, CLI entrypoints
+frontend/          SvelteKit 2, Svelte 5, UnoCSS (presetWind4), shadcn-svelte,
+                   adapter-static, Bun tooling; .bun-version pins Bun
+scripts/           the gates that span both surfaces, so they belong to neither
+docs/              this plan and the PRD
+.github/           the merge, nightly, and release lanes (§A.5)
 ```
 
+`prek.toml`, `.gitignore`, and `LICENSE` stay at the root with `scripts/`.
+
 Rust toolchain pinned at 1.97.1, edition 2024.
+
+**Every cargo command runs from `backend/`.** Cargo discovers `.cargo/config.toml` and rustup
+discovers `rust-toolchain.toml` by walking *up* from the working directory; neither ever descends. A
+cargo step left at the repository root gets the default toolchain and no `[env]` block, and says
+nothing about it. The CI lanes set `working-directory: backend`, the prek hooks `cd backend` first,
+and `scripts/dev-database.sh` does the same before it calls `cargo sqlx prepare`. The offline query
+data needs no such care: sqlx resolves `.sqlx/` through `cargo metadata` → `workspace_root`, which
+follows the manifest rather than the working directory.
 
 **Inside a crate, the division continues by domain.** Each `src/` holds subfolders named after a
 thing the product has or a job it does — `placement/`, `lifecycle/`, `sources/trakt/`,
 `definition/validation/` — never a flat `src/` of siblings, and never a folder named after a layer
 (`utils/`, `helpers/`, `common/`, `types/`, `models/`). Code shared across domains is not banned —
-it goes in `crates/core/src/<named>/` or `web/src/lib/shared/<named>/` under a name that predicts
-what it does (`text/slug.rs`, not `utils.rs`), and is itself a domain (§24.6.1). Frontend domain code lives in
-`web/src/lib/features/<domain>/`, holding that domain's components, `.svelte.ts` state, and calls to
-the generated client together; `web/src/lib/components/ui/` stays the shared primitive layer. Where a
-domain spans crates, the folder name matches on both sides: `crates/core/src/placement/` and
-`crates/api/src/routes/placement/`. Rule in PRD §24.6.1.
+it goes in `backend/crates/core/src/<named>/` or `frontend/src/lib/shared/<named>/` under a name that
+predicts what it does (`text/slug.rs`, not `utils.rs`), and is itself a domain (§24.6.1). Frontend
+domain code lives in `frontend/src/lib/features/<domain>/`, holding that domain's components,
+`.svelte.ts` state, and calls to the generated client together; `frontend/src/lib/components/ui/`
+stays the shared primitive layer. Where a domain spans crates, the folder name matches on both sides:
+`backend/crates/core/src/placement/` and `backend/crates/api/src/routes/placement/`. Rule in PRD
+§24.6.1.
 
 ---
 
@@ -169,13 +188,14 @@ the schema's *shape* — per-user targeting needing no migration, one subject pe
 a unique index. Both are cheap now and are table rebuilds later.
 
 ### Task 0.1 Workspace, prek, and the CI lanes
-- **Build:** the Cargo workspace and the `web/` project, pre-commit hooks installed, and CI running the
-  three test lanes recorded as D-035 — merge, nightly, release.
-- **Where:** repository root; `crates/core`, `crates/sources`, `crates/plex`, `crates/render`,
-  `crates/packs`, `crates/api`, `crates/afisharr`; `web/`.
+- **Build:** the Cargo workspace under `backend/` and the `frontend/` project, pre-commit hooks
+  installed, and CI running the three test lanes recorded as D-035 — merge, nightly, release.
+- **Where:** repository root; `backend/` and its `crates/core`, `crates/sources`, `crates/plex`,
+  `crates/render`, `crates/packs`, `crates/api`, `crates/afisharr`; `frontend/`.
 - **Subtasks:**
-  - [x] 1. Scaffold the seven workspace crates with `crates/afisharr` as the binary depending on the rest.
-  - [x] 2. Scaffold `web/` as a SvelteKit 2 / Svelte 5 project with UnoCSS (`presetWind4`), shadcn-svelte,
+  - [x] 1. Scaffold the seven workspace crates under `backend/`, with `backend/crates/afisharr` as the
+     binary depending on the rest.
+  - [x] 2. Scaffold `frontend/` as a SvelteKit 2 / Svelte 5 project with UnoCSS (`presetWind4`), shadcn-svelte,
      `adapter-static`, and Bun tooling.
   - [x] 3. Install prek and commit its hook configuration.
   - [x] 4. Wire the merge lane: every table-driven and unit-level invariant, budgeted at 10 minutes.
@@ -193,7 +213,7 @@ a unique index. Both are cheap now and are table rebuilds later.
 
 ### Task 0.2 The complete schema
 - **Build:** all 68 tables and their indexes, exactly as specified, as SQLx migrations.
-- **Where:** `crates/afisharr/migrations/`; `crates/core` (row types, projection functions).
+- **Where:** `backend/crates/afisharr/migrations/`; `backend/crates/core` (row types, projection functions).
 - **Subtasks:**
   - [x] 1. Write migration `0001`, setting `auto_vacuum = INCREMENTAL`, `journal_mode = WAL`, and
      `page_size = 8192` before the first `CREATE TABLE` — these are one-way doors that cannot be set
@@ -215,7 +235,7 @@ a unique index. Both are cheap now and are table rebuilds later.
 ### Task 0.3 Startup sequence
 - **Build:** the sequence that runs on every boot — downgrade refusal, automatic pre-migration backup,
   and post-migration integrity verification.
-- **Where:** `crates/afisharr` (startup path); `crates/core` (backup and integrity checks).
+- **Where:** `backend/crates/afisharr` (startup path); `backend/crates/core` (backup and integrity checks).
 - **Subtasks:**
   - [x] 1. On open, read the applied-migration table; if it names a version this binary does not know,
      refuse to start with a message naming both the found version and the binary's newest known one.
@@ -232,7 +252,7 @@ a unique index. Both are cheap now and are table rebuilds later.
 ### Task 0.4 Concurrency
 - **Build:** WAL mode, a single write actor, per-pass leases, and the rule that no transaction spans
   network or filesystem I/O.
-- **Where:** `crates/core` (connection pool, write actor, lease acquisition).
+- **Where:** `backend/crates/core` (connection pool, write actor, lease acquisition).
 - **Subtasks:**
   - [x] 1. Set the connection pragmas on every pooled connection: `foreign_keys = ON`,
      `busy_timeout = 5000`, `synchronous = NORMAL`, `cache_size = -32000`, `temp_store = MEMORY`.
@@ -250,7 +270,7 @@ a unique index. Both are cheap now and are table rebuilds later.
 
 ### Task 0.5 Structured logging and configuration
 - **Build:** the application log, the single-row `settings` table with history, and instance identity.
-- **Where:** `crates/afisharr` (log init, config loading); `crates/core` (settings, `instance` table).
+- **Where:** `backend/crates/afisharr` (log init, config loading); `backend/crates/core` (settings, `instance` table).
 - **Subtasks:**
   - [x] 1. Implement structured logging to `logs/afisharr.log`, rotated, distinct from the database-backed
      run-event log the GUI reads.
@@ -265,7 +285,7 @@ a unique index. Both are cheap now and are table rebuilds later.
 
 ### Task 0.6 The secret table and key handling
 - **Build:** encrypted credential storage per D-032, isolated from `settings`.
-- **Where:** `crates/core` (secrets table, cipher); `crates/afisharr` (key file lifecycle).
+- **Where:** `backend/crates/core` (secrets table, cipher); `backend/crates/afisharr` (key file lifecycle).
 - **Subtasks:**
   - [x] 1. Implement the `secrets` table: ciphertext, nonce, algorithm, per-secret.
   - [x] 2. Implement XChaCha20-Poly1305 encryption with a random nonce per secret.
@@ -300,7 +320,7 @@ the eight-step journey on top of it.
 
 ### Task 1.1 Axum routing and error model
 - **Build:** the HTTP surface's spine — routing, a structured error model, and the health route.
-- **Where:** `crates/api`.
+- **Where:** `backend/crates/api`.
 - **Subtasks:**
   - [ ] 1. Stand up Axum with a router that groups routes by the six primary destinations plus settings.
   - [ ] 2. Define one structured error type carrying a JSON pointer, expected-versus-actual, and an HTTP
@@ -313,7 +333,7 @@ the eight-step journey on top of it.
 
 ### Task 1.2 Local and Plex authentication
 - **Build:** local password authentication and the Plex PIN/OAuth login flow.
-- **Where:** `crates/api` (routes); `crates/core` (`users`, `plex_pin_logins`); `crates/plex` (the
+- **Where:** `backend/crates/api` (routes); `backend/crates/core` (`users`, `plex_pin_logins`); `backend/crates/plex` (the
   plex.tv PIN and OAuth calls).
 - **Subtasks:**
   - [ ] 1. Implement local login: Argon2id password hashing at PHC-string parameters tuned to roughly 250 ms
@@ -331,7 +351,7 @@ the eight-step journey on top of it.
 
 ### Task 1.3 Sessions and API keys
 - **Build:** session lifecycle and revocable, scoped API keys.
-- **Where:** `crates/api`; `crates/core` (`sessions`, `api_keys`).
+- **Where:** `backend/crates/api`; `backend/crates/core` (`sessions`, `api_keys`).
 - **Subtasks:**
   - [ ] 1. Store sessions by the SHA-256 of the cookie value, never the value itself; set `Secure`,
      `HttpOnly`, `SameSite=Lax`.
@@ -347,7 +367,7 @@ the eight-step journey on top of it.
 
 ### Task 1.4 Rate limiting with the trusted-proxy list
 - **Build:** per-IP and per-account rate limiting that cannot be defeated by a forged forwarded header.
-- **Where:** `crates/api`.
+- **Where:** `backend/crates/api`.
 - **Subtasks:**
   - [ ] 1. Implement the limit table: login per account (5 failures / 15 min, exponential lockout to 24 h),
      login per IP (20 failures / 15 min), authenticated API (600 req/min), provider-calling endpoints
@@ -362,7 +382,7 @@ the eight-step journey on top of it.
 
 ### Task 1.5 Security headers and CSRF
 - **Build:** the fixed response-header set and always-on CSRF protection.
-- **Where:** `crates/api` (middleware).
+- **Where:** `backend/crates/api` (middleware).
 - **Subtasks:**
   - [ ] 1. Apply `Strict-Transport-Security`, `Content-Security-Policy` (`default-src 'self'`, no inline
      script, `frame-ancestors 'none'`), `X-Content-Type-Options: nosniff`, `Referrer-Policy:
@@ -377,7 +397,7 @@ the eight-step journey on top of it.
 
 ### Task 1.6 The filesystem browser and its root jail
 - **Build:** the jailed browser used by the asset picker and placeholder roots.
-- **Where:** `crates/api` (routes); `crates/core` (path canonicalisation and containment check).
+- **Where:** `backend/crates/api` (routes); `backend/crates/core` (path canonicalisation and containment check).
 - **Subtasks:**
   - [ ] 1. Canonicalise every requested path and resolve symbolic links before checking containment within
      an enabled root — never before.
@@ -391,7 +411,7 @@ the eight-step journey on top of it.
 ### Task 1.7 The SvelteKit shell, embedded in the binary
 - **Build:** the prerendered SPA embedded into the release binary, with no JavaScript server runtime in
   production.
-- **Where:** `web/`; `crates/afisharr` (embedding).
+- **Where:** `frontend/`; `backend/crates/afisharr` (embedding).
 - **Subtasks:**
   - [ ] 1. Configure `adapter-static` prerendering with no server load functions, form actions, server
      hooks, or server-side database access — these are structurally unavailable on this stack.
@@ -403,7 +423,7 @@ the eight-step journey on top of it.
 ### Task 1.8 The nine-state component vocabulary
 - **Build:** one shared component per interface state, so no page invents its own flattening of what
   the API already distinguishes.
-- **Where:** `web/` (shared component library).
+- **Where:** `frontend/` (shared component library).
 - **Subtasks:**
   - [ ] 1. Build one component each for Loading, Empty, Error, Frozen, Degraded, Stale, Pending, Blocked,
      and Non-convergent, each independently importable.
@@ -422,7 +442,7 @@ the eight-step journey on top of it.
 ### Task 1.9 SSE transport
 - **Build:** the single multiplexed SSE connection used for job progress and source health, established
   after auth.
-- **Where:** `crates/api` (SSE endpoint); `web/` (client, reconnection logic).
+- **Where:** `backend/crates/api` (SSE endpoint); `frontend/` (client, reconnection logic).
 - **Subtasks:**
   - [ ] 1. Implement one connection per client, multiplexed by topic, established after authentication.
   - [ ] 2. Implement backoff reconnection; on reconnect, refetch state rather than replay missed events.
@@ -436,7 +456,7 @@ the eight-step journey on top of it.
 
 ### Task 1.10 The i18n catalogue and extraction
 - **Build:** the message-catalogue framework, shipping English, with interpolation and plural rules.
-- **Where:** `web/` (catalogue, lint rule); `crates/core` (locale as a data concept for formatters).
+- **Where:** `frontend/` (catalogue, lint rule); `backend/crates/core` (locale as a data concept for formatters).
 - **Subtasks:**
   - [ ] 1. Wire a message-catalogue library with interpolation and plural-rule support.
   - [ ] 2. Add a lint rule, active from the first commit, that fails on a hard-coded user-facing string.
@@ -449,7 +469,7 @@ the eight-step journey on top of it.
 ### Task 1.11 Interface pages this phase ships
 - **Build:** the navigation shell — six primary destinations plus Settings — as routed pages, and the
   first-run and login flows that make the shell reachable.
-- **Where:** `web/src/routes`.
+- **Where:** `frontend/src/routes`.
 - **Subtasks:**
   - [ ] 1. Route Dashboard, Collections, Design, Home Screen, Lifecycle, and Doctor, plus a Settings area
      with its sub-page navigation, organised around the object the operator is thinking about rather
@@ -469,8 +489,8 @@ the eight-step journey on top of it.
 - **Build:** the console-printed bootstrap token, the setup claim leased to one browser, and the
   recovery path that replaces the token once an admin account exists. Specified in PRD §19.6.1;
   decided as D-045 and D-046.
-- **Where:** `crates/afisharr` (banner, token state); `crates/api` (claim, recovery, and the claim
-  gate); `crates/core` (`setup:claim` lease, derived resume step).
+- **Where:** `backend/crates/afisharr` (banner, token state); `backend/crates/api` (claim, recovery, and the claim
+  gate); `backend/crates/core` (`setup:claim` lease, derived resume step).
 - **Subtasks:**
   - [ ] 1. Implement token generation: three four-character segments from a 36-character lowercase
      alphanumeric alphabet, drawn from the OS CSPRNG with rejection sampling — discard and redraw any
@@ -525,7 +545,7 @@ cannot express the failures the invariants from Phase 4 onward are written again
 - **Build:** the protocol surface Afisharr actually calls, and no more — authentication, library and
   item listing, collection CRUD, hub reposition, labels, media-stream facts, artwork upload, and
   per-library filter-metadata discovery.
-- **Where:** `crates/plex`.
+- **Where:** `backend/crates/plex`.
 - **Subtasks:**
   - [ ] 1. Implement the `X-Plex-*` header contract and the PIN/OAuth token exchange consumed by Task 1.2.
   - [ ] 2. Implement library listing and item listing, including the filter-query parameter shapes
@@ -548,7 +568,7 @@ cannot express the failures the invariants from Phase 4 onward are written again
   unrecognised artwork URL formats, rating-key churn, partial scan states, independently-controllable
   sort-title value/presence/lock, mid-pass timeouts and 5xx failures at a chosen operation, and a
   changeable machine identifier — every behaviour deterministic from a seed.
-- **Where:** a test-support module inside `crates/plex`, compiled only under test, consumed by every
+- **Where:** a test-support module inside `backend/crates/plex`, compiled only under test, consumed by every
   later phase's test suite.
 - **Subtasks:**
   - [ ] 1. Implement a move that reports success over the wire while not actually changing order, triggered
@@ -568,7 +588,7 @@ cannot express the failures the invariants from Phase 4 onward are written again
 ### Task 2.3 The release-lane contract test against a real server
 - **Build:** a contract test exercising the client from Task 2.1 against a real Plex server, run in the
   release lane, that keeps the fake honest.
-- **Where:** `crates/plex/tests`, wired into the release lane from Task 0.1.
+- **Where:** `backend/crates/plex/tests`, wired into the release lane from Task 0.1.
 - **Subtasks:**
   - [ ] 1. Exercise the same call surface as Task 2.1 against a real server reachable in CI via a
      release-lane credential.
@@ -582,7 +602,7 @@ cannot express the failures the invariants from Phase 4 onward are written again
 ### Task 2.4 Interface pages this phase ships
 - **Build:** the Plex connectivity indicator in Settings — reachable, unreachable, or wrong-server —
   using the nine-state vocabulary from Task 1.8, without displaying any library content.
-- **Where:** `web/src/routes` (Settings › Plex connection); `crates/api`.
+- **Where:** `frontend/src/routes` (Settings › Plex connection); `backend/crates/api`.
 - **Subtasks:**
   - [ ] 1. Add a lightweight connectivity check hitting the machine-identifier call from Task 2.1.
   - [ ] 2. Render the three connection states (reachable, unreachable, wrong-server per `I-ID-5`'s blocking
@@ -612,7 +632,7 @@ depends on that answer, so it runs second.
 ### Task S.1 Q-015 — one global sequence, or several merged at render
 - **Build:** a direct answer, from observation of a real server, to whether the home screen is one
   global ordering sequence or per-library sequences merged at render.
-- **Where:** a spike harness outside the crate boundary, exercising `crates/plex` against a real
+- **Where:** a spike harness outside the crate boundary, exercising `backend/crates/plex` against a real
   server; not merged into product code.
 - **Subtasks:**
   - [ ] 1. Instrument a real server to observe how home-screen hub composition behaves under controlled
@@ -626,7 +646,7 @@ depends on that answer, so it runs second.
 ### Task S.2 Q-014 — the real precision budget
 - **Build:** a calibrated precision budget for minimal-move planning, measured against a sequence of at
   least 2,500 items — a short sequence measures the wrong thing.
-- **Where:** the same spike harness, against `crates/plex` and a real server.
+- **Where:** the same spike harness, against `backend/crates/plex` and a real server.
 - **Subtasks:**
   - [ ] 1. Build a sequence of at least 2,500 items against a real server, shaped by S.1's answer (global or
      per-library).
@@ -654,7 +674,7 @@ document amended, and the placement budget confirmed or replaced.
 ### Task 3.1 Envelope, kinds, and definition storage
 - **Build:** the definition envelope (`kind`, `schemaVersion`, `registryVersion`, ULID, handle, `meta`,
   `spec`), the seven kinds, and the storage and concurrency machinery around them.
-- **Where:** `crates/core` (definition module); `crates/api` (`/api/definitions/{kind}` CRUD).
+- **Where:** `backend/crates/core` (definition module); `backend/crates/api` (`/api/definitions/{kind}` CRUD).
 - **Subtasks:**
   - [ ] 1. Implement the envelope type and canonical JSON serialisation with stable key ordering.
   - [ ] 2. Implement the seven kinds — `Collection`, `Playlist`, `Placement`, `OverlayTemplate`,
@@ -674,7 +694,7 @@ document amended, and the placement budget confirmed or replaced.
 ### Task 3.2 Condition and filter expression trees
 - **Build:** the one structured expression language shared by collection filters, overlay conditions,
   and lifecycle rules — leaves, combinators, and scoped quantifiers.
-- **Where:** `crates/core` (expression tree, evaluator).
+- **Where:** `backend/crates/core` (expression tree, evaluator).
 - **Subtasks:**
   - [ ] 1. Implement leaves (`field`/`op`/`value`), combinators (`all`/`any`/`not`), and scoped quantifiers
      (`scope`, `quantifier: any|all|none|{countGte:N}|{countLt:N}`, `tree`).
@@ -691,7 +711,7 @@ document amended, and the placement budget confirmed or replaced.
 - **Build:** the field registry (static core plus the server-discovered layer), the operator set, the
   formatter registry, and the source registry entry shape — compiled into the binary as constants, per
   D-016.
-- **Where:** `crates/core` (registry constants, generated JSON artifact); `crates/api` (serving the
+- **Where:** `backend/crates/core` (registry constants, generated JSON artifact); `backend/crates/api` (serving the
   artifact to the GUI).
 - **Subtasks:**
   - [ ] 1. Encode the static-core field catalogue (`item.*`, `media.*`, `ratings.*`, `lifecycle.*`,
@@ -716,7 +736,7 @@ document amended, and the placement budget confirmed or replaced.
 ### Task 3.4 The validation pipeline
 - **Build:** the eleven-step save-time validation sequence as one code path, with structured,
   pointer-addressed errors.
-- **Where:** `crates/core` (validation); `crates/api` (surfacing structured errors).
+- **Where:** `backend/crates/core` (validation); `backend/crates/api` (surfacing structured errors).
 - **Subtasks:**
   - [ ] 1. Implement the eleven checks in order, stopping at the first failure: envelope shape; kind schema;
      source parameters against JSON Schema; field-key existence and scope; operator legality for type
@@ -735,7 +755,7 @@ document amended, and the placement budget confirmed or replaced.
 
 ### Task 3.5 Export and import
 - **Build:** canonical-JSON export and import with exact round-trip.
-- **Where:** `crates/core`; `crates/api` (export/import endpoints).
+- **Where:** `backend/crates/core`; `backend/crates/api` (export/import endpoints).
 - **Subtasks:**
   - [ ] 1. Implement pretty-printed canonical JSON export for any definition.
   - [ ] 2. Implement import running the same eleven-step validation as a save.
@@ -747,7 +767,7 @@ document amended, and the placement budget confirmed or replaced.
 
 ### Task 3.6 Definition history
 - **Build:** the last-20-versions history per definition, with diff and restore.
-- **Where:** `crates/core` (`definition_history`); `crates/api`; `web/` (history panel, per the
+- **Where:** `backend/crates/core` (`definition_history`); `backend/crates/api`; `frontend/` (history panel, per the
   cross-cutting affordances every definition-backed object carries).
 - **Subtasks:**
   - [ ] 1. Write a `definition_history` row on every accepted save, keyed by `(definition_id,
@@ -762,7 +782,7 @@ document amended, and the placement budget confirmed or replaced.
 ### Task 3.7 User-defined computed fields
 - **Build:** the restricted computed-field capability from CR-1/D-018 — one arithmetic operation over
   two registered numeric fields, in a closed `user.*` namespace.
-- **Where:** `crates/core` (`computed_fields` table, registry integration).
+- **Where:** `backend/crates/core` (`computed_fields` table, registry integration).
 - **Subtasks:**
   - [ ] 1. Implement the `computed_fields` table: operation (`add`/`subtract`/`multiply`/`divide`), two
      operand field keys, result type, `null_policy` (`Null` default, `Zero` opt-in), derived
@@ -781,7 +801,7 @@ document amended, and the placement budget confirmed or replaced.
 ### Task 3.8 Interface pages this phase ships
 - **Build:** the definition editor shell, the registry-generated condition and expression builder, and
   the cross-cutting affordances every definition-backed object carries.
-- **Where:** `web/src/routes` (definition editors); `web/` (shared condition-builder component).
+- **Where:** `frontend/src/routes` (definition editors); `frontend/` (shared condition-builder component).
 - **Subtasks:**
   - [ ] 1. Build a condition-tree builder generated from the field and operator registries — adding a field
      to the registry must add a working control with no frontend code change.
@@ -808,7 +828,7 @@ streaming discipline is set on the first pass that needs it, not retrofitted ont
 
 ### Task 4.1 Library discovery
 - **Build:** discovery and tracking of Plex libraries, filtering to the two representable types.
-- **Where:** `crates/core` (`libraries` table); `crates/plex` (the discovery calls from Phase 2).
+- **Where:** `backend/crates/core` (`libraries` table); `backend/crates/plex` (the discovery calls from Phase 2).
 - **Subtasks:**
   - [ ] 1. Populate `libraries` from the server's section list, keyed on `section_uuid` with an immutable
      `handle` that definitions reference.
@@ -822,7 +842,7 @@ streaming discipline is set on the first pass that needs it, not retrofitted ont
 
 ### Task 4.2 The item cache
 - **Build:** the per-item cache — movies, shows, seasons, episodes — with soft deletion.
-- **Where:** `crates/core` (`library_items`).
+- **Where:** `backend/crates/core` (`library_items`).
 - **Subtasks:**
   - [ ] 1. Populate `library_items` with parent linkage (season → show, episode → season), `rating_key`,
      `guid`, and the tracked metadata fields.
@@ -838,7 +858,7 @@ streaming discipline is set on the first pass that needs it, not retrofitted ont
 ### Task 4.3 Metadata change tracking
 - **Build:** a hashable projection of item facts, separated from ratings by refresh cadence and
   availability class.
-- **Where:** `crates/core` (`library_item_state`).
+- **Where:** `backend/crates/core` (`library_item_state`).
 - **Subtasks:**
   - [ ] 1. Compute `metadata_hash` on `library_items` from the tracked metadata fields, to detect changes
      cheaply on each pass.
@@ -855,7 +875,7 @@ streaming discipline is set on the first pass that needs it, not retrofitted ont
 ### Task 4.4 The discovered field cache
 - **Build:** the persisted half of the two-layer field registry from Task 3.3 — one snapshot per
   library, invalidated on observable events only.
-- **Where:** `crates/core` (`discovery_snapshots` and children, `definition_field_uses`).
+- **Where:** `backend/crates/core` (`discovery_snapshots` and children, `definition_field_uses`).
 - **Subtasks:**
   - [ ] 1. Write a new snapshot and flip `is_current` in one transaction, so a failed or partial discovery
      never leaves the cache half-rewritten.
@@ -871,7 +891,7 @@ streaming discipline is set on the first pass that needs it, not retrofitted ont
 ### Task 4.5 Canonical id resolution
 - **Build:** resolution of external identifiers (TMDB/TVDB/IMDb triple, Plex GUID) to library items,
   with ambiguity recorded rather than guessed.
-- **Where:** `crates/core` (`library_item_ids`, `ambiguous_matches`).
+- **Where:** `backend/crates/core` (`library_item_ids`, `ambiguous_matches`).
 - **Subtasks:**
   - [ ] 1. Populate `library_item_ids` from Plex's own GUID plus agent- and mapping-derived identifiers.
   - [ ] 2. Implement the lookup index resolving `(id_space, id_value)` to a library item within a library.
@@ -886,7 +906,7 @@ streaming discipline is set on the first pass that needs it, not retrofitted ont
 ### Task 4.6 Anime id mapping
 - **Build:** bulk-imported cross-provider identifier mapping (AniList/MAL to TVDB/TMDB), refreshed
   wholesale on a schedule, kept apart from per-item state.
-- **Where:** `crates/core` (`id_mappings`).
+- **Where:** `backend/crates/core` (`id_mappings`).
 - **Subtasks:**
   - [ ] 1. Implement `id_mappings` as a composite-key, `WITHOUT ROWID` table, season-aware where a mapping
      depends on season.
@@ -897,7 +917,7 @@ streaming discipline is set on the first pass that needs it, not retrofitted ont
 
 ### Task 4.7 Rebinding and self-healing
 - **Build:** recovery from Plex-assigned identifier churn without treating the item as new.
-- **Where:** `crates/core` (rebinding logic over `library_items` and `library_item_ids`).
+- **Where:** `backend/crates/core` (rebinding logic over `library_items` and `library_item_ids`).
 - **Subtasks:**
   - [ ] 1. Detect rating-key churn — the same canonical identity reappearing under a new `rating_key` — and
      rebind the existing row via `UPDATE`, never a re-key.
@@ -911,7 +931,7 @@ streaming discipline is set on the first pass that needs it, not retrofitted ont
 ### Task 4.8 The ambiguity surface
 - **Build:** the resolution API and minimal list surface for ambiguous matches, ahead of the full
   doctor page.
-- **Where:** `crates/api` (resolution endpoint); `web/` (minimal list, feeding the doctor page later).
+- **Where:** `backend/crates/api` (resolution endpoint); `frontend/` (minimal list, feeding the doctor page later).
 - **Subtasks:**
   - [ ] 1. Expose an endpoint listing unresolved `ambiguous_matches` rows with their candidates.
   - [ ] 2. Expose a resolution endpoint recording `resolved_item_id` and `resolved_by`.
@@ -924,7 +944,7 @@ streaming discipline is set on the first pass that needs it, not retrofitted ont
 ### Task 4.9 Streaming discipline over the full library
 - **Build:** the batch/stream processing discipline for any pass touching every item in a library, set
   here because this is the first component that does.
-- **Where:** `crates/core` (pass execution).
+- **Where:** `backend/crates/core` (pass execution).
 - **Subtasks:**
   - [ ] 1. Process items in bounded batches rather than materialising a full 200,000-item library in memory.
   - [ ] 2. Make every full-library pass resumable at a batch boundary, consistent with the no-transaction-
@@ -936,7 +956,7 @@ streaming discipline is set on the first pass that needs it, not retrofitted ont
 
 ### Task 4.10 Interface pages this phase ships
 - **Build:** the Libraries settings page and item-cache status indicators.
-- **Where:** `web/src/routes` (Settings › libraries).
+- **Where:** `frontend/src/routes` (Settings › libraries).
 - **Subtasks:**
   - [ ] 1. List discovered libraries with type, item count, last scan, and last cache-refresh time.
   - [ ] 2. Show a library missing from the server (per `missing_since`) as a distinct state, not silently
@@ -969,7 +989,7 @@ is adapters — a content decision, not an engine one.
 ### Task 5.1 The generic source interface
 - **Build:** the `SourceBuilder` trait every adapter implements, with a typed client, rate limiter,
   circuit breaker, response validator, and health-status hook built once.
-- **Where:** `crates/sources` (trait and shared scaffolding).
+- **Where:** `backend/crates/sources` (trait and shared scaffolding).
 - **Subtasks:**
   - [ ] 1. Define the `SourceBuilder` trait: fetch, declared parameters (JSON Schema), declared endpoints
      (the ladder), declared `idSpace`.
@@ -983,7 +1003,7 @@ is adapters — a content decision, not an engine one.
 ### Task 5.2 The endpoint ladder with per-rung capabilities
 - **Build:** the ordered, per-rung endpoint declaration (`structured` / `embedded` / `markup`), each
   rung carrying its own `parserVersion` and capability flags, per D-040.
-- **Where:** `crates/sources` (ladder execution); `crates/core` (registry entry shape from Task 3.3).
+- **Where:** `backend/crates/sources` (ladder execution); `backend/crates/core` (registry entry shape from Task 3.3).
 - **Subtasks:**
   - [ ] 1. Implement the ladder as an ordered list tried top to bottom, most sources declaring exactly one
      rung.
@@ -997,7 +1017,7 @@ is adapters — a content decision, not an engine one.
 
 ### Task 5.3 The circuit breaker
 - **Build:** persisted, per-source circuit-breaker state that survives restart.
-- **Where:** `crates/sources` (`source_health`).
+- **Where:** `backend/crates/sources` (`source_health`).
 - **Subtasks:**
   - [ ] 1. Implement `source_health` keyed on `(source_type, instance_ref)`, tracking consecutive failures,
      open/half-open/closed state, and cooldown.
@@ -1012,7 +1032,7 @@ is adapters — a content decision, not an engine one.
 
 ### Task 5.4 Frozen contributions and degraded state
 - **Build:** the last-known-good freeze that keeps a failed source from emptying a collection.
-- **Where:** `crates/sources` / `crates/core` (`source_contributions`).
+- **Where:** `backend/crates/sources` / `backend/crates/core` (`source_contributions`).
 - **Subtasks:**
   - [ ] 1. Implement `source_contributions`, retaining at most two rows per `(definition_id, source_index)`:
      most recent, and most recent trustworthy (`status = 'Ok'` and either `item_count > 0` or
@@ -1028,7 +1048,7 @@ is adapters — a content decision, not an engine one.
 ### Task 5.5 One instrumented HTTP client with a mandatory per-request timeout
 - **Build:** the single shared HTTP client every adapter uses — timeout, retry, backoff, jitter, log
   deduplication.
-- **Where:** `crates/sources` (shared client module).
+- **Where:** `backend/crates/sources` (shared client module).
 - **Subtasks:**
   - [ ] 1. Enforce a mandatory per-request timeout with no adapter able to opt out.
   - [ ] 2. Implement retry with exponential backoff and jitter, bounded, feeding failures into the breaker
@@ -1042,7 +1062,7 @@ is adapters — a content decision, not an engine one.
 ### Task 5.6 The parser-versioned response cache with spread expiries
 - **Build:** `http_cache`, keyed on request plus the interpreting parser's version, with expiries
   spread to avoid a synchronized refetch storm — per D-043.
-- **Where:** `crates/sources` (`http_cache`).
+- **Where:** `backend/crates/sources` (`http_cache`).
 - **Subtasks:**
   - [ ] 1. Compute `cache_key` as a digest over method, URL, relevant headers, and `parser_version` — inside
      the key, not stored beside it.
@@ -1059,7 +1079,7 @@ is adapters — a content decision, not an engine one.
 ### Task 5.7 The volatile-parameter feed and its signature verification
 - **Build:** the out-of-band feed that supplies provider-rotated parameter values, constrained to the
   names the binary ships — per D-041.
-- **Where:** `crates/sources` (`volatile_params`, feed fetch and verification).
+- **Where:** `backend/crates/sources` (`volatile_params`, feed fetch and verification).
 - **Subtasks:**
   - [ ] 1. Implement `volatile_params`, rejecting any `name` absent from the shipped registry's
      `volatileParams` declarations.
@@ -1076,7 +1096,7 @@ is adapters — a content decision, not an engine one.
 ### Task 5.8 The bulk dataset importer
 - **Build:** atomic, all-or-nothing import of a provider's whole-dataset file, staged and promoted by
   generation — per D-042.
-- **Where:** `crates/sources` (`reference_datasets`, `reference_dataset_rows`).
+- **Where:** `backend/crates/sources` (`reference_datasets`, `reference_dataset_rows`).
 - **Subtasks:**
   - [ ] 1. Stream-decompress and batch-insert the incoming file at `generation + 1` with
      `import_state = 'Staging'`, never loading the full file into memory.
@@ -1093,7 +1113,7 @@ is adapters — a content decision, not an engine one.
 ### Task 5.9 TMDB adapters
 - **Build:** charts, franchise, custom lists, random (seeded), Discover with nested filter groups,
   watch providers, and person collections (auto-collections).
-- **Where:** `crates/sources/tmdb`.
+- **Where:** `backend/crates/sources/tmdb`.
 - **Subtasks:**
   - [ ] 1. Implement `tmdb.chart` (popular/topRated/trending, window, mediaType, limit).
   - [ ] 2. Implement `tmdb.franchise` (franchise id or seed title, includeParts) and `tmdb.list` (list url or
@@ -1110,7 +1130,7 @@ is adapters — a content decision, not an engine one.
 
 ### Task 5.10 Trakt adapters
 - **Build:** charts, custom lists, recommendations.
-- **Where:** `crates/sources/trakt`.
+- **Where:** `backend/crates/sources/trakt`.
 - **Subtasks:**
   - [ ] 1. Implement `trakt.chart` (chart, period, mediaType).
   - [ ] 2. Implement `trakt.list` (list url).
@@ -1122,7 +1142,7 @@ is adapters — a content decision, not an engine one.
 - **Build:** charts and custom lists, declared on two rungs per CR-3/D-040 — a structured,
   cursor-paginated, typed-error endpoint, and an embedded-payload fallback that cannot distinguish
   empty from broken.
-- **Where:** `crates/sources/imdb`.
+- **Where:** `backend/crates/sources/imdb`.
 - **Subtasks:**
   - [ ] 1. Implement `imdb.chart` and `imdb.list` against the structured rung, declaring
      `affirmativeEmpty: true` there because its typed errors distinguish not-found from forbidden from
@@ -1137,7 +1157,7 @@ is adapters — a content decision, not an engine one.
 
 ### Task 5.12 Letterboxd lists adapter
 - **Build:** the scraped-tier list source.
-- **Where:** `crates/sources/letterboxd`.
+- **Where:** `backend/crates/sources/letterboxd`.
 - **Subtasks:**
   - [ ] 1. Implement `letterboxd.list` (list url, random) audited against the endpoint ladder before any
      parser is written.
@@ -1148,7 +1168,7 @@ is adapters — a content decision, not an engine one.
 
 ### Task 5.13 MDBList adapter
 - **Build:** `mdblist.list` (list url).
-- **Where:** `crates/sources/mdblist`.
+- **Where:** `backend/crates/sources/mdblist`.
 - **Subtasks:**
   - [ ] 1. Audit against the endpoint ladder and implement at the highest rung reached.
   - [ ] 2. Declare capabilities per rung.
@@ -1156,7 +1176,7 @@ is adapters — a content decision, not an engine one.
 
 ### Task 5.14 AniList adapter
 - **Build:** `anilist.*` (chart or list url).
-- **Where:** `crates/sources/anilist`.
+- **Where:** `backend/crates/sources/anilist`.
 - **Subtasks:**
   - [ ] 1. Implement chart and list variants against AniList's structured API.
   - [ ] 2. Resolve results through the anime id mapping from Task 4.6 where the target library speaks
@@ -1166,7 +1186,7 @@ is adapters — a content decision, not an engine one.
 
 ### Task 5.15 MyAnimeList adapter
 - **Build:** `mal.*` (chart or list).
-- **Where:** `crates/sources/mal`.
+- **Where:** `backend/crates/sources/mal`.
 - **Subtasks:**
   - [ ] 1. Implement chart and list variants.
   - [ ] 2. Resolve through the anime id mapping as in Task 5.14.
@@ -1175,7 +1195,7 @@ is adapters — a content decision, not an engine one.
 
 ### Task 5.16 FlixPatrol adapters
 - **Build:** networks and originals, scraped tier.
-- **Where:** `crates/sources/flixpatrol`.
+- **Where:** `backend/crates/sources/flixpatrol`.
 - **Subtasks:**
   - [ ] 1. Implement `flixpatrol.networks` (country, platform) and `flixpatrol.originals` (platform).
   - [ ] 2. Declare `affirmativeEmpty: false`, behind challenge detection and the circuit breaker.
@@ -1184,7 +1204,7 @@ is adapters — a content decision, not an engine one.
 
 ### Task 5.17 Overseerr adapter
 - **Build:** `overseerr.requests` (scope global/perUser, status).
-- **Where:** `crates/sources/overseerr`.
+- **Where:** `backend/crates/sources/overseerr`.
 - **Subtasks:**
   - [ ] 1. Implement the requests query against Overseerr's API.
   - [ ] 2. Declare `affirmativeEmpty: true` on its structured rung.
@@ -1192,7 +1212,7 @@ is adapters — a content decision, not an engine one.
 
 ### Task 5.18 Tautulli adapter
 - **Build:** `tautulli.stats` (metric × unit, days, minPlays).
-- **Where:** `crates/sources/tautulli`.
+- **Where:** `backend/crates/sources/tautulli`.
 - **Subtasks:**
   - [ ] 1. Implement the popular/watched metric crossed with plays/duration unit.
   - [ ] 2. Support the `days`/`minPlays` parameters as JSON-Schema-validated inputs.
@@ -1200,7 +1220,7 @@ is adapters — a content decision, not an engine one.
 
 ### Task 5.19 Radarr/Sonarr tag adapters
 - **Build:** `radarr.tag` and `sonarr.tag` (instanceId, tagId).
-- **Where:** `crates/sources/radarr`, `crates/sources/sonarr`.
+- **Where:** `backend/crates/sources/radarr`, `backend/crates/sources/sonarr`.
 - **Subtasks:**
   - [ ] 1. Implement both against multi-instance configuration.
   - [ ] 2. Declare `ordered: false`.
@@ -1210,7 +1230,7 @@ is adapters — a content decision, not an engine one.
 ### Task 5.20 Plex library modes adapter
 - **Build:** `plex.library` (mode: recentlyAdded / recentlyReleased / recentlyReleasedEpisodes, limit),
   reading through the Phase 2 client — no writes.
-- **Where:** `crates/sources/plex_library`, consuming `crates/plex`.
+- **Where:** `backend/crates/sources/plex_library`, consuming `backend/crates/plex`.
 - **Subtasks:**
   - [ ] 1. Implement all three modes as read-only queries against the library-listing calls from
      Task 2.1.
@@ -1221,7 +1241,7 @@ is adapters — a content decision, not an engine one.
 ### Task 5.21 Lifecycle Coming Soon adapter
 - **Build:** `lifecycle.comingSoon` (window, monitored scope, instance and tag filters), shaped now so
   the source interface is complete even though the lifecycle state machine it reads lands later.
-- **Where:** `crates/sources/lifecycle`.
+- **Where:** `backend/crates/sources/lifecycle`.
 - **Subtasks:**
   - [ ] 1. Implement the source's parameter schema and query shape against the lifecycle fields the registry
      already declares (Task 3.3's `lifecycle.*` catalogue).
@@ -1233,7 +1253,7 @@ is adapters — a content decision, not an engine one.
 ### Task 5.22 Multi-source composition
 - **Build:** the two meta sources — `multi` (N children with per-source priority and caps) and
   `hubReplacement` (shadows a native Plex hub, excluding placeholder items).
-- **Where:** `crates/sources/meta`.
+- **Where:** `backend/crates/sources/meta`.
 - **Subtasks:**
   - [ ] 1. Implement `multi`, mapping its combine modes onto the merge strategy and order stage from
      Task 5.23.
@@ -1246,7 +1266,7 @@ is adapters — a content decision, not an engine one.
   intersect/subtract, per-source cap, canonical-id dedupe), filter (exclusions, thresholds, attribute
   filters, mutual exclusion, time restrictions), order (deterministic by source position, release date,
   rating, or seeded random; franchise parts by release date).
-- **Where:** `crates/core` (pipeline).
+- **Where:** `backend/crates/core` (pipeline).
 - **Subtasks:**
   - [ ] 1. Implement merge with the three strategies, per-source caps, and canonical-identifier
      deduplication.
@@ -1264,7 +1284,7 @@ is adapters — a content decision, not an engine one.
 ### Task 5.24 Interface pages this phase ships
 - **Build:** source health and circuit-breaker status on the collection editor, a per-collection source
   list, and the preview panel showing partial results with per-source attribution.
-- **Where:** `web/src/routes` (collection editor, preview panel); `crates/api` (exposing
+- **Where:** `frontend/src/routes` (collection editor, preview panel); `backend/crates/api` (exposing
   `source_health` and `source_contributions`).
 - **Subtasks:**
   - [ ] 1. Render each source's health state (closed/open/half-open, frozen, degraded) inline in the
@@ -1295,7 +1315,7 @@ state, artwork, and sort-title records.
 ### Task 6.1 Create and update managed collections
 - **Build:** the `managed_collections` binding between a definition and the Plex collection(s) it
   produces, one row per `(definition, library, variant)`.
-- **Where:** `crates/core` (`managed_collections`); `crates/plex` (create/update calls from Task 2.1).
+- **Where:** `backend/crates/core` (`managed_collections`); `backend/crates/plex` (create/update calls from Task 2.1).
 - **Subtasks:**
   - [ ] 1. Implement `managed_collections` with `variant_key` for the multi-collection modes (per-franchise,
      per-person), keyed uniquely on `(definition_id, library_id, variant_key)`.
@@ -1311,7 +1331,7 @@ state, artwork, and sort-title records.
 ### Task 6.2 Reconcile membership
 - **Build:** membership reconciliation as a diff against `managed_collection_items`, never a full
   rewrite.
-- **Where:** `crates/core` (reconciliation); `crates/plex` (item add/remove/reorder calls).
+- **Where:** `backend/crates/core` (reconciliation); `backend/crates/plex` (item add/remove/reorder calls).
 - **Subtasks:**
   - [ ] 1. Diff the desired item set against `managed_collection_items`, the last reconciled membership.
   - [ ] 2. Issue only the add/remove/reorder calls the diff requires — no unconditional clear-and-rewrite.
@@ -1326,7 +1346,7 @@ state, artwork, and sort-title records.
 
 ### Task 6.3 Mutual exclusion
 - **Build:** enforcement of `reconcile.mutualExclusionGroup` across collections sharing a group.
-- **Where:** `crates/core` (reconciliation, using `ix_managed_collection_items__item`).
+- **Where:** `backend/crates/core` (reconciliation, using `ix_managed_collection_items__item`).
 - **Subtasks:**
   - [ ] 1. Before adding an item to a collection with a mutual-exclusion group, check existing membership
      across every other collection in that group via the item-indexed lookup.
@@ -1337,7 +1357,7 @@ state, artwork, and sort-title records.
 
 ### Task 6.4 Self-healing for a vanished collection
 - **Build:** recovery when a managed collection disappears from Plex between passes.
-- **Where:** `crates/core` (`managed_collections.missing_since`, `heal_count`).
+- **Where:** `backend/crates/core` (`managed_collections.missing_since`, `heal_count`).
 - **Subtasks:**
   - [ ] 1. Detect a managed collection's absence via `missing_since` rather than assuming deletion means
      intent.
@@ -1349,7 +1369,7 @@ state, artwork, and sort-title records.
 
 ### Task 6.5 Adoption of user-made collections, with consent
 - **Build:** consent-gated adoption of collections the user created, per D-014.
-- **Where:** `crates/core` (adoption state, sort-title consent); `web/` (consent controls).
+- **Where:** `backend/crates/core` (adoption state, sort-title consent); `frontend/` (consent controls).
 - **Subtasks:**
   - [ ] 1. Implement the per-library adoption-consent control, with a per-collection override for
      exceptions, and no global control at launch.
@@ -1363,7 +1383,7 @@ state, artwork, and sort-title records.
 
 ### Task 6.6 Interface pages this phase ships
 - **Build:** the Collections list page and adoption-consent controls in Settings.
-- **Where:** `web/src/routes` (Collections list; Settings › libraries adoption consent).
+- **Where:** `frontend/src/routes` (Collections list; Settings › libraries adoption consent).
 - **Subtasks:**
   - [ ] 1. List every collection with name, target libraries, item count, last-run outcome, next run, and
      current state (frozen/degraded/never-run/disabled/mid-sync), each legible without opening the
@@ -1398,7 +1418,7 @@ stops.
 
 - **Build:** compute the desired sequence per surface from stored `position` values, tie-broken by
   participant ULID, deduplicated by identifier before any planning runs.
-- **Where:** crates/core
+- **Where:** backend/crates/core
 - **Subtasks:**
   - [ ] 1. Read `placement_desired` rows into an ordered sequence per (surface, library).
   - [ ] 2. Sort by `(position, participant ULID)` ascending.
@@ -1415,7 +1435,7 @@ stops.
 - **Build:** given the actual sequence read from Plex and the desired sequence, compute the longest
   subsequence of actual already in desired relative order (an LIS over desired-rank) and emit
   exactly `n − LIS` moves, each item moved once, `after` its already-correct predecessor.
-- **Where:** crates/core
+- **Where:** backend/crates/core
 - **Subtasks:**
   - [ ] 1. Implement LIS-over-desired-rank on the actual sequence.
   - [ ] 2. Emit the move list: everything outside the LIS, in desired order, each placed `after` its
@@ -1431,7 +1451,7 @@ stops.
   `placement_gaps`. An insertion destroys the parent pair and creates two child pairs, each
   inheriting `depth = parent.depth + 1`; depth resets to zero for a pair whose right-hand
   participant was just re-promoted with fresh spacing.
-- **Where:** crates/core (accounting), crates/plex (the position observations that seed the estimate)
+- **Where:** backend/crates/core (accounting), backend/crates/plex (the position observations that seed the estimate)
 - **Subtasks:**
   - [ ] 1. Implement the `placement_gaps` split-on-insertion update: two child rows with incremented
      depth, parent row removed.
@@ -1453,7 +1473,7 @@ stops.
   library rebalance scoped to re-promotable participants, and a terminal non-convergent state —
   bounded and deterministic, with every rung recorded before it executes and anchors never
   unpromoted at any rung.
-- **Where:** crates/core (ladder logic), crates/plex (unpromote / promote / move calls)
+- **Where:** backend/crates/core (ladder logic), backend/crates/plex (unpromote / promote / move calls)
 - **Subtasks:**
   - [ ] 1. Rung 0: apply the minimal move plan from Task 7.2, one attempt, verify by read-back (Task 7.5).
   - [ ] 2. Rung 1: for each item still misplaced and re-promotable, unpromote and re-promote with fresh
@@ -1478,7 +1498,7 @@ stops.
 - **Build:** every applied plan is verified by reading back the actual order; a pass compares a
   hash of (desired sequence, visibility set) against the last verified state and, on a match,
   issues zero API calls beyond the cheap verification read.
-- **Where:** crates/core, crates/plex
+- **Where:** backend/crates/core, backend/crates/plex
 - **Subtasks:**
   - [ ] 1. Compute `desired_hash` before planning; compare against `placement_surface_state.verified_hash`.
   - [ ] 2. On a hash match, skip planning and writes entirely — only the cheap verification read runs.
@@ -1495,7 +1515,7 @@ stops.
 - **Build:** apply visibility changes (owner home, shared-user home, library recommended) before
   ordering within a pass, against `placement_visibility` rows scoped to the seeded whole-audience
   principals at Tier 0.
-- **Where:** crates/core, crates/plex
+- **Where:** backend/crates/core, backend/crates/plex
 - **Subtasks:**
   - [ ] 1. Resolve each participant's visibility set from `placement_visibility` per surface.
   - [ ] 2. Apply visibility writes strictly before the ordering pass for that surface — a newly visible
@@ -1513,7 +1533,7 @@ stops.
   original value, presence, and lock state from the raw Plex attribute before the first mutation;
   consent enforcement for adopted collections at library scope with a per-collection override;
   idempotent prefix application.
-- **Where:** crates/core (policy, the one function), crates/plex (raw-attribute read, locked
+- **Where:** backend/crates/core (policy, the one function), backend/crates/plex (raw-attribute read, locked
   edit-endpoint write)
 - **Subtasks:**
   - [ ] 1. Implement the single prefix compute/strip function; no second implementation exists anywhere
@@ -1540,7 +1560,7 @@ stops.
   re-keyed one, drop and report a user-deleted adoption, drop and report an absent native hub, and
   leave unrecognised participants alone and recorded — plus epoch-seeded randomization confined to
   a participant's own occupied positions.
-- **Where:** crates/core
+- **Where:** backend/crates/core
 - **Subtasks:**
   - [ ] 1. Implement each row of the self-healing table as an explicit branch, not a generic catch-all.
   - [ ] 2. Implement `randomization_epochs`: the shuffle is seeded by `(epoch, surface)`; the epoch
@@ -1559,7 +1579,7 @@ stops.
 - **Build:** ordering and visibility across the home surface and each library surface, shaped by
   the spike track's answers to Q-015 and Q-013; every applicable engine-specific state rendered
   explicitly, with a full keyboard path for every drag operation.
-- **Where:** crates/api (routes, SSE for pass status), web/
+- **Where:** backend/crates/api (routes, SSE for pass status), frontend/
 - **Subtasks:**
   - [ ] 1. Confirm Q-014 and Q-015 have landed with recorded measurements, and the PRD's placement design
      amended accordingly, before building against their answer.
@@ -1604,7 +1624,7 @@ state machine passes its own tests.
 
 - **Build:** capture the original poster once, before any modification, byte-exactly and
   content-addressed; quarantine any capture whose provenance is uncertain.
-- **Where:** crates/render (capture pipeline), crates/plex (thumbnail read)
+- **Where:** backend/crates/render (capture pipeline), backend/crates/plex (thumbnail read)
 - **Subtasks:**
   - [ ] 1. On first touch of a library item, read the poster bytes via the item's recorded thumbnail key
      and hash to `sha256`; insert into the content-addressed asset store (deduplicated on the
@@ -1624,7 +1644,7 @@ state machine passes its own tests.
 
 - **Build:** the element model (layers, positioned elements, per-element conditions), formatters as
   pure functions of value, locale, and arguments, and the null-skip rule for unresolved variables.
-- **Where:** crates/render
+- **Where:** backend/crates/render
 - **Subtasks:**
   - [ ] 1. Implement the element model: layers, positioned elements, per-element conditions bound to
      registry fields.
@@ -1643,7 +1663,7 @@ state machine passes its own tests.
 - **Build:** one renderer implementation compositing pristine base plus current template plus
   current state, serving both the editor preview and the applied output; an overlay is never
   applied over an overlay.
-- **Where:** crates/render
+- **Where:** backend/crates/render
 - **Subtasks:**
   - [ ] 1. Implement a single render entry point used by both the preview endpoint and the apply job — no
      second renderer.
@@ -1661,7 +1681,7 @@ state machine passes its own tests.
 - **Build:** the content-addressed render cache keyed by a hash of (base digest, template id,
   template version, state snapshot, renderer version), with a configured size cap and
   `last_used_at` eviction that never evicts an entry a database constraint protects.
-- **Where:** crates/render
+- **Where:** backend/crates/render
 - **Subtasks:**
   - [ ] 1. Implement the five-term key composition; mutating any one term must change the key.
   - [ ] 2. On an unchanged key, skip the upload entirely — a cache hit, no write.
@@ -1678,7 +1698,7 @@ state machine passes its own tests.
 
 - **Build:** mark-and-sweep garbage collection across every table that can reference an asset, with
   a grace window before deletion and a filesystem reconciliation pass for unreferenced files.
-- **Where:** crates/render, crates/core (nightly job wiring)
+- **Where:** backend/crates/render, backend/crates/core (nightly job wiring)
 - **Subtasks:**
   - [ ] 1. Mark: walk every table that can reference an asset — base posters, the render cache, pack
      assets, local asset files, and definition-body asset references — and touch `last_used_at` on
@@ -1698,7 +1718,7 @@ state machine passes its own tests.
 
 - **Build:** removing overlays uploads the stored base poster exactly as captured — no resize,
   re-encode, format conversion, or crop.
-- **Where:** crates/render, crates/plex
+- **Where:** backend/crates/render, backend/crates/plex
 - **Subtasks:**
   - [ ] 1. Implement the reset path as a direct upload of the stored base asset's bytes; it never passes
      through the renderer.
@@ -1712,7 +1732,7 @@ state machine passes its own tests.
 - **Build:** the layered canvas editor — layer list, canvas, element inspector, per-element
   conditions, live preview — sharing Task 8.3's renderer so preview and applied output cannot
   drift.
-- **Where:** crates/api, web/
+- **Where:** backend/crates/api, frontend/
 - **Subtasks:**
   - [ ] 1. Layer list, canvas, element inspector, and per-element condition editing bound to the field
      registry.
@@ -1751,7 +1771,7 @@ Phase 8 until this phase's state machine passes its own tests, in isolation, fir
 - **Build:** the lifecycle subject model — phase, acquisition, presence, and (for shows) production
   as independent axes; the fixed six-step evaluation pass; the seven guards; bidirectional phase
   transitions that never destroy on a release date moving backwards.
-- **Where:** crates/core
+- **Where:** backend/crates/core
 - **Subtasks:**
   - [ ] 1. Implement the subject model against the lifecycle-subjects table, including its identity
      uniqueness (library, id space, id value, season) and the whole-title/season split from D-025.
@@ -1782,7 +1802,7 @@ Phase 8 until this phase's state machine passes its own tests, in isolation, fir
 - **Build:** opt-in per-show season subjects, a whole-title subject that always exists for a tracked
   show, and the ownership-by-absence rule that stops the two granularities from ever contending for
   one placeholder path.
-- **Where:** crates/core
+- **Where:** backend/crates/core
 - **Subtasks:**
   - [ ] 1. Implement `seasonGranularity` resolution (off by default, instance/definition default, per-show
      override) and season-subject creation only for seasons whose air date falls inside
@@ -1804,7 +1824,7 @@ Phase 8 until this phase's state machine passes its own tests, in isolation, fir
 
 - **Build:** the pure mapping from (phase, acquisition, presence, production) to the single status
   label overlay packs render, exposed under a `lifecycle.*` field-registry namespace.
-- **Where:** crates/core
+- **Where:** backend/crates/core
 - **Subtasks:**
   - [ ] 1. Implement the status table as a pure function — no I/O, no clock reads beyond the evaluation
      clock.
@@ -1823,7 +1843,7 @@ Phase 8 until this phase's state machine passes its own tests, in isolation, fir
   three-layer marker scheme that lets hub replacement and sweeps identify a placeholder without
   parsing filenames, and title repair for a placeholder whose display title has drifted from
   evidence.
-- **Where:** crates/core (intent orchestration, filesystem writes, marker application), crates/plex
+- **Where:** backend/crates/core (intent orchestration, filesystem writes, marker application), backend/crates/plex
   (label write, scan trigger, rating-key discovery)
 - **Subtasks:**
   - [ ] 1. Implement the intent lifecycle: Intend (transactional, moves presence to
@@ -1854,7 +1874,7 @@ Phase 8 until this phase's state machine passes its own tests, in isolation, fir
 - **Build:** the seven-trigger allowlist as the only path that can delete a placeholder, each
   carrying its evidence into an append-only transition log; the reference-counting rule under which
   only a count reaching zero departs a subject.
-- **Where:** crates/core
+- **Where:** backend/crates/core
 - **Subtasks:**
   - [ ] 1. Implement the seven triggers (`Materialized`, `Departed`, `Retired`, `FilteredOut`, `Disabled`,
      `Manual`, `Reaped`), each writing a transition row with `is_destructive` set and a complete
@@ -1884,7 +1904,7 @@ Phase 8 until this phase's state machine passes its own tests, in isolation, fir
 - **Build:** the eligibility-gate and routing computation the lifecycle pass evaluates alongside the
   state machine, stopping short of any write to a download stack — that write path belongs to
   Phase 10.
-- **Where:** crates/core
+- **Where:** backend/crates/core
 - **Subtasks:**
   - [ ] 1. Implement the eligibility gates (position cap, minimum year, minimum ratings, genre / country /
      language / keyword filters, collection enablement) as pure evaluators over evidence.
@@ -1900,7 +1920,7 @@ Phase 8 until this phase's state machine passes its own tests, in isolation, fir
 
 - **Build:** a nightly-lane scale test running a full reconciliation-through-lifecycle pass over the
   200,000-item, 2,000-collection scale target (D-030), asserting process RSS never exceeds 1 GB.
-- **Where:** crates/core (streaming discipline across the full pass), the nightly CI lane (D-035)
+- **Where:** backend/crates/core (streaming discipline across the full pass), the nightly CI lane (D-035)
 - **Subtasks:**
   - [ ] 1. Assemble scale fixtures at 200,000 items across several libraries and 2,000 collections,
      reusing the streaming batch discipline established for the item cache earlier in the plan.
@@ -1915,7 +1935,7 @@ Phase 8 until this phase's state machine passes its own tests, in isolation, fir
 - **Build:** the upcoming-by-date view, the materialised-placeholders view, and the
   stale-placeholder surface (D-011) with bulk removal; the acquisition-activity view ships empty
   here and is completed in Phase 10.
-- **Where:** crates/api, web/
+- **Where:** backend/crates/api, frontend/
 - **Subtasks:**
   - [ ] 1. Upcoming-by-date view ordered by each subject's resolved release date.
   - [ ] 2. Placeholders-currently-in-the-library view; each entry shows why it exists (its transitions)
@@ -1947,7 +1967,7 @@ state machine's own correctness obligations.
 - **Build:** typed write clients for Radarr and Sonarr — add movie or series, quality profile, root
   folder, tags, monitor mode, search-on-add, season folder — reusing the instrumented HTTP client
   and circuit breaker already built for these same products as read-only sources.
-- **Where:** crates/sources
+- **Where:** backend/crates/sources
 - **Subtasks:**
   - [ ] 1. Extend each adapter with a write-capable client surface distinct from its read-only
      collection-membership surface.
@@ -1962,7 +1982,7 @@ state machine's own correctness obligations.
 
 - **Build:** a typed client for creating Overseerr requests, distinct from the per-user / global
   read-only source built earlier.
-- **Where:** crates/sources
+- **Where:** backend/crates/sources
 - **Subtasks:**
   - [ ] 1. Implement the request-creation call and response handling.
   - [ ] 2. Route it through the same instrumented-client and breaker infrastructure as the read path.
@@ -1974,7 +1994,7 @@ state machine's own correctness obligations.
 - **Build:** complete the eligibility gates and routing decision scaffolded in Phase 9 into an
   executable policy — request-or-direct routing, never both for one subject — with a decision
   record complete enough to recompute the decision from the record alone.
-- **Where:** crates/core
+- **Where:** backend/crates/core
 - **Subtasks:**
   - [ ] 1. Evaluate all eligibility gates and record every gate's verdict, including the ones that
      passed.
@@ -2001,7 +2021,7 @@ state machine's own correctness obligations.
 
 - **Build:** the rule that an unreachable download stack freezes the acquisition axis, rather than
   being treated as permission to add again.
-- **Where:** crates/core
+- **Where:** backend/crates/core
 - **Subtasks:**
   - [ ] 1. Detect download-stack unreachability per instance before evaluating gates for any subject
      targeting it.
@@ -2018,7 +2038,7 @@ state machine's own correctness obligations.
 - **Build:** complete the Lifecycle page's acquisition-activity view left empty in Phase 9, and add
   the acquisition-policy section (eligibility gates, routing, TV shaping) to the collection editor's
   lifecycle section.
-- **Where:** crates/api, web/
+- **Where:** backend/crates/api, frontend/
 - **Subtasks:**
   - [ ] 1. Acquisition-activity view: recent decisions, their outcome, and their route.
   - [ ] 2. Collection editor's lifecycle section gains the gate, routing, and TV-shaping controls,
@@ -2062,7 +2082,7 @@ presence, and lock state — and restoring only the value fails silently and per
 - **Build:** a first-class, resumable teardown operation restoring every base poster, sort-title
   prefix with its lock state, applied label, managed collection and placeholder, and native hub
   placement; resumable after a crash or a cancel; reports everything it could not restore, by name.
-- **Where:** crates/core (orchestration, resumability), crates/plex (restore calls), crates/render
+- **Where:** backend/crates/core (orchestration, resumability), backend/crates/plex (restore calls), backend/crates/render
   (base-poster restore, reusing Task 8.6)
 - **Subtasks:**
   - [ ] 1. Restore every base poster via the byte-exact reset path built in Phase 8.
@@ -2087,7 +2107,7 @@ presence, and lock state — and restoring only the value fails silently and per
 - **Build:** the specific regression I-REV-3 exists for — value, presence, and lock state restored
   independently and correctly for items that never had a sort title, had a locked one, and had an
   unlocked one.
-- **Where:** crates/core, crates/plex
+- **Where:** backend/crates/core, backend/crates/plex
 - **Subtasks:**
   - [ ] 1. Build three fixtures: no sort title, a locked sort title, an unlocked sort title.
   - [ ] 2. Round-trip each through promote, then teardown's demote.
@@ -2100,7 +2120,7 @@ presence, and lock state — and restoring only the value fails silently and per
 
 - **Build:** confirm the label-removal failure reporting built earlier is not bypassed by the
   teardown path specifically.
-- **Where:** crates/core, crates/plex
+- **Where:** backend/crates/core, backend/crates/plex
 - **Subtasks:**
   - [ ] 1. Fault-inject a label-removal failure during a teardown run.
   - [ ] 2. Assert a doctor finding is raised, the item is not recorded as reset, and the next pass retries
@@ -2113,7 +2133,7 @@ presence, and lock state — and restoring only the value fails silently and per
 
 - **Build:** preview, typed confirmation, resumable progress display, and a final report — the
   preview's counts matching what teardown actually does.
-- **Where:** crates/api, web/
+- **Where:** backend/crates/api, frontend/
 - **Subtasks:**
   - [ ] 1. Preview: compute and display the exact named objects and counts teardown will affect, before
      any write.
@@ -2143,7 +2163,7 @@ Size `M`.
   `secrets.key` opt-in and default off, render cache / HTTP cache / placeholder stubs / logs never —
   captured using SQLite's online backup API, never a file copy, retaining seven daily and four
   weekly archives.
-- **Where:** crates/afisharr (scheduler wiring, backup command), crates/core (scheduling)
+- **Where:** backend/crates/afisharr (scheduler wiring, backup command), backend/crates/core (scheduling)
 - **Subtasks:**
   - [ ] 1. Implement the online-backup-API capture path for the database, reusing the mechanism already
      required for the pre-migration backup built in Phase 0.
@@ -2162,7 +2182,7 @@ Size `M`.
 - **Build:** the nightly job verifies the archive it just wrote — integrity check on the database
   copy, digest sample against asset files — and raises a doctor finding on failure. A backup that
   has never been restored is a hypothesis, not a guarantee.
-- **Where:** crates/afisharr, crates/api (finding surface)
+- **Where:** backend/crates/afisharr, backend/crates/api (finding surface)
 - **Subtasks:**
   - [ ] 1. Run an integrity check against the backed-up database copy immediately after capture.
   - [ ] 2. Sample asset digests in the archive against their recorded values.
@@ -2175,7 +2195,7 @@ Size `M`.
 - **Build:** restore that refuses to run against a live instance, verifies the archive before
   touching anything, refuses a schema version newer than the binary, restores the database then the
   assets, reconciles asset rows against the filesystem, and reports what could not be restored.
-- **Where:** crates/afisharr
+- **Where:** backend/crates/afisharr
 - **Subtasks:**
   - [ ] 1. Refuse to restore into a running instance; require a stop first.
   - [ ] 2. Verify the archive before any write: database integrity, schema version, a sample of asset
@@ -2197,7 +2217,7 @@ Size `M`.
   present and marked undecryptable; nothing is deleted on the assumption that an unreadable
   credential is an absent one; the interface walks the operator through re-authenticating each
   affected integration.
-- **Where:** crates/afisharr, crates/api, web/ (integration re-authentication flow)
+- **Where:** backend/crates/afisharr, backend/crates/api, frontend/ (integration re-authentication flow)
 - **Subtasks:**
   - [ ] 1. Implement the undecryptable-credential marking on restore, rather than deletion or silent
      substitution.
@@ -2229,7 +2249,7 @@ gate itself is claimed as I-SEC-8 in Phase 1, where it guards the first-run page
   Task 1.12, including D-026's report-and-adopt-nothing step — it lists existing collections per
   library, explains what adoption is, states plainly that Afisharr leaves those collections alone,
   and links to where adoption happens, with no bulk-adopt control anywhere in the wizard.
-- **Where:** crates/api, web/
+- **Where:** backend/crates/api, frontend/
 - **Subtasks:**
   - [ ] 1. Build the eight wizard steps against the onboarding journey — Claim, Admin, Plex, Libraries,
      Integrations, Packs, Report, Review — resumable mid-flow and re-runnable later without
@@ -2262,7 +2282,7 @@ gate itself is claimed as I-SEC-8 in Phase 1, where it guards the first-run page
 - **Build:** the pack installer over the manifest format (definitions, assets, declared variables),
   upgrade that replaces pack-origin documents while leaving forks untouched and reported as behind
   upstream, and forking a pack-origin definition into the user's own namespace.
-- **Where:** crates/packs
+- **Where:** backend/crates/packs
 - **Subtasks:**
   - [ ] 1. Implement manifest parsing and asset/definition installation from file, URL, or repository.
   - [ ] 2. Implement variable resolution and template expansion at install time (D-044): a parameterized
@@ -2289,7 +2309,7 @@ gate itself is claimed as I-SEC-8 in Phase 1, where it guards the first-run page
   surface per D-013), suspect base posters, orphan-sweep candidates, non-convergent libraries,
   asset-store reconciliation, and the explicitly dangerous operator actions (full hub reset, forced
   re-discovery, cache rebuild), each behind a preview of what will be lost.
-- **Where:** crates/api, web/
+- **Where:** backend/crates/api, frontend/
 - **Subtasks:**
   - [ ] 1. Aggregate findings by severity, deduplicated per check and subject, with first-seen and
      last-seen timestamps and an acknowledge action that suppresses without resolving.
@@ -2309,7 +2329,7 @@ gate itself is claimed as I-SEC-8 in Phase 1, where it guards the first-run page
 
 - **Build:** the scheduler that drives every recurring pass — cron parsing, jitter, due-job
   selection, backoff on consecutive failure, manual triggering — and the jobs/schedules page.
-- **Where:** crates/core (scheduler), crates/api, web/
+- **Where:** backend/crates/core (scheduler), backend/crates/api, frontend/
 - **Subtasks:**
   - [ ] 1. Implement jitter and next-run-time computation feeding the due-jobs index, on top of the cron
      parsing already validated at save time in Phase 3.
@@ -2328,7 +2348,7 @@ gate itself is claimed as I-SEC-8 in Phase 1, where it guards the first-run page
 
 - **Build:** the structured logs page reading job-run events directly, filterable by run,
   definition, library, source, and level.
-- **Where:** crates/api, web/
+- **Where:** backend/crates/api, frontend/
 - **Subtasks:**
   - [ ] 1. Implement filter parameters against the run-events index and each event's scope field.
   - [ ] 2. Confirm "everything that happened to this collection during last night's run" resolves as one
@@ -2341,7 +2361,7 @@ gate itself is claimed as I-SEC-8 in Phase 1, where it guards the first-run page
 - **Build:** resolve whatever the editor-disclosure and dashboard-content open questions (Q-002,
   Q-003) still owe the Design and Dashboard pages, now that both are being finalized, and confirm
   Q-013's board-layout answer needed nothing further once Phase 7 shipped.
-- **Where:** web/
+- **Where:** frontend/
 - **Subtasks:**
   - [ ] 1. Confirm Q-013 is fully closed by the Phase 7 board; extend it here only if a page in this
      phase surfaces placement content that still depends on it.
@@ -2364,7 +2384,7 @@ Size `M`.
   `linux/arm64` Docker supported, native binaries best-effort for `linux/amd64`, `linux/arm64`,
   `darwin/arm64`, and `windows/amd64`; `linux/armv7` explicitly unsupported and excluded from the
   build matrix.
-- **Where:** crates/afisharr, repository build and release tooling
+- **Where:** backend/crates/afisharr, repository build and release tooling
 - **Subtasks:**
   - [ ] 1. Build and publish `linux/amd64` and `linux/arm64` Docker images; treat `linux/amd64` as the
      tested target every resource budget in the PRD is measured against.
@@ -2399,7 +2419,7 @@ Size `M`.
 
 - **Build:** machine-checked dependency licences, the runtime source-link obligation wired to the
   version stamp, and generated third-party attribution.
-- **Where:** crates/afisharr (version stamp, attribution generation), web/ (About panel, footer
+- **Where:** backend/crates/afisharr (version stamp, attribution generation), frontend/ (About panel, footer
   link), repository tooling (dependency-licence check)
 - **Subtasks:**
   - [ ] 1. Wire a dependency-licence check with an explicit allow-list (MIT, Apache-2.0, BSD-2/3, ISC,
@@ -2432,7 +2452,7 @@ Size `M`.
 
 - **Build:** complete the About panel scaffolded in Phase 13's Settings with the licence name, the
   exact running version, and the source link for that version, together in one place.
-- **Where:** web/
+- **Where:** frontend/
 - **Subtasks:**
   - [ ] 1. Render the licence name (AGPL-3.0-or-later), the version stamp, and the source link together
      on the About panel.
@@ -2565,7 +2585,8 @@ what makes code wrong on either stack is neither.
 
 Every phase of work — a task, a PR, a milestone — passes only when all of the following commands succeed. This section is the single command list; §A.2–§A.5 explain how each command's configuration is derived and how to work through a task so the gates pass on the first CI run rather than the third.
 
-**Rust gate (run from the workspace root):**
+**Rust gate (run from `backend/`, the workspace root — cargo and rustup discover
+`.cargo/config.toml` and `rust-toolchain.toml` by walking up, never down):**
 
 ```bash
 cargo fmt --check
@@ -2583,7 +2604,7 @@ Any crate that touches `unsafe` additionally requires, at least before merge:
 cargo +nightly miri test
 ```
 
-**Frontend gate (run from the frontend package root, always with `bun`, never `npm`):**
+**Frontend gate (run from `frontend/`, the package root, always with `bun`, never `npm`):**
 
 ```bash
 bun install --frozen-lockfile   # fail if bun.lock would change
@@ -2594,7 +2615,8 @@ bun run test:browser            # vitest run — *.svelte.test.ts in chromium
 bun run build                   # vite build via adapter-static; must complete with no server-only code reachable
 ```
 
-**Structure gate (run from the workspace root).** This is the script-checkable half of PRD §24.6.
+**Structure gate (run from the repository root — it spans both surfaces).** This is the
+script-checkable half of PRD §24.6.
 Each command must print nothing. A line of output names a file over its soft limit (§24.6.4), which
 is either split in this change or justified in one sentence in the PR. A file over its hard limit is
 split, or it carries a `// STRUCTURE:` header comment naming why the split is worse, agreed by a
@@ -2602,15 +2624,15 @@ reviewer who is not the author — two signatures, recorded in the file.
 
 ```bash
 # Rust, non-test: soft 400, hard 700
-find crates -name '*.rs' -not -path '*/target/*' -print0 \
+find backend/crates -name '*.rs' -not -path '*/target/*' -print0 \
   | xargs -0 wc -l | awk '$2 != "total" && $1 > 400' | sort -rn
 
 # Svelte components: soft 250, hard 400
-find web/src -name '*.svelte' -print0 \
+find frontend/src -name '*.svelte' -print0 \
   | xargs -0 wc -l | awk '$2 != "total" && $1 > 250' | sort -rn
 
 # TypeScript and rune modules: soft 300, hard 500
-find web/src \( -name '*.ts' -o -name '*.svelte.ts' \) -print0 \
+find frontend/src \( -name '*.ts' -o -name '*.svelte.ts' \) -print0 \
   | xargs -0 wc -l | awk '$2 != "total" && $1 > 300' | sort -rn
 ```
 
@@ -2894,14 +2916,17 @@ CI runs as independent lanes so a failure in one stack does not block investigat
 repos:
   - repo: local
     hooks:
+      # prek runs every hook from the repository root, so the cargo entries cd
+      # into backend/ themselves. A `files` filter alone would leave them
+      # running against the default toolchain with no workspace in sight.
       - id: rust-fmt
         name: cargo fmt --check
-        entry: cargo fmt --check
+        entry: sh -c 'cd backend && cargo fmt --check'
         language: system
         pass_filenames: false
       - id: rust-clippy
         name: cargo clippy
-        entry: cargo clippy --all-targets --all-features -- -D warnings
+        entry: sh -c 'cd backend && cargo clippy --all-targets --all-features -- -D warnings'
         language: system
         pass_filenames: false
       - id: biome-ci
