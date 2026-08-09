@@ -1,0 +1,8 @@
+# SPDX-FileCopyrightText: 2026 Afisharr contributors
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
+edition = "2024"
+max_width = 100
+use_small_heuristics = "Default"
+imports_granularity = "Crate"     # nightly-gated formatting options
+group_imports = "StdExternalCrate"

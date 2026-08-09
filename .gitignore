@@ -22,3 +22,11 @@ target
 
 # Local agent session state. Working notes, not project state.
 .omc/
+
+# Scratch database the sqlx query macros are checked against.
+# Rebuilt by scripts/dev-database.sh; the verified metadata in .sqlx/ is what
+# gets committed.
+/.dev/
+
+# Runtime data directory for a locally started instance.
+/data/
