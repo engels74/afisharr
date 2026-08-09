@@ -224,6 +224,66 @@ async fn a_secret_round_trips_and_is_unreadable_without_the_key() {
     booted.database.close().await;
 }
 
+/// A database copied without `secrets.key` decrypts nothing.
+///
+/// The copy starts cleanly — it mints its own key, because a start that refused
+/// would make a restore unrecoverable — and every stored secret is then
+/// *unobservable* rather than absent. Nothing may be deleted on the strength of
+/// a secret that will not decrypt (P1, PRD §21.6.3).
+#[tokio::test]
+async fn a_database_copied_without_the_key_cannot_decrypt_any_secret() {
+    use afisharr_core::{secrets::PutSecret, time::Timestamp};
+
+    let original = TempInstance::new();
+    let booted = original.boot().await;
+    let sealed = booted
+        .secret_key
+        .seal(b"plex-token-value")
+        .expect("sealing");
+    booted
+        .database
+        .writer()
+        .submit(PutSecret {
+            name: "plex.token".to_owned(),
+            sealed,
+            at: Timestamp::from_millis(1),
+        })
+        .await
+        .expect("storing the secret");
+    booted.database.close().await;
+
+    // Copy the database and leave the key behind, which is what the default
+    // backup does (PRD §21.6.1).
+    let elsewhere = TempInstance::new();
+    std::fs::copy(original.paths().database(), elsewhere.paths().database())
+        .expect("copying the database");
+    assert!(!elsewhere.paths().secret_key().exists());
+
+    let restored = elsewhere.boot().await;
+    assert!(
+        elsewhere.paths().secret_key().exists(),
+        "a fresh key is minted rather than the start failing; a restore that refuses to \
+         boot is a restore nobody can finish"
+    );
+
+    let refusal = afisharr_core::secrets::get(
+        restored.database.readers(),
+        &restored.secret_key,
+        "plex.token",
+    )
+    .await
+    .expect_err("the copied row must not decrypt under a different key");
+    assert!(format!("{refusal}").contains("plex.token"));
+
+    let rows: i64 = sqlx::query_scalar("SELECT count(*) FROM secrets")
+        .fetch_one(restored.database.readers())
+        .await
+        .expect("counting secrets");
+    assert_eq!(rows, 1, "an unreadable secret is not a deleted one");
+
+    restored.database.close().await;
+}
+
 #[tokio::test]
 async fn no_secret_value_reaches_settings_or_its_history() {
     use afisharr_core::{secrets::PutSecret, time::Timestamp};
