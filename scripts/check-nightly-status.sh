@@ -14,6 +14,15 @@
 # A reason is required and lands in the permanent record of the merge, which is
 # the point: a waiver that costs nothing gets used for everything.
 #
+# The waiver therefore lives on a pull request, and this gate decides only where
+# one exists to carry it: the pull request's own check, and the merge queue run
+# that merges it. `github.event.pull_request.body` is populated for the first
+# and empty for the second, so the merge queue resolves the body from the
+# reference naming the queued pull request — otherwise a waived pull request
+# passes its check and is blocked again on the way in. A push to `main` is after
+# that decision, and the release lane runs the whole nightly suite itself rather
+# than reading its last result, so neither gates.
+#
 # Three states, and only the first two are inputs to a decision (P1). A nightly
 # that *failed* blocks. A nightly that has never run — no workflow on `main`
 # yet, or no completed run — is known-absent and blocks nothing. A result this
@@ -57,7 +66,47 @@ success | neutral | skipped)
 	;;
 esac
 
-reason=$(printf '%s' "${PR_BODY:-}" | sed -n 's/^Nightly-Waiver:[[:space:]]*//p' | head -n 1)
+case "${GITHUB_EVENT_NAME:-}" in
+pull_request)
+	body="${PR_BODY:-}"
+	;;
+merge_group)
+	# refs/heads/gh-readonly-queue/<base branch>/pr-<number>-<sha>
+	queued=$(printf '%s' "${MERGE_GROUP_HEAD_REF:-}" |
+		sed -n 's|.*/pr-\([0-9][0-9]*\)-[0-9a-f]*$|\1|p')
+	if [ -z "$queued" ]; then
+		echo "The last nightly run on main concluded '$last_conclusion'." >&2
+		echo "No pull request could be read from '${MERGE_GROUP_HEAD_REF:-}', so a" >&2
+		echo "waiver on it is unobservable rather than absent." >&2
+		exit 1
+	fi
+	if ! body=$(gh api "repos/$repo/pulls/$queued" --jq '.body // ""'); then
+		echo "The last nightly run on main concluded '$last_conclusion'." >&2
+		echo "Could not read pull request #$queued's body, so a waiver on it is" >&2
+		echo "unobservable rather than absent." >&2
+		exit 1
+	fi
+	;;
+push | workflow_dispatch)
+	# A push to `main` is after the merge the gate decides, and the release
+	# lane — which reaches this through `workflow_call`, so the event name is
+	# the caller's — runs the whole nightly suite itself rather than reading
+	# its last result.
+	echo "The last nightly run on main concluded '$last_conclusion'."
+	echo "A '$GITHUB_EVENT_NAME' run is not a merge to main; nothing to gate."
+	exit 0
+	;;
+*)
+	# A new trigger reaches this with no decision made about it. Passing would
+	# un-gate D-035 silently, which is the failure this script exists to stop.
+	echo "The last nightly run on main concluded '$last_conclusion'." >&2
+	echo "A '${GITHUB_EVENT_NAME:-unknown}' run has no waiver source, so whether" >&2
+	echo "this merge is waived is unobservable. Decide it here, in D-035's terms." >&2
+	exit 1
+	;;
+esac
+
+reason=$(printf '%s' "$body" | sed -n 's/^Nightly-Waiver:[[:space:]]*//p' | head -n 1)
 
 if [ -n "$reason" ]; then
 	echo "The last nightly run on main concluded '$last_conclusion'."

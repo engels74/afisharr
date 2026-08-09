@@ -15,9 +15,10 @@ on:
     tags: ["v*"]
   workflow_dispatch:
 
-# The merge lane's nightly-status job reads the nightly workflow's last result
-# and the pull request body; a called workflow cannot widen what the caller
-# grants.
+# The merge lane's nightly-status job asks for the nightly workflow's last
+# result and for the pull request carrying a waiver, and a called workflow
+# cannot widen what the caller grants — so both are granted here even though a
+# release run is not a merge to main and returns before it reads a pull request.
 permissions:
   contents: read
   actions: read

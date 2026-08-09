@@ -196,7 +196,11 @@ jobs:
       - name: refuse to merge past a red nightly
         env:
           GH_TOKEN: ${{ github.token }}
+          # The waiver lives in a pull request body, so the script needs both
+          # the body this event carries and, in the merge queue, the reference
+          # naming the pull request being merged.
           PR_BODY: ${{ github.event.pull_request.body }}
+          MERGE_GROUP_HEAD_REF: ${{ github.event.merge_group.head_ref }}
         run: ./scripts/check-nightly-status.sh
 
   merge-gate:
