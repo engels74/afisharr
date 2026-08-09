@@ -1,0 +1,19 @@
+// SPDX-FileCopyrightText: 2026 Afisharr contributors
+// SPDX-License-Identifier: AGPL-3.0-or-later
+
+//! Shared scaffolding for the binary's integration tests.
+//!
+//! Compiled into every test binary that declares it, so an item only one of
+//! them needs looks dead to the others.
+#![allow(
+    dead_code,
+    unused_imports,
+    clippy::unwrap_used,
+    clippy::struct_field_names
+)]
+
+mod fixtures;
+mod temp_instance;
+
+pub use fixtures::{InsertLifecycleSubject, InsertPlexPrincipal, InsertVisibility, seed_library};
+pub use temp_instance::TempInstance;

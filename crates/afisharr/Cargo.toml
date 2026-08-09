@@ -1,0 +1,37 @@
+# SPDX-FileCopyrightText: 2026 Afisharr contributors
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
+[package]
+name = "afisharr"
+description = "Plex collections, posters, and overlay manager"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+# Workspace-internal: the shipped artefact is the binary, not these crates.
+publish = false
+repository.workspace = true
+authors.workspace = true
+
+[dependencies]
+afisharr-api = { workspace = true }
+afisharr-core = { workspace = true }
+afisharr-packs = { workspace = true }
+afisharr-plex = { workspace = true }
+afisharr-render = { workspace = true }
+afisharr-sources = { workspace = true }
+
+anyhow = { workspace = true }
+clap = { workspace = true }
+sqlx = { workspace = true }
+tokio = { workspace = true, features = ["rt-multi-thread", "macros", "signal"] }
+toml = { workspace = true }
+tracing = { workspace = true }
+tracing-appender = { workspace = true }
+tracing-subscriber = { workspace = true }
+
+[dev-dependencies]
+tempfile = "3.27.0"
+
+[lints]
+workspace = true
