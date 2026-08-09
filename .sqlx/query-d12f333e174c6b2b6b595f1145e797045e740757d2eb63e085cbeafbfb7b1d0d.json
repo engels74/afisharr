@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT INTO libraries\n                 (id, handle, section_key, type, title, created_at, last_seen_at)\n             VALUES (?1, ?1, '1', 'movie', 'Films', 0, 0)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": []
+  },
+  "hash": "d12f333e174c6b2b6b595f1145e797045e740757d2eb63e085cbeafbfb7b1d0d"
+}

@@ -1,0 +1,38 @@
+# SPDX-FileCopyrightText: 2026 Afisharr contributors
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
+[package]
+name = "afisharr-core"
+description = "Afisharr domain model, persistence spine, and reconciliation engine"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+# Workspace-internal: the shipped artefact is the binary, not these crates.
+publish = false
+repository.workspace = true
+authors.workspace = true
+
+[dependencies]
+chacha20poly1305 = { workspace = true }
+getrandom.workspace = true
+hex.workspace = true
+rusqlite = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+sha2.workspace = true
+sqlx = { workspace = true }
+thiserror = { workspace = true }
+# `fs` is used directly by `backup` and `storage`. Declared rather than taken
+# from sqlx's `runtime-tokio`, which enables it today: a crate that compiles on
+# a feature it never asked for breaks when the dependency that supplied it moves.
+tokio = { workspace = true, features = ["fs"] }
+tracing = { workspace = true }
+ulid = { workspace = true }
+
+[lints]
+workspace = true
+
+[dev-dependencies]
+tempfile = "3.27.0"
+tokio = { workspace = true, features = ["rt-multi-thread", "macros"] }

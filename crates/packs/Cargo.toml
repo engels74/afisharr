@@ -1,0 +1,19 @@
+# SPDX-FileCopyrightText: 2026 Afisharr contributors
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
+[package]
+name = "afisharr-packs"
+description = "Afisharr pack format and installer"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+# Workspace-internal: the shipped artefact is the binary, not these crates.
+publish = false
+repository.workspace = true
+authors.workspace = true
+
+[dependencies]
+
+[lints]
+workspace = true

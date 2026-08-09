@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT INTO id_mappings\n                         (from_space, from_value, to_space, to_value, season, dataset, imported_at)\n                     VALUES (?1, ?2, ?3, ?4, ?5, 'anime-lists', 0)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 5
+    },
+    "nullable": []
+  },
+  "hash": "f0e9d892ab6624a7db487e358d474e4a4fdbefdb23c5a8aa11829c0eacfe6ebd"
+}

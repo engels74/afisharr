@@ -1,0 +1,5 @@
+# SPDX-FileCopyrightText: 2026 Afisharr contributors
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
+msrv = "1.97"
+avoid-breaking-exported-api = false

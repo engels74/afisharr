@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT INTO settings_history (version, body_json, changed_at, changed_by, diff_json)\n             VALUES (?1, ?2, ?3, ?4, ?5)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 5
+    },
+    "nullable": []
+  },
+  "hash": "e954df1e18d2dc3c4c63a75f7238235edda8a519e0c7a826d35615241ca4ad6a"
+}

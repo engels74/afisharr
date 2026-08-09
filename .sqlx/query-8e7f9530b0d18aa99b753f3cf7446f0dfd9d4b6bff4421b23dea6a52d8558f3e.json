@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "UPDATE leases SET heartbeat_at = ?3, expires_at = ?4\n             WHERE name = ?1 AND owner = ?2",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 4
+    },
+    "nullable": []
+  },
+  "hash": "8e7f9530b0d18aa99b753f3cf7446f0dfd9d4b6bff4421b23dea6a52d8558f3e"
+}

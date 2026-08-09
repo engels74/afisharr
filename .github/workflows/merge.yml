@@ -1,0 +1,253 @@
+# SPDX-FileCopyrightText: 2026 Afisharr contributors
+# SPDX-License-Identifier: AGPL-3.0-or-later
+#
+# The merge lane (D-035). Runs on every pull request and on pushes to main.
+#
+# Contains every table-driven and unit-level invariant — everything whose test
+# is a pure function over enumerated inputs — and is budgeted at 10 minutes.
+# The lanes are independent so a failure in one stack does not block
+# investigating the other, and the fast ones (format, lint) fail loudly before
+# the slow ones start.
+
+name: merge
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  merge_group:
+  # The release lane runs this whole lane before it runs its own jobs.
+  workflow_call:
+
+concurrency:
+  group: merge-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  # The sqlx query macros read the committed offline data rather than a live
+  # database; scripts/dev-database.sh regenerates it.
+  SQLX_OFFLINE: "true"
+
+jobs:
+  rust-fmt:
+    name: rust-fmt
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v5
+      - uses: ./.github/actions/rust
+      - run: cargo fmt --check
+
+  rust-lint:
+    name: rust-lint
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v5
+      - uses: ./.github/actions/rust
+      - run: cargo clippy --workspace --all-targets --all-features -- -D warnings
+
+  rust-test:
+    name: rust-test
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v5
+      - uses: ./.github/actions/rust
+        with:
+          tools: nextest
+      - run: cargo nextest run --workspace --all-features
+      # nextest does not run doctests.
+      - run: cargo test --doc --workspace
+
+  rust-supply-chain:
+    name: rust-supply-chain
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v5
+      - uses: ./.github/actions/rust
+        with:
+          tools: deny machete
+      # Licences, advisories, and bans. AGPL-3.0-or-later obliges every
+      # dependency to be GPL-compatible and a transitive crate can introduce an
+      # incompatible licence silently (PRD §21.9, D-028).
+      - run: cargo deny check
+      - run: cargo machete
+
+  rust-miri:
+    name: rust-miri
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v5
+      # Every crate sets `unsafe_code = "forbid"` at the workspace root, so
+      # there is nothing for Miri to find. The lane exists so the crate that
+      # first takes a justified `unsafe` block is covered by a lane that already
+      # runs, and this step fails the moment one appears.
+      - name: assert no crate has taken an unsafe exception
+        run: |
+          # grep exits 1 for "no match" and 2 for "could not scan". Only the
+          # first is an answer; treating both as one reports a scan that never
+          # ran as a clean tree.
+          status=0
+          exceptions=$(grep -rn --include='*.rs' -E '^\s*#!\[allow\(unsafe_code' crates) || status=$?
+          case "$status" in
+          0)
+            printf '%s\n' "$exceptions" >&2
+            echo "A crate has allowed unsafe_code. Extend this lane to run" >&2
+            echo "cargo +nightly miri test against it (§A.5, §24.2.9)." >&2
+            exit 1
+            ;;
+          1)
+            echo "unsafe_code is forbidden workspace-wide; nothing to check."
+            ;;
+          *)
+            echo "The unsafe_code scan could not run (grep exited $status)." >&2
+            exit 1
+            ;;
+          esac
+
+  structure:
+    name: structure
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v5
+      # The script-checkable half of PRD §24.6 (D-047). Also a commit-stage prek
+      # hook, so this is the backstop rather than the first line of defence.
+      - run: ./scripts/check-file-size.sh
+
+  frontend-install:
+    name: frontend-install
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v5
+      - uses: ./.github/actions/frontend
+
+  frontend-format-lint:
+    name: frontend-format-lint
+    runs-on: ubuntu-latest
+    needs: frontend-install
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v5
+      - uses: ./.github/actions/frontend
+      - run: bun run --cwd web lint
+
+  frontend-typecheck:
+    name: frontend-typecheck
+    runs-on: ubuntu-latest
+    needs: frontend-install
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v5
+      - uses: ./.github/actions/frontend
+      - run: bun run --cwd web check
+
+  frontend-test-unit:
+    name: frontend-test-unit
+    runs-on: ubuntu-latest
+    needs: frontend-install
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v5
+      - uses: ./.github/actions/frontend
+      - run: bun test --cwd web
+
+  frontend-test-browser:
+    name: frontend-test-browser
+    runs-on: ubuntu-latest
+    # The slowest frontend lane. A typecheck or unit failure is cheaper to
+    # report first, so it waits on both.
+    needs: [frontend-typecheck, frontend-test-unit]
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v5
+      - uses: ./.github/actions/frontend
+      - run: bunx playwright install --with-deps chromium
+        working-directory: web
+      - run: bun run --cwd web test:browser
+
+  frontend-build:
+    name: frontend-build
+    runs-on: ubuntu-latest
+    needs: frontend-install
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v5
+      - uses: ./.github/actions/frontend
+      # adapter-static. A page or component reaching for a server-only primitive
+      # covered by §24.4 fails the build here.
+      - run: bun run --cwd web build
+
+  contract-check:
+    name: contract-check
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v5
+      - run: ./scripts/check-openapi-contract.sh
+
+  nightly-status:
+    name: nightly-status
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      actions: read
+      pull-requests: read
+    steps:
+      - uses: actions/checkout@v5
+      # A nightly failure blocks the next merge to main until it is fixed or
+      # explicitly waived with a named reason (D-035). Without this, the nightly
+      # lane becomes a wall of red nobody reads.
+      - name: refuse to merge past a red nightly
+        env:
+          GH_TOKEN: ${{ github.token }}
+          # Which pull request carries the waiver, not the body itself: the
+          # script reads the description live, so a waiver added after this
+          # gate asked for one is visible to a re-run of the job.
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          MERGE_GROUP_HEAD_REF: ${{ github.event.merge_group.head_ref }}
+        run: ./scripts/check-nightly-status.sh
+
+  merge-gate:
+    name: merge-gate
+    runs-on: ubuntu-latest
+    if: always()
+    needs:
+      - rust-fmt
+      - rust-lint
+      - rust-test
+      - rust-supply-chain
+      - rust-miri
+      - structure
+      - frontend-install
+      - frontend-format-lint
+      - frontend-typecheck
+      - frontend-test-unit
+      - frontend-test-browser
+      - frontend-build
+      - contract-check
+      - nightly-status
+    steps:
+      # Every lane above must succeed. "Parallel" never means "optional", and
+      # neither does "skipped": a job whose `needs` failed reports `skipped`
+      # rather than `failure`, so this asserts the result positively instead of
+      # naming the two ways it knows how to fail.
+      - name: assert every lane succeeded
+        env:
+          LANE_RESULTS: ${{ toJSON(needs) }}
+        run: |
+          printf '%s' "${LANE_RESULTS}" | jq -r 'to_entries[] | "\(.key): \(.value.result)"'
+          if ! printf '%s' "${LANE_RESULTS}" |
+            jq -e 'length > 0 and all(.[]; .result == "success")' >/dev/null; then
+            echo "One or more merge lanes did not succeed." >&2
+            exit 1
+          fi

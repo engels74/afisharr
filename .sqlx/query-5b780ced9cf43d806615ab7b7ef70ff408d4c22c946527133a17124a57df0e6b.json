@@ -1,0 +1,38 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT owner, expires_at FROM leases WHERE name = ?1",
+  "describe": {
+    "columns": [
+      {
+        "name": "owner",
+        "ordinal": 0,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "leases",
+            "name": "owner"
+          }
+        }
+      },
+      {
+        "name": "expires_at",
+        "ordinal": 1,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "leases",
+            "name": "expires_at"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false,
+      false
+    ]
+  },
+  "hash": "5b780ced9cf43d806615ab7b7ef70ff408d4c22c946527133a17124a57df0e6b"
+}

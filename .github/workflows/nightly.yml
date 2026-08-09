@@ -1,0 +1,125 @@
+# SPDX-FileCopyrightText: 2026 Afisharr contributors
+# SPDX-License-Identifier: AGPL-3.0-or-later
+#
+# The nightly lane (D-035). Runs every night on main, budgeted at 2 hours.
+#
+# It holds what does not fit in the merge lane's ten minutes: crash injection
+# across every intent kind, the property tests, the teardown integration test,
+# and the performance invariants at scale. Those tests arrive with the
+# subsystems they cover — the jobs are wired now so a later phase adds a step to
+# a lane that already runs, rather than building the lane alongside its first
+# test.
+#
+# A failure here blocks the next merge to main until it is fixed or explicitly
+# waived with a named reason. The merge lane's `nightly-status` job enforces it.
+
+name: nightly
+
+on:
+  schedule:
+    # 03:17 UTC — off the hour, so it does not queue behind everything else
+    # scheduled on the hour.
+    - cron: "17 3 * * *"
+  workflow_dispatch:
+  # The release lane runs this whole lane before it runs its own jobs.
+  workflow_call:
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  SQLX_OFFLINE: "true"
+
+jobs:
+  crash-injection:
+    name: crash-injection
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v5
+      - uses: ./.github/actions/rust
+        with:
+          tools: nextest
+      # I-DATA-1: crash injection between every pair of steps, for every intent
+      # kind, asserting one startup pass reaches a consistent state. The intent
+      # executor is built with the lifecycle state machine (Phase 9); this step
+      # runs whatever crash-injection tests exist and reports honestly when
+      # there are none.
+      - name: crash-injection suite
+        run: |
+          # Captured rather than piped: a pipeline's status is grep's, so a
+          # tree that does not compile would read as "no such tests" and pass.
+          listed=$(cargo nextest list --workspace --all-features -E 'test(crash_injection)')
+          if printf '%s' "$listed" | grep -q 'crash_injection'; then
+            cargo nextest run --workspace --all-features -E 'test(crash_injection)'
+          else
+            echo "No crash-injection tests exist yet (I-DATA-1 is claimed in Phase 9)."
+          fi
+
+  property-tests:
+    name: property-tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v5
+      - uses: ./.github/actions/rust
+        with:
+          tools: nextest
+      # "Test with a few cases" and "test with ten thousand generated cases" are
+      # different commitments; the generated ones live here.
+      - name: property suite
+        run: |
+          # Captured rather than piped: a pipeline's status is grep's, so a
+          # tree that does not compile would read as "no such tests" and pass.
+          listed=$(cargo nextest list --workspace --all-features -E 'test(prop_)')
+          if printf '%s' "$listed" | grep -q 'prop_'; then
+            cargo nextest run --workspace --all-features -E 'test(prop_)'
+          else
+            echo "No property tests exist yet."
+          fi
+
+  teardown:
+    name: teardown
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v5
+      - uses: ./.github/actions/rust
+        with:
+          tools: nextest
+      # I-REV-4. The single most important test in the product, and it does not
+      # fit in ten minutes: it needs a fully populated fixture library and a full
+      # apply-then-reverse cycle. Built in Phase 11.
+      - name: teardown suite
+        run: |
+          # Captured rather than piped: a pipeline's status is grep's, so a
+          # tree that does not compile would read as "no such tests" and pass.
+          listed=$(cargo nextest list --workspace --all-features -E 'test(teardown)')
+          if printf '%s' "$listed" | grep -q 'teardown'; then
+            cargo nextest run --workspace --all-features -E 'test(teardown)'
+          else
+            echo "No teardown tests exist yet (I-REV-4 is claimed in Phase 11)."
+          fi
+
+  performance-at-scale:
+    name: performance-at-scale
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v5
+      - uses: ./.github/actions/rust
+        with:
+          tools: nextest
+      # I-PERF-1 and I-PERF-3 against the scale target of D-030: 200,000 items
+      # and 2,000 collections across several libraries.
+      - name: performance suite
+        run: |
+          # Captured rather than piped: a pipeline's status is grep's, so a
+          # tree that does not compile would read as "no such tests" and pass.
+          listed=$(cargo nextest list --workspace --all-features -E 'test(perf_)')
+          if printf '%s' "$listed" | grep -q 'perf_'; then
+            cargo nextest run --workspace --all-features -E 'test(perf_)'
+          else
+            echo "No at-scale performance tests exist yet."
+          fi

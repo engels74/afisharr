@@ -1,0 +1,18 @@
+# SPDX-FileCopyrightText: 2026 Afisharr contributors
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
+[install]
+registry = "https://registry.npmjs.org/"
+exact = true
+
+[test]
+preload = ["./test-setup.ts"]
+# `*.svelte.test.ts` is the browser lane's suffix, whatever it covers —
+# components and rune modules alike. That lane is `vitest.config.ts`, which is
+# where `vitest-browser-svelte` is set up. `bun test` matches any `*.test.ts`,
+# so without this the first such file runs twice: once in chromium and once
+# here under happy-dom, where rendering was never wired.
+pathIgnorePatterns = ["**/*.svelte.test.ts"]
+coverage = true
+coverageReporter = ["text", "lcov"]
+coverageThreshold = { lines = 0.85, functions = 0.90, statements = 0.80 }

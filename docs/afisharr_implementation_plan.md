@@ -174,20 +174,20 @@ a unique index. Both are cheap now and are table rebuilds later.
 - **Where:** repository root; `crates/core`, `crates/sources`, `crates/plex`, `crates/render`,
   `crates/packs`, `crates/api`, `crates/afisharr`; `web/`.
 - **Subtasks:**
-  - [ ] 1. Scaffold the seven workspace crates with `crates/afisharr` as the binary depending on the rest.
-  - [ ] 2. Scaffold `web/` as a SvelteKit 2 / Svelte 5 project with UnoCSS (`presetWind4`), shadcn-svelte,
+  - [x] 1. Scaffold the seven workspace crates with `crates/afisharr` as the binary depending on the rest.
+  - [x] 2. Scaffold `web/` as a SvelteKit 2 / Svelte 5 project with UnoCSS (`presetWind4`), shadcn-svelte,
      `adapter-static`, and Bun tooling.
-  - [ ] 3. Install prek and commit its hook configuration.
-  - [ ] 4. Wire the merge lane: every table-driven and unit-level invariant, budgeted at 10 minutes.
-  - [ ] 5. Wire the nightly-lane and release-lane job shapes now, even though they have nothing but
+  - [x] 3. Install prek and commit its hook configuration.
+  - [x] 4. Wire the merge lane: every table-driven and unit-level invariant, budgeted at 10 minutes.
+  - [x] 5. Wire the nightly-lane and release-lane job shapes now, even though they have nothing but
      placeholder checks to run — later phases add jobs to an existing lane rather than build one.
-  - [ ] 6. Wire the rule that a nightly failure blocks the next merge until fixed or explicitly waived with
+  - [x] 6. Wire the rule that a nightly failure blocks the next merge until fixed or explicitly waived with
      a named reason.
-  - [ ] 7. Add the structure gate from §A.1 as a prek hook and a merge-lane step, with the exempt paths
+  - [x] 7. Add the structure gate from §A.1 as a prek hook and a merge-lane step, with the exempt paths
      (generated client, `target/`, `.svelte-kit/`, migrations, registry constant tables) excluded in
      the script rather than by raising a threshold. It exists from the first commit because a limit
      introduced in Phase 6 is a limit that first fires as a backlog (§24.6.4, D-047).
-- [ ] **Done when:** `prek install` leaves hooks active in a fresh clone, and a trivial commit runs the
+- [x] **Done when:** `prek install` leaves hooks active in a fresh clone, and a trivial commit runs the
   merge lane to a pass inside the 10-minute budget, with the nightly and release lane jobs present and
   schedulable. The structure gate runs in that lane and passes on the empty tree.
 
@@ -195,18 +195,18 @@ a unique index. Both are cheap now and are table rebuilds later.
 - **Build:** all 68 tables and their indexes, exactly as specified, as SQLx migrations.
 - **Where:** `crates/afisharr/migrations/`; `crates/core` (row types, projection functions).
 - **Subtasks:**
-  - [ ] 1. Write migration `0001`, setting `auto_vacuum = INCREMENTAL`, `journal_mode = WAL`, and
+  - [x] 1. Write migration `0001`, setting `auto_vacuum = INCREMENTAL`, `journal_mode = WAL`, and
      `page_size = 8192` before the first `CREATE TABLE` — these are one-way doors that cannot be set
      after the first write.
-  - [ ] 2. Create every `STRICT` table and every index in the schema, including the four tables that store
+  - [x] 2. Create every `STRICT` table and every index in the schema, including the four tables that store
      the volatile-parameter feed and bulk-dataset machinery Phase 5 will use.
-  - [ ] 3. Seed the three fixed-ULID principal rows: `Everyone`, `Owner`, `SharedAll`.
-  - [ ] 4. Implement the SQLx migration runner in the binary's startup path.
-  - [ ] 5. Implement the per-table derived-column projection functions (one function per table, per the
+  - [x] 3. Seed the three fixed-ULID principal rows: `Everyone`, `Owner`, `SharedAll`.
+  - [x] 4. Implement the SQLx migration runner in the binary's startup path.
+  - [x] 5. Implement the per-table derived-column projection functions (one function per table, per the
      derived-column rule) and the `afisharr db reproject` command.
-  - [ ] 6. Write the reprojection test: for every row in the database, `project(body_json)` equals the
+  - [x] 6. Write the reprojection test: for every row in the database, `project(body_json)` equals the
      stored derived columns.
-- [ ] **Done when:** `sqlx migrate run` against a fresh database creates all 68 tables with zero errors;
+- [x] **Done when:** `sqlx migrate run` against a fresh database creates all 68 tables with zero errors;
   `I-DATA-5` passes — inserting a `PlexUser` or `LocalUser` principal row and a `placement_visibility`
   row referencing it requires no `ALTER TABLE`; `I-DATA-10` passes — a second whole-title lifecycle
   subject for the same identity is rejected by its unique index; and `I-DATA-6` passes —
@@ -217,14 +217,14 @@ a unique index. Both are cheap now and are table rebuilds later.
   and post-migration integrity verification.
 - **Where:** `crates/afisharr` (startup path); `crates/core` (backup and integrity checks).
 - **Subtasks:**
-  - [ ] 1. On open, read the applied-migration table; if it names a version this binary does not know,
+  - [x] 1. On open, read the applied-migration table; if it names a version this binary does not know,
      refuse to start with a message naming both the found version and the binary's newest known one.
-  - [ ] 2. Before running a pending migration, copy the database using SQLite's online backup API — never a
+  - [x] 2. Before running a pending migration, copy the database using SQLite's online backup API — never a
      file copy — to `backups/pre-migration-<version>-<timestamp>.db`, retaining the last three.
-  - [ ] 3. Run pending migrations, then run `PRAGMA foreign_key_check` and `PRAGMA integrity_check`.
-  - [ ] 4. Reconcile unconfirmed lifecycle intents and expired leases as the final startup step.
-  - [ ] 5. Clear leases whose owner names this process instance on startup, before touching anything else.
-- [ ] **Done when:** `I-DATA-7` and `I-DATA-8` pass — a binary pointed at a database with a newer applied
+  - [x] 3. Run pending migrations, then run `PRAGMA foreign_key_check` and `PRAGMA integrity_check`.
+  - [x] 4. Reconcile unconfirmed lifecycle intents and expired leases as the final startup step.
+  - [x] 5. Clear leases whose owner names this process instance on startup, before touching anything else.
+- [x] **Done when:** `I-DATA-7` and `I-DATA-8` pass — a binary pointed at a database with a newer applied
   migration than it knows refuses to start rather than proceeding; a pending migration produces a
   backup file via the online backup API before it runs; and `foreign_key_check` plus `integrity_check`
   both return clean on first start after a migration.
@@ -234,17 +234,17 @@ a unique index. Both are cheap now and are table rebuilds later.
   network or filesystem I/O.
 - **Where:** `crates/core` (connection pool, write actor, lease acquisition).
 - **Subtasks:**
-  - [ ] 1. Set the connection pragmas on every pooled connection: `foreign_keys = ON`,
+  - [x] 1. Set the connection pragmas on every pooled connection: `foreign_keys = ON`,
      `busy_timeout = 5000`, `synchronous = NORMAL`, `cache_size = -32000`, `temp_store = MEMORY`.
-  - [ ] 2. Build a read pool of `min(4, cores)` connections and exactly one writer connection owned by a
+  - [x] 2. Build a read pool of `min(4, cores)` connections and exactly one writer connection owned by a
      write actor; route every mutation through it as a message, never a second write path.
-  - [ ] 3. Implement the `leases` table and its conditional insert-or-update acquisition (steal only an
+  - [x] 3. Implement the `leases` table and its conditional insert-or-update acquisition (steal only an
      expired lease).
-  - [ ] 4. Enforce hierarchical lease names (`pass:collection:<id>`, `pass:placement:<library_id>`,
+  - [x] 4. Enforce hierarchical lease names (`pass:collection:<id>`, `pass:placement:<library_id>`,
      `pass:lifecycle:<library_id>`, `job:<job_id>`) and heartbeat-driven abort on lease loss.
-  - [ ] 5. Structure every long-running pass as: snapshot read, do the I/O, commit in short transactions at
+  - [x] 5. Structure every long-running pass as: snapshot read, do the I/O, commit in short transactions at
      defined checkpoints — never one transaction wrapping the I/O.
-- [ ] **Done when:** `I-DATA-2` and `I-DATA-3` pass — two logical passes racing for the same lease name
+- [x] **Done when:** `I-DATA-2` and `I-DATA-3` pass — two logical passes racing for the same lease name
   never both proceed, the write actor is the only code path that opens a write connection, and no test
   or lint finds a transaction held open across an HTTP call or a library-root filesystem write.
 
@@ -252,14 +252,14 @@ a unique index. Both are cheap now and are table rebuilds later.
 - **Build:** the application log, the single-row `settings` table with history, and instance identity.
 - **Where:** `crates/afisharr` (log init, config loading); `crates/core` (settings, `instance` table).
 - **Subtasks:**
-  - [ ] 1. Implement structured logging to `logs/afisharr.log`, rotated, distinct from the database-backed
+  - [x] 1. Implement structured logging to `logs/afisharr.log`, rotated, distinct from the database-backed
      run-event log the GUI reads.
-  - [ ] 2. Implement the `instance` table, generating `client_identifier` once on first start and never
+  - [x] 2. Implement the `instance` table, generating `client_identifier` once on first start and never
      regenerating it.
-  - [ ] 3. Implement `settings` and `settings_history` as one JSON body deserialised into a typed struct with
+  - [x] 3. Implement `settings` and `settings_history` as one JSON body deserialised into a typed struct with
      unknown-field rejection, never a key-value table.
-  - [ ] 4. Implement config loading (environment, file) that populates `settings` on first start.
-- [ ] **Done when:** a fresh instance boots, writes one `instance` row with a `client_identifier` that
+  - [x] 4. Implement config loading (environment, file) that populates `settings` on first start.
+- [x] **Done when:** a fresh instance boots, writes one `instance` row with a `client_identifier` that
   survives a restart unchanged, and every settings write lands as one versioned body in
   `settings_history` rather than a partial key-value update.
 
@@ -267,12 +267,12 @@ a unique index. Both are cheap now and are table rebuilds later.
 - **Build:** encrypted credential storage per D-032, isolated from `settings`.
 - **Where:** `crates/core` (secrets table, cipher); `crates/afisharr` (key file lifecycle).
 - **Subtasks:**
-  - [ ] 1. Implement the `secrets` table: ciphertext, nonce, algorithm, per-secret.
-  - [ ] 2. Implement XChaCha20-Poly1305 encryption with a random nonce per secret.
-  - [ ] 3. Generate a 32-byte key from the OS CSPRNG on first start, store it beside the database at
+  - [x] 1. Implement the `secrets` table: ciphertext, nonce, algorithm, per-secret.
+  - [x] 2. Implement XChaCha20-Poly1305 encryption with a random nonce per secret.
+  - [x] 3. Generate a 32-byte key from the OS CSPRNG on first start, store it beside the database at
      `secrets.key` with mode `0600`, and support the `AFISHARR_SECRET_KEY` override.
-  - [ ] 4. Verify no secret value can reach `settings.body_json` or a `settings_history` diff.
-- [ ] **Done when:** a secret written through the table round-trips through encrypt and decrypt; the key
+  - [x] 4. Verify no secret value can reach `settings.body_json` or a `settings_history` diff.
+- [x] **Done when:** a secret written through the table round-trips through encrypt and decrypt; the key
   file is created with mode `0600` on first start; `AFISHARR_SECRET_KEY` overrides it when set; and
   `I-DATA-11` passes — a database copied without `secrets.key` cannot decrypt any stored secret, and no
   secret value appears anywhere in `settings` or its history.
@@ -2589,8 +2589,8 @@ cargo +nightly miri test
 bun install --frozen-lockfile   # fail if bun.lock would change
 biome ci .                      # format + lint + assist, writes nothing
 bun run check                   # svelte-kit sync && svelte-check --tsconfig ./tsconfig.json
-bun test                        # pure .ts / .svelte.ts unit tests
-bun run test:browser            # vitest run — .svelte component tests
+bun test                        # unit tests — every *.test.ts except *.svelte.test.ts
+bun run test:browser            # vitest run — *.svelte.test.ts in chromium
 bun run build                   # vite build via adapter-static; must complete with no server-only code reachable
 ```
 

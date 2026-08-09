@@ -1,0 +1,110 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT s.library_item_id, s.facts_hash, s.ratings_hash, s.state_hash,\n                    l.phase, l.acquisition, l.presence, l.production\n             FROM library_item_state s\n             LEFT JOIN lifecycle_subjects l\n               ON l.id = (SELECT id FROM lifecycle_subjects\n                          WHERE library_item_id = s.library_item_id\n                          ORDER BY IFNULL(season_number, -1), id LIMIT 1)\n             WHERE s.library_item_id > ?1\n             ORDER BY s.library_item_id LIMIT ?2",
+  "describe": {
+    "columns": [
+      {
+        "name": "library_item_id",
+        "ordinal": 0,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "library_item_state",
+            "name": "library_item_id"
+          }
+        }
+      },
+      {
+        "name": "facts_hash",
+        "ordinal": 1,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "library_item_state",
+            "name": "facts_hash"
+          }
+        }
+      },
+      {
+        "name": "ratings_hash",
+        "ordinal": 2,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "library_item_state",
+            "name": "ratings_hash"
+          }
+        }
+      },
+      {
+        "name": "state_hash",
+        "ordinal": 3,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "library_item_state",
+            "name": "state_hash"
+          }
+        }
+      },
+      {
+        "name": "phase",
+        "ordinal": 4,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "lifecycle_subjects",
+            "name": "phase"
+          }
+        }
+      },
+      {
+        "name": "acquisition",
+        "ordinal": 5,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "lifecycle_subjects",
+            "name": "acquisition"
+          }
+        }
+      },
+      {
+        "name": "presence",
+        "ordinal": 6,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "lifecycle_subjects",
+            "name": "presence"
+          }
+        }
+      },
+      {
+        "name": "production",
+        "ordinal": 7,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "lifecycle_subjects",
+            "name": "production"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": [
+      false,
+      false,
+      true,
+      false,
+      true,
+      true,
+      true,
+      true
+    ]
+  },
+  "hash": "324349de8b26f82fd651eb4aed3816bc4eb754bc70e39d05557ac52926b726b8"
+}

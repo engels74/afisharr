@@ -1,0 +1,35 @@
+# SPDX-FileCopyrightText: 2026 Afisharr contributors
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
+# cargo-deny — the machine check PRD §21.9 requires of D-028. Afisharr ships as
+# AGPL-3.0-or-later, so every dependency must be GPL-compatible, and a
+# transitive crate can introduce an incompatible licence without anyone noticing.
+
+[advisories]
+yanked = "deny"
+
+[bans]
+multiple-versions = "warn"
+
+[licenses]
+# Afisharr's own crates are AGPL-3.0-or-later and are never published; the
+# allow-list below is about what the dependency tree drags in.
+private = { ignore = true }
+
+# The allow-list is PRD §21.9's, not a description of today's tree. An entry
+# nothing currently uses is the point: it stays allowed when something does.
+unused-allowed-license = "allow"
+# PRD §21.9 names the allow-list: MIT, Apache-2.0, BSD-2/3, ISC, Zlib, MPL-2.0,
+# Unicode-3.0. Everything else is refused by default, including BSL, SSPL,
+# Elastic, and CC-BY-NC. The PRD wins over the shorter illustrative list in the
+# implementation plan's §A.2 (PRD §0.2).
+allow = [
+  "MIT",
+  "Apache-2.0",
+  "BSD-2-Clause",
+  "BSD-3-Clause",
+  "ISC",
+  "Zlib",
+  "MPL-2.0",
+  "Unicode-3.0",
+]

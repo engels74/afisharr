@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "UPDATE definitions SET kind = ?2, handle = ?3, name = ?4, schema_version = ?5,\n                        registry_version = ?6, body_hash = ?7, origin_kind = ?8,\n                        origin_pack = ?9, origin_pack_version = ?10\n                 WHERE id = ?1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 10
+    },
+    "nullable": []
+  },
+  "hash": "f5c6a731e1f3f43159bd8d6ef1a46b3ac105a31088b2bd45f3ef53436a0c0791"
+}
