@@ -8,7 +8,7 @@ description: >-
 
 inputs:
   tools:
-    description: Space-separated cargo subcommands to install (nextest, deny, machete).
+    description: Space-separated cargo subcommands to install (nextest, deny, machete, sqlx).
     required: false
     default: ""
 
@@ -44,5 +44,16 @@ runs:
       shell: bash
       run: |
         for tool in ${{ inputs.tools }}; do
-          cargo install "cargo-$tool" --locked
+          case "$tool" in
+          # `cargo sqlx` comes from a crate that does not carry the cargo-
+          # prefix, and its default features build the postgres and mysql
+          # drivers this workspace does not use.
+          sqlx)
+            cargo install sqlx-cli --locked \
+              --no-default-features --features sqlite,rustls
+            ;;
+          *)
+            cargo install "cargo-$tool" --locked
+            ;;
+          esac
         done

@@ -64,6 +64,22 @@ jobs:
       # nextest does not run doctests.
       - run: cargo test --doc --workspace
 
+  rust-sqlx-prepare:
+    name: rust-sqlx-prepare
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v5
+      - uses: ./.github/actions/rust
+        with:
+          tools: sqlx
+      # Every other rust lane reads `.sqlx/` and trusts it. Nothing in them
+      # notices when a query changed and the committed metadata did not, because
+      # stale metadata still compiles — it just describes a query that no longer
+      # exists. This lane rebuilds the schema from the migrations and asks sqlx
+      # whether what is committed is what the current queries produce.
+      - run: ./scripts/dev-database.sh --check
+
   rust-supply-chain:
     name: rust-supply-chain
     runs-on: ubuntu-latest
@@ -225,6 +241,7 @@ jobs:
       - rust-fmt
       - rust-lint
       - rust-test
+      - rust-sqlx-prepare
       - rust-supply-chain
       - rust-miri
       - structure
