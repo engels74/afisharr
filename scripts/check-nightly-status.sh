@@ -13,28 +13,46 @@
 #
 # A reason is required and lands in the permanent record of the merge, which is
 # the point: a waiver that costs nothing gets used for everything.
+#
+# Three states, and only the first two are inputs to a decision (P1). A nightly
+# that *failed* blocks. A nightly that has never run — no workflow on `main`
+# yet, or no completed run — is known-absent and blocks nothing. A result this
+# script cannot read is unobservable, and it fails rather than reporting the
+# absence of a failure it could not have seen.
 
-set -euo pipefail
+set -uo pipefail
 
 if [ -z "${GH_TOKEN:-}" ]; then
-	echo "GH_TOKEN is unset; cannot read the nightly lane's last result." >&2
+	echo "GH_TOKEN is unset; the nightly lane's last result is unobservable." >&2
 	exit 1
 fi
 
 repo="${GITHUB_REPOSITORY:?GITHUB_REPOSITORY is unset}"
+endpoint="repos/$repo/actions/workflows/nightly.yml/runs?branch=main&status=completed&per_page=1"
 
-last_conclusion=$(
-	gh api "repos/$repo/actions/workflows/nightly.yml/runs?branch=main&status=completed&per_page=1" \
-		--jq '.workflow_runs[0].conclusion // "none"' 2>/dev/null || echo "none"
-)
+if ! response=$(gh api "$endpoint" 2>&1); then
+	case "$response" in
+	*'"status":"404"'* | *'Not Found'*)
+		echo "No nightly workflow has run on main yet. Nothing to block on."
+		exit 0
+		;;
+	*)
+		echo "Could not read the nightly lane's last result:" >&2
+		printf '%s\n' "$response" >&2
+		exit 1
+		;;
+	esac
+fi
+
+last_conclusion=$(printf '%s' "$response" | jq -r '.workflow_runs[0].conclusion // "none"')
 
 case "$last_conclusion" in
 none)
-	echo "The nightly lane has not completed a run on main yet. Nothing to block on."
+	echo "The nightly lane has no completed run on main. Nothing to block on."
 	exit 0
 	;;
-success)
-	echo "The last nightly run on main succeeded."
+success | neutral | skipped)
+	echo "The last nightly run on main concluded '$last_conclusion'."
 	exit 0
 	;;
 esac
