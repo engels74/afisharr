@@ -1,0 +1,48 @@
+# SPDX-FileCopyrightText: 2026 Afisharr contributors
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
+name: Rust toolchain
+description: >-
+  Installs the toolchain pinned by rust-toolchain.toml, restores the cargo
+  caches, and installs the named cargo subcommands.
+
+inputs:
+  tools:
+    description: Space-separated cargo subcommands to install (nextest, deny, machete).
+    required: false
+    default: ""
+
+runs:
+  using: composite
+  steps:
+    # rustup reads rust-toolchain.toml, so the pinned channel and components
+    # come from the repository rather than from a workflow input that can drift
+    # away from it.
+    - name: install the pinned toolchain
+      shell: bash
+      run: rustup show active-toolchain || rustup toolchain install
+
+    - uses: actions/cache@v4
+      with:
+        path: |
+          ~/.cargo/registry/index
+          ~/.cargo/registry/cache
+          ~/.cargo/git/db
+          target
+        key: cargo-${{ runner.os }}-${{ hashFiles('rust-toolchain.toml', 'Cargo.lock') }}
+        restore-keys: cargo-${{ runner.os }}-
+
+    - uses: actions/cache@v4
+      if: inputs.tools != ''
+      id: tool-cache
+      with:
+        path: ~/.cargo/bin
+        key: cargo-tools-${{ runner.os }}-${{ inputs.tools }}-${{ hashFiles('rust-toolchain.toml') }}
+
+    - name: install cargo subcommands
+      if: inputs.tools != '' && steps.tool-cache.outputs.cache-hit != 'true'
+      shell: bash
+      run: |
+        for tool in ${{ inputs.tools }}; do
+          cargo install "cargo-$tool" --locked
+        done

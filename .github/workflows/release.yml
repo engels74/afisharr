@@ -1,0 +1,90 @@
+# SPDX-FileCopyrightText: 2026 Afisharr contributors
+# SPDX-License-Identifier: AGPL-3.0-or-later
+#
+# The release lane (D-035). Runs on every tagged release, budgeted at 6 hours.
+#
+# Everything the merge and nightly lanes run, plus the render-cache bound, the
+# restore path, and the full matrix against every supported Plex version. Those
+# suites arrive with the subsystems they cover; the jobs are wired now so a
+# later phase adds a step to a lane that already exists.
+
+name: release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+# The merge lane's nightly-status job reads the nightly workflow's last result
+# and the pull request body; a called workflow cannot widen what the caller
+# grants.
+permissions:
+  contents: read
+  actions: read
+  pull-requests: read
+
+env:
+  CARGO_TERM_COLOR: always
+  SQLX_OFFLINE: "true"
+
+jobs:
+  merge-lane:
+    name: merge-lane
+    uses: ./.github/workflows/merge.yml
+
+  nightly-lane:
+    name: nightly-lane
+    uses: ./.github/workflows/nightly.yml
+
+  restore-path:
+    name: restore-path
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v5
+      - uses: ./.github/actions/rust
+        with:
+          tools: nextest
+      # I-SEC-5 and I-SEC-6: a restore without `secrets.key` loses credentials
+      # and nothing else, and a backup is verified before it is called a backup.
+      # Built in Phase 12.
+      - name: restore suite
+        run: |
+          if cargo nextest list --workspace --all-features -E 'test(restore)' | grep -q 'restore'; then
+            cargo nextest run --workspace --all-features -E 'test(restore)'
+          else
+            echo "No restore tests exist yet (I-SEC-5 and I-SEC-6 are claimed in Phase 12)."
+          fi
+
+  plex-matrix:
+    name: plex-matrix
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v5
+      # The contract test against a real server is what keeps the adversarial
+      # fake honest: the fake makes failures reproducible, and this makes the
+      # fake truthful (D-036). It needs a real Plex server, which arrives with
+      # the client in Phase 2.
+      - name: contract tests against every supported Plex version
+        run: echo "No Plex contract tests exist yet (the client is built in Phase 2)."
+
+  render-cache-bound:
+    name: render-cache-bound
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v5
+      - uses: ./.github/actions/rust
+        with:
+          tools: nextest
+      # I-PERF-2: the render cache is bounded, default cap 10 GB, LRU eviction
+      # by last_used_at. Built in Phase 8.
+      - name: render-cache suite
+        run: |
+          if cargo nextest list --workspace --all-features -E 'test(render_cache)' \
+            | grep -q 'render_cache'; then
+            cargo nextest run --workspace --all-features -E 'test(render_cache)'
+          else
+            echo "No render-cache tests exist yet (I-PERF-2 is claimed in Phase 8)."
+          fi
