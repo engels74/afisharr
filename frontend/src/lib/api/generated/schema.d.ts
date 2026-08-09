@@ -271,7 +271,22 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        get?: never;
+        /**
+         * Reports what the claim page needs, without a claim.
+         * @description `/api/setup/status` sits behind the claim gate, so an unclaimed browser can
+         *     never read it — which is correct for the derived step and useless for the
+         *     page that has to be drawn *before* a claim exists. Left to guess, the
+         *     interface fabricates: a hard-coded `recoveryAvailable: false` hides the
+         *     recovery form from the operator whose token has died with a restart, and a
+         *     hard-coded `tokenLive: true` offers a token field on an instance that has
+         *     no live token to accept.
+         *
+         *     Neither fact is a disclosure. "An administrator exists" is already the
+         *     difference between `/api/setup/recover` accepting credentials and refusing
+         *     them, and "a token is live" is already the difference between a claim
+         *     attempt being refused and being possible at all.
+         */
+        get: operations["claim_status"];
         put?: never;
         /** Takes the wizard for this browser, on the strength of the console token. */
         post: operations["claim"];
@@ -296,6 +311,8 @@ export interface paths {
          *     `instance.setup_completed_at` is written, the `setup:claim` lease is
          *     deleted, the in-memory token is cleared, and the cookie is expired. From
          *     then on the banner prints nothing on restart and these endpoints answer 404.
+         *
+         *     All four are irreversible, which is why the prerequisite is checked first.
          */
         post: operations["complete"];
         delete?: never;
@@ -424,6 +441,39 @@ export interface components {
             /** @description The three four-character segments, as printed. */
             token: string;
         };
+        /**
+         * @description The two facts the claim page renders, and whether it already holds a claim.
+         *
+         *     Deliberately not the derived step and deliberately not `Evidence`: this route
+         *     is outside the claim gate, so it says the least that lets step one draw
+         *     itself and nothing about how far setup has got (D-046).
+         */
+        ClaimStatus: {
+            /** @description Whether this browser already holds the wizard. */
+            claimHeld: boolean;
+            /**
+             * Format: int32
+             * @description The claim step's position in the journey, one-based, for display only.
+             *
+             *     Carried rather than assumed, for the same reason `/api/setup/status`
+             *     carries it: the shape of the journey is the server's to state, and a
+             *     number written into a page is a number that goes stale in silence.
+             */
+            ordinal: number;
+            /**
+             * @description Whether an administrator account exists, which decides whether the claim
+             *     page offers the recovery affordance (PRD §7.14).
+             */
+            recoveryAvailable: boolean;
+            /**
+             * @description Whether a token is live to be entered at all.
+             *
+             *     False fifteen minutes after a start with no restart, which is what turns
+             *     the page's message from "enter the token" into "restart the container
+             *     and read the console".
+             */
+            tokenLive: boolean;
+        };
         /** @description The administrator the wizard creates. */
         CreateAdmin: {
             /** @description The password. */
@@ -477,7 +527,7 @@ export interface components {
          *     able to arrive silently as a 500.
          * @enum {string}
          */
-        ErrorCode: "invalid" | "unauthenticated" | "forbidden" | "notFound" | "conflict" | "blocked" | "rateLimited" | "setupRequired" | "internal";
+        ErrorCode: "invalid" | "unauthenticated" | "forbidden" | "notFound" | "conflict" | "blocked" | "rateLimited" | "setupRequired" | "upstream" | "internal";
         /**
          * @description What the health route reports.
          *
@@ -731,6 +781,15 @@ export interface operations {
                     "application/json": components["schemas"]["SignedIn"];
                 };
             };
+            /** @description The request body was not readable */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Problem"];
+                };
+            };
             /** @description The credentials were not accepted */
             401: {
                 headers: {
@@ -800,6 +859,15 @@ export interface operations {
                     "application/json": components["schemas"]["PinStarted"];
                 };
             };
+            /** @description The request body was not readable */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Problem"];
+                };
+            };
             /** @description Too many attempts */
             429: {
                 headers: {
@@ -859,6 +927,33 @@ export interface operations {
                     "application/json": components["schemas"]["Problem"];
                 };
             };
+            /** @description The client identifier changed, or the attempt was already completed */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Too many calls to plex.tv */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description plex.tv could not be reached */
+            502: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Problem"];
+                };
+            };
         };
     };
     whoami: {
@@ -892,14 +987,14 @@ export interface operations {
     };
     browse: {
         parameters: {
-            query: {
+            query?: never;
+            header?: never;
+            path: {
                 /** @description The operator's label for the root to walk. */
                 root: string;
                 /** @description The path inside the root. Empty means the root itself. */
-                path?: string;
+                path: string;
             };
-            header?: never;
-            path?: never;
             cookie?: never;
         };
         requestBody?: never;
@@ -913,6 +1008,15 @@ export interface operations {
                     "application/json": components["schemas"]["DirectoryListing"];
                 };
             };
+            /** @description The query was not readable */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Problem"];
+                };
+            };
             /** @description No accepted credential was presented */
             401: {
                 headers: {
@@ -922,7 +1026,7 @@ export interface operations {
                     "application/json": components["schemas"]["Problem"];
                 };
             };
-            /** @description The path is not inside the root */
+            /** @description The path is not inside the root, or that account does not administer this instance */
             403: {
                 headers: {
                     [name: string]: unknown;
@@ -962,6 +1066,15 @@ export interface operations {
             };
             /** @description No accepted credential was presented */
             401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description That account does not administer this instance */
+            403: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -1018,6 +1131,15 @@ export interface operations {
                     "application/json": components["schemas"]["Problem"];
                 };
             };
+            /** @description That account does not administer this instance */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Problem"];
+                };
+            };
         };
     };
     create: {
@@ -1060,6 +1182,15 @@ export interface operations {
                     "application/json": components["schemas"]["Problem"];
                 };
             };
+            /** @description That account does not administer this instance */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Problem"];
+                };
+            };
         };
     };
     revoke: {
@@ -1083,6 +1214,15 @@ export interface operations {
             };
             /** @description No accepted credential was presented */
             401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description That account does not administer this instance */
+            403: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -1253,6 +1393,35 @@ export interface operations {
             };
         };
     };
+    claim_status: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description What the claim page renders */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ClaimStatus"];
+                };
+            };
+            /** @description Setup has already been completed */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
     claim: {
         parameters: {
             query?: never;
@@ -1273,6 +1442,15 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ClaimGranted"];
+                };
+            };
+            /** @description The request body was not readable */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Problem"];
                 };
             };
             /** @description The token was not accepted */
@@ -1331,7 +1509,7 @@ export interface operations {
                     "application/json": components["schemas"]["Problem"];
                 };
             };
-            /** @description Another browser holds the wizard */
+            /** @description Another browser holds the wizard, or no administrator exists yet */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -1362,6 +1540,15 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ClaimGranted"];
+                };
+            };
+            /** @description The request body was not readable */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Problem"];
                 };
             };
             /** @description The credentials were not accepted */
@@ -1442,6 +1629,15 @@ export interface operations {
             };
             /** @description No accepted credential was presented */
             401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description That account does not administer this instance */
+            403: {
                 headers: {
                     [name: string]: unknown;
                 };

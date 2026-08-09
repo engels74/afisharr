@@ -207,6 +207,32 @@ describe('the disconnection watchdog', () => {
 		stream.close();
 	});
 
+	test('a half-open connection is torn down and reconnected', async () => {
+		// A connection that stops carrying events without erroring fires no
+		// `error` at all. Relabelling the status and leaving the `EventSource`
+		// in place makes `open()` a no-op forever, so nothing reconnects and no
+		// refetcher ever runs.
+		const stream = new StreamConnection();
+		let refetches = 0;
+		stream.onreconnect(() => {
+			refetches += 1;
+		});
+		stream.open();
+		latest().emit('open');
+		latest().emit('stream', { heartbeatSeconds: 0.01, topics: ['jobs'] });
+
+		const opened = FakeEventSource.instances.length;
+		// The watchdog fires at 260ms; the first backoff is at most a second.
+		await Bun.sleep(1500);
+
+		expect(FakeEventSource.instances.length).toBeGreaterThan(opened);
+		expect(latest().closed).toBe(false);
+		latest().emit('open');
+		expect(stream.status).toBe('live');
+		expect(refetches).toBe(1);
+		stream.close();
+	});
+
 	test('an arriving event rearms the watchdog', async () => {
 		const stream = new StreamConnection();
 		stream.open();
@@ -224,15 +250,36 @@ describe('the disconnection watchdog', () => {
 });
 
 describe('closing', () => {
-	test('a closed connection stops reconnecting', () => {
+	test('a closed connection stops reconnecting on its own', async () => {
+		const stream = new StreamConnection();
+		stream.open();
+		latest().emit('open');
+		latest().emit('error');
+		stream.close();
+
+		expect(stream.status).toBe('disconnected');
+		const opened = FakeEventSource.instances.length;
+		// Long enough for the pending backoff retry to have fired.
+		await Bun.sleep(1500);
+		expect(FakeEventSource.instances.length).toBe(opened);
+	});
+
+	test('a closed connection reopens when it is asked to', () => {
+		// The root layout keeps one connection and closes it whenever it
+		// navigates into the login or setup journey. Signing out and back in
+		// arrives at `open()` on an object that has already been stopped, and a
+		// `close()` that could not be undone would leave a permanently dead
+		// stream with nothing to explain it.
 		const stream = new StreamConnection();
 		stream.open();
 		latest().emit('open');
 		stream.close();
 
-		expect(stream.status).toBe('disconnected');
 		const opened = FakeEventSource.instances.length;
 		stream.open();
-		expect(FakeEventSource.instances.length).toBe(opened);
+		expect(FakeEventSource.instances.length).toBe(opened + 1);
+		latest().emit('open');
+		expect(stream.status).toBe('live');
+		stream.close();
 	});
 });

@@ -3,5 +3,5 @@
 
 /** What this build is, and where its source is published. */
 
-export type { Provenance } from './source-link';
-export { recordProvenance, sourceHref } from './source-link';
+export type { Provenance } from './source-link.svelte';
+export { recordProvenance, sourceHref } from './source-link.svelte';

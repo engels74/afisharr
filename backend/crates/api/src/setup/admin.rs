@@ -20,7 +20,7 @@ use utoipa::ToSchema;
 
 use crate::{
     authentication::SignedIn,
-    error::{AppError, AppResult, ErrorCode, Problem},
+    error::{AppError, AppResult, ErrorCode, JsonBody, Problem},
     setup::events::record_step,
     state::ApiState,
 };
@@ -63,7 +63,7 @@ pub struct CreateAdmin {
 )]
 pub async fn create_admin(
     State(state): State<ApiState>,
-    Json(request): Json<CreateAdmin>,
+    JsonBody(request): JsonBody<CreateAdmin>,
 ) -> AppResult<Json<SignedIn>> {
     let username = request.username.trim().to_owned();
     validate(&username, &request.password)?;

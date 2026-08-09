@@ -25,6 +25,7 @@ use crate::{
     authentication::{plex_pin_start::plex_failure, session},
     error::{AppError, AppResult, ErrorCode, Problem},
     proxy::ClientContext,
+    ratelimit::{Bucket, Decision},
     state::ApiState,
 };
 
@@ -62,6 +63,9 @@ pub enum PinState {
         (status = 200, description = "The attempt's current state", body = PinState),
         (status = 403, description = "The Plex account is not linked to an Afisharr account", body = Problem),
         (status = 404, description = "No such attempt", body = Problem),
+        (status = 409, description = "The client identifier changed, or the attempt was already completed", body = Problem),
+        (status = 429, description = "Too many calls to plex.tv", body = Problem),
+        (status = 502, description = "plex.tv could not be reached", body = Problem),
     ),
 )]
 pub async fn poll_plex_pin(
@@ -94,6 +98,13 @@ pub async fn poll_plex_pin(
         ));
     }
 
+    // Every poll reaches plex.tv on the caller's behalf, so every poll counts
+    // against the provider bucket — not just the call that created the pin.
+    // A pin identifier is a bearer-free public string, so a limit spent only at
+    // creation leaves anyone who has seen one able to drive unbounded traffic
+    // at plex.tv from this instance's client identifier (PRD §21.4.3).
+    spend_provider_budget(&state, client)?;
+
     match state
         .plex()
         .poll_pin(&attempt.plex_pin_id)
@@ -106,8 +117,48 @@ pub async fn poll_plex_pin(
             Ok((jar, Json(PinState::Expired)))
         }
         PinPoll::Authorized { auth_token } => {
+            // Claimed before anything is stored and before a session exists.
+            // Two overlapping polls are both told `Authorized` by plex.tv, and
+            // without this both would store the token, refresh the account, and
+            // issue a session — two valid sessions from one exchange. The claim
+            // is a single serialised `consumed_at IS NULL` update, so exactly
+            // one request gets past here.
+            let claimed = state
+                .database()
+                .writer()
+                .submit(plex_pin::ClaimPinLogin {
+                    id: attempt.id.clone(),
+                    at: now,
+                })
+                .await
+                .map_err(AppError::internal)?;
+            if !claimed {
+                return Err(AppError::of(
+                    ErrorCode::Conflict,
+                    "That sign-in attempt has already been completed.",
+                ));
+            }
             authorize(&state, &attempt.id, auth_token, client, &headers, jar, now).await
         }
+    }
+}
+
+/// Spends one provider attempt, or refuses.
+fn spend_provider_budget(state: &ApiState, client: ClientContext) -> AppResult<()> {
+    match state
+        .limiter()
+        .record(&Bucket::Provider, Some(client.address))
+    {
+        Decision::Allowed => Ok(()),
+        Decision::Refused {
+            retry_after_seconds,
+        } => Err(AppError::new(
+            Problem::new(
+                ErrorCode::RateLimited,
+                "Too many calls to Plex from this address. Try again shortly.",
+            )
+            .retry_after(retry_after_seconds),
+        )),
     }
 }
 
@@ -118,6 +169,10 @@ pub async fn poll_plex_pin(
 /// Signing in first and asking later would let anyone with a plex.tv account
 /// walk into an instance that offers Plex sign-in — so the account is resolved,
 /// matched against a linked row, and only then is the token worth storing.
+///
+/// Reached only by the request that claimed the attempt, so everything below
+/// happens once. The `close` calls record how it ended on a row that is already
+/// consumed.
 async fn authorize(
     state: &ApiState,
     attempt_id: &str,
@@ -134,8 +189,9 @@ async fn authorize(
         .map_err(plex_failure)?;
 
     let Some(user) = linked_account(state, &account).await? else {
-        // Nothing is stored and no session is minted. The attempt is closed so
-        // the same pin cannot be replayed against a link created afterwards.
+        // Nothing is stored and no session is minted. The attempt is already
+        // claimed, so recording the outcome is all that is left, and the same
+        // pin cannot be replayed against a link created afterwards.
         close(state, attempt_id, plex_pin::PinLoginResult::Aborted, now).await;
         return Err(AppError::of(
             ErrorCode::Forbidden,

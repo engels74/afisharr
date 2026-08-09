@@ -86,6 +86,44 @@ impl FromRequestParts<ApiState> for Authenticated {
     }
 }
 
+/// A caller who has proved who they are **and** holds administrator rights.
+///
+/// Tier 0 is an admin-only product (D-007): the filesystem browser, the
+/// instance's API keys, the Plex connection, and the event stream are one
+/// operator's control panel over their own server, and none of them is scoped
+/// to the account that asked. `users.is_admin` can still be `0` — a Plex
+/// account linked for viewing, a row edited by hand — and such an account holds
+/// a session this surface accepts. Without this extractor the whole documented
+/// admin-only surface is ordinary authenticated access.
+///
+/// A second extractor rather than a check inside [`Authenticated`], because
+/// "who is calling" and "may they do this" are different questions: signing
+/// out, reading one's own session, and changing one's own password are
+/// self-scoped and need the first without the second.
+#[derive(Debug, Clone)]
+pub struct Administrator(
+    /// The caller, once their rights are established.
+    pub Authenticated,
+);
+
+impl FromRequestParts<ApiState> for Administrator {
+    type Rejection = AppError;
+
+    async fn from_request_parts(
+        parts: &mut Parts,
+        state: &ApiState,
+    ) -> Result<Self, Self::Rejection> {
+        let caller = Authenticated::from_request_parts(parts, state).await?;
+        if !caller.is_admin {
+            return Err(AppError::of(
+                ErrorCode::Forbidden,
+                "That account does not administer this instance.",
+            ));
+        }
+        Ok(Self(caller))
+    }
+}
+
 /// The value of an `Authorization: Bearer` header, if there is one.
 fn bearer_key(parts: &Parts) -> Option<String> {
     let raw = parts.headers.get(AUTHORIZATION)?.to_str().ok()?;

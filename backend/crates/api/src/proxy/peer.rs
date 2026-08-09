@@ -63,25 +63,52 @@ impl ClientContext {
         }
 
         Self {
-            address: forwarded_for(headers).unwrap_or(peer_address),
+            address: forwarded_for(headers, trusted).unwrap_or(peer_address),
             scheme: forwarded_scheme(headers),
         }
     }
 }
 
-/// The client-most address in `X-Forwarded-For`.
+/// The client address in `X-Forwarded-For`, read from the trusted edge.
 ///
-/// The leftmost entry is the one the client claims, and the trusted proxy is
-/// the one appending to it. Reading the leftmost is correct only because the
-/// caller has already established that a trusted proxy built this header.
-fn forwarded_for(headers: &HeaderMap) -> Option<IpAddr> {
-    headers
-        .get(FORWARDED_FOR)?
-        .to_str()
-        .ok()?
-        .split(',')
+/// Read right to left, never left to right. The leftmost entry is whatever the
+/// client wrote, and a trusted proxy that *appends* — which is what every
+/// mainstream proxy does by default, including nginx's `proxy_add_x_forwarded_for`
+/// — leaves the forged entry sitting in front of the real one. Trusting the
+/// leftmost therefore hands the caller the address every limit is counted
+/// against and every audit line records, which is `I-SEC-1` failing while
+/// reporting that it works.
+///
+/// So: walk from the right, discarding entries that are themselves configured
+/// proxies, and stop at the first one that is not. That entry is the address
+/// the last trustworthy hop actually saw. An entry that is not an address at
+/// all ends the walk with nothing — the chain cannot be shown to be trusted
+/// past a value that cannot be compared, and the peer's own address is the safe
+/// answer (P2).
+fn forwarded_for(headers: &HeaderMap, trusted: &TrustedProxies) -> Option<IpAddr> {
+    // Every value, in order: a chain can arrive as one comma-joined header or
+    // as several, and a proxy that appends a second header line is appending to
+    // the same list.
+    let chain: Vec<&str> = headers
+        .get_all(FORWARDED_FOR)
+        .iter()
+        .filter_map(|value| value.to_str().ok())
+        .flat_map(|value| value.split(','))
         .map(str::trim)
-        .find_map(|entry| entry.parse::<IpAddr>().ok())
+        .filter(|entry| !entry.is_empty())
+        .collect();
+
+    let mut leftmost = None;
+    for entry in chain.iter().rev() {
+        let address = entry.parse::<IpAddr>().ok()?;
+        if !trusted.trusts(address) {
+            return Some(address);
+        }
+        leftmost = Some(address);
+    }
+    // Every hop in the chain is a proxy this instance trusts, so the leftmost
+    // of them is as close to the client as the header goes.
+    leftmost
 }
 
 fn forwarded_scheme(headers: &HeaderMap) -> Scheme {
@@ -138,7 +165,7 @@ mod tests {
     }
 
     #[test]
-    fn the_leftmost_forwarded_entry_wins_behind_a_trusted_proxy() {
+    fn the_hop_before_the_trusted_edge_wins_and_not_the_leftmost_entry() {
         let trusted = TrustedProxies::parse(&["10.0.0.0/8"]).expect("parses");
         let context = ClientContext::resolve(
             peer("10.0.0.5"),
@@ -146,6 +173,53 @@ mod tests {
             &trusted,
         );
         assert_eq!(context.address.to_string(), "1.2.3.4");
+    }
+
+    #[test]
+    fn a_forged_leftmost_entry_does_not_choose_the_address_that_is_counted() {
+        // The attack: the client sends `X-Forwarded-For: 9.9.9.9`, the trusted
+        // proxy appends what it actually saw, and the header arrives as
+        // "9.9.9.9, 203.0.113.9". Reading left to right lets the caller pick a
+        // different identity on every request.
+        let trusted = TrustedProxies::parse(&["10.0.0.0/8"]).expect("parses");
+        let attributed: Vec<String> = (0..5)
+            .map(|n| {
+                ClientContext::resolve(
+                    peer("10.0.0.5"),
+                    &headers(&[(FORWARDED_FOR, &format!("9.9.9.{n}, 203.0.113.9"))]),
+                    &trusted,
+                )
+                .address
+                .to_string()
+            })
+            .collect();
+        assert_eq!(attributed, vec!["203.0.113.9"; 5]);
+    }
+
+    #[test]
+    fn a_chain_of_trusted_hops_falls_back_to_the_client_most_of_them() {
+        // Two proxies of the operator's own, and nothing beyond them: the
+        // leftmost is as close to the client as the header goes.
+        let trusted = TrustedProxies::parse(&["10.0.0.0/8"]).expect("parses");
+        let context = ClientContext::resolve(
+            peer("10.0.0.5"),
+            &headers(&[(FORWARDED_FOR, "10.0.0.9, 10.0.0.5")]),
+            &trusted,
+        );
+        assert_eq!(context.address.to_string(), "10.0.0.9");
+    }
+
+    #[test]
+    fn an_unreadable_entry_at_the_edge_falls_back_to_the_peer() {
+        // "unknown" cannot be compared against the trusted list, so the chain
+        // stops being provable there and the peer's own address is the answer.
+        let trusted = TrustedProxies::parse(&["10.0.0.0/8"]).expect("parses");
+        let context = ClientContext::resolve(
+            peer("10.0.0.5"),
+            &headers(&[(FORWARDED_FOR, "1.2.3.4, unknown")]),
+            &trusted,
+        );
+        assert_eq!(context.address.to_string(), "10.0.0.5");
     }
 
     #[test]

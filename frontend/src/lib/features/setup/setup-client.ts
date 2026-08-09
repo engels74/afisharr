@@ -20,6 +20,22 @@ export interface SetupStatus {
 	tokenLive: boolean;
 }
 
+/**
+ * What the claim page renders, before it holds a claim.
+ *
+ * A separate shape from {@link SetupStatus} because it comes from a separate
+ * route, and it has to: `/api/setup/status` sits behind the claim gate, so an
+ * unclaimed browser is always refused there. A page that filled these in
+ * itself would hide the recovery form from the operator whose token died with
+ * a restart, and offer a token field on an instance with no live token.
+ */
+export interface ClaimStatus {
+	ordinal: number;
+	claimHeld: boolean;
+	recoveryAvailable: boolean;
+	tokenLive: boolean;
+}
+
 /** What a setup call produced. Never an exception: a refusal is a value. */
 export type SetupResult<T> =
 	| { readonly outcome: 'ok'; readonly value: T }
@@ -36,6 +52,19 @@ export async function readStatus(): Promise<SetupResult<SetupStatus>> {
 	const { data, error } = await api.GET('/api/setup/status');
 	return data
 		? { outcome: 'ok', value: data as SetupStatus }
+		: { outcome: 'refused', problem: error as Problem };
+}
+
+/**
+ * Reads what the claim page renders, without needing a claim.
+ *
+ * The one setup read available before the gate is passed. Everything it
+ * returns is a fact the server derived, so the page never invents one.
+ */
+export async function readClaimStatus(): Promise<SetupResult<ClaimStatus>> {
+	const { data, error } = await api.GET('/api/setup/claim');
+	return data
+		? { outcome: 'ok', value: data as ClaimStatus }
 		: { outcome: 'refused', problem: error as Problem };
 }
 
@@ -77,5 +106,23 @@ export async function createAdmin(
 	});
 	return data
 		? { outcome: 'ok', value: data }
+		: { outcome: 'refused', problem: error as Problem };
+}
+
+/**
+ * Finishes setup.
+ *
+ * Creating the administrator does not finish setup — it only moves the derived
+ * step on. Until this is called `instance.setup_completed_at` is `NULL`, and
+ * `require_setup_completed` refuses every route behind it, sign-in included.
+ * A first run that stopped after the administrator would leave the shell
+ * unreachable through the interface that created it.
+ */
+export async function completeSetup(): Promise<SetupResult<SetupStatus>> {
+	const { data, error } = await api.POST('/api/setup/complete', {
+		headers: csrfHeaders(),
+	});
+	return data
+		? { outcome: 'ok', value: data as SetupStatus }
 		: { outcome: 'refused', problem: error as Problem };
 }

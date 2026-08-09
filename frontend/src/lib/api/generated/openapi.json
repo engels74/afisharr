@@ -42,6 +42,16 @@
               }
             }
           },
+          "400": {
+            "description": "The request body was not readable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
           "401": {
             "description": "The credentials were not accepted",
             "content": {
@@ -117,6 +127,16 @@
               }
             }
           },
+          "400": {
+            "description": "The request body was not readable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
           "429": {
             "description": "Too many attempts",
             "content": {
@@ -188,6 +208,36 @@
                 }
               }
             }
+          },
+          "409": {
+            "description": "The client identifier changed, or the attempt was already completed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Too many calls to plex.tv",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "plex.tv could not be reached",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
           }
         }
       }
@@ -234,7 +284,7 @@
         "parameters": [
           {
             "name": "root",
-            "in": "query",
+            "in": "path",
             "description": "The operator's label for the root to walk.",
             "required": true,
             "schema": {
@@ -243,9 +293,9 @@
           },
           {
             "name": "path",
-            "in": "query",
+            "in": "path",
             "description": "The path inside the root. Empty means the root itself.",
-            "required": false,
+            "required": true,
             "schema": {
               "type": "string"
             }
@@ -262,6 +312,16 @@
               }
             }
           },
+          "400": {
+            "description": "The query was not readable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
           "401": {
             "description": "No accepted credential was presented",
             "content": {
@@ -273,7 +333,7 @@
             }
           },
           "403": {
-            "description": "The path is not inside the root",
+            "description": "The path is not inside the root, or that account does not administer this instance",
             "content": {
               "application/json": {
                 "schema": {
@@ -318,6 +378,16 @@
           },
           "401": {
             "description": "No accepted credential was presented",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "That account does not administer this instance",
             "content": {
               "application/json": {
                 "schema": {
@@ -380,6 +450,16 @@
                 }
               }
             }
+          },
+          "403": {
+            "description": "That account does not administer this instance",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
           }
         }
       },
@@ -429,6 +509,16 @@
                 }
               }
             }
+          },
+          "403": {
+            "description": "That account does not administer this instance",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
           }
         }
       }
@@ -457,6 +547,16 @@
           },
           "401": {
             "description": "No accepted credential was presented",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "That account does not administer this instance",
             "content": {
               "application/json": {
                 "schema": {
@@ -662,6 +762,36 @@
       }
     },
     "/api/setup/claim": {
+      "get": {
+        "tags": [
+          "setup"
+        ],
+        "summary": "Reports what the claim page needs, without a claim.",
+        "description": "`/api/setup/status` sits behind the claim gate, so an unclaimed browser can\nnever read it — which is correct for the derived step and useless for the\npage that has to be drawn *before* a claim exists. Left to guess, the\ninterface fabricates: a hard-coded `recoveryAvailable: false` hides the\nrecovery form from the operator whose token has died with a restart, and a\nhard-coded `tokenLive: true` offers a token field on an instance that has\nno live token to accept.\n\nNeither fact is a disclosure. \"An administrator exists\" is already the\ndifference between `/api/setup/recover` accepting credentials and refusing\nthem, and \"a token is live\" is already the difference between a claim\nattempt being refused and being possible at all.",
+        "operationId": "claim_status",
+        "responses": {
+          "200": {
+            "description": "What the claim page renders",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ClaimStatus"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Setup has already been completed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      },
       "post": {
         "tags": [
           "setup"
@@ -685,6 +815,16 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/ClaimGranted"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The request body was not readable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
                 }
               }
             }
@@ -728,7 +868,7 @@
           "setup"
         ],
         "summary": "Finishes setup.",
-        "description": "Four things happen together and none is optional (PRD §19.6.1):\n`instance.setup_completed_at` is written, the `setup:claim` lease is\ndeleted, the in-memory token is cleared, and the cookie is expired. From\nthen on the banner prints nothing on restart and these endpoints answer 404.",
+        "description": "Four things happen together and none is optional (PRD §19.6.1):\n`instance.setup_completed_at` is written, the `setup:claim` lease is\ndeleted, the in-memory token is cleared, and the cookie is expired. From\nthen on the banner prints nothing on restart and these endpoints answer 404.\n\nAll four are irreversible, which is why the prerequisite is checked first.",
         "operationId": "complete",
         "responses": {
           "200": {
@@ -752,7 +892,7 @@
             }
           },
           "409": {
-            "description": "Another browser holds the wizard",
+            "description": "Another browser holds the wizard, or no administrator exists yet",
             "content": {
               "application/json": {
                 "schema": {
@@ -789,6 +929,16 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/ClaimGranted"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The request body was not readable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
                 }
               }
             }
@@ -882,6 +1032,16 @@
                 }
               }
             }
+          },
+          "403": {
+            "description": "That account does not administer this instance",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
           }
         }
       }
@@ -961,6 +1121,36 @@
           }
         },
         "additionalProperties": false
+      },
+      "ClaimStatus": {
+        "type": "object",
+        "description": "The two facts the claim page renders, and whether it already holds a claim.\n\nDeliberately not the derived step and deliberately not `Evidence`: this route\nis outside the claim gate, so it says the least that lets step one draw\nitself and nothing about how far setup has got (D-046).",
+        "required": [
+          "ordinal",
+          "claimHeld",
+          "recoveryAvailable",
+          "tokenLive"
+        ],
+        "properties": {
+          "claimHeld": {
+            "type": "boolean",
+            "description": "Whether this browser already holds the wizard."
+          },
+          "ordinal": {
+            "type": "integer",
+            "format": "int32",
+            "description": "The claim step's position in the journey, one-based, for display only.\n\nCarried rather than assumed, for the same reason `/api/setup/status`\ncarries it: the shape of the journey is the server's to state, and a\nnumber written into a page is a number that goes stale in silence.",
+            "minimum": 0
+          },
+          "recoveryAvailable": {
+            "type": "boolean",
+            "description": "Whether an administrator account exists, which decides whether the claim\npage offers the recovery affordance (PRD §7.14)."
+          },
+          "tokenLive": {
+            "type": "boolean",
+            "description": "Whether a token is live to be entered at all.\n\nFalse fifteen minutes after a start with no restart, which is what turns\nthe page's message from \"enter the token\" into \"restart the container\nand read the console\"."
+          }
+        }
       },
       "CreateAdmin": {
         "type": "object",
@@ -1070,6 +1260,7 @@
           "blocked",
           "rateLimited",
           "setupRequired",
+          "upstream",
           "internal"
         ]
       },

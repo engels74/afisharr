@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "UPDATE plex_pin_logins SET consumed_at = ?2\n             WHERE id = ?1 AND consumed_at IS NULL",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": []
+  },
+  "hash": "4373e0d3fac01f556783677afe5d8a48deb21c6c1a15dd9aaf3146945b9de26c"
+}

@@ -33,6 +33,14 @@ pub enum ErrorCode {
     RateLimited,
     /// The instance has not been claimed, or setup is not finished.
     SetupRequired,
+    /// A service this instance depends on did not answer, or answered with
+    /// something this build cannot use.
+    ///
+    /// Its own code rather than `Internal`: an operator whose plex.tv is
+    /// unreachable and an operator who has found a fault in Afisharr need
+    /// different things, and a client that cannot tell the two apart tells its
+    /// user neither.
+    Upstream,
     /// Something failed that the caller cannot correct.
     Internal,
 }
@@ -55,6 +63,9 @@ impl ErrorCode {
             // client tells them apart by the code, as with Conflict above.
             Self::Forbidden | Self::SetupRequired => StatusCode::FORBIDDEN,
             Self::Internal => StatusCode::INTERNAL_SERVER_ERROR,
+            // 502, and not 500: the fault is upstream of this instance, and a
+            // 500 tells an operator to read a log that will say nothing.
+            Self::Upstream => StatusCode::BAD_GATEWAY,
         }
     }
 
@@ -62,7 +73,8 @@ impl ErrorCode {
     ///
     /// A rejected password and a rate-limited caller are the surface working,
     /// not the surface failing. Logging them at error level trains an operator
-    /// to ignore the level that matters.
+    /// to ignore the level that matters. An upstream outage is the same: it is
+    /// real, it is not this instance's fault, and it is not actionable here.
     #[must_use]
     pub const fn is_a_fault(self) -> bool {
         matches!(self, Self::Internal)
@@ -73,7 +85,7 @@ impl ErrorCode {
 mod tests {
     use super::*;
 
-    const EVERY_CODE: [ErrorCode; 9] = [
+    const EVERY_CODE: [ErrorCode; 10] = [
         ErrorCode::Invalid,
         ErrorCode::Unauthenticated,
         ErrorCode::Forbidden,
@@ -82,6 +94,7 @@ mod tests {
         ErrorCode::Blocked,
         ErrorCode::RateLimited,
         ErrorCode::SetupRequired,
+        ErrorCode::Upstream,
         ErrorCode::Internal,
     ];
 
@@ -121,6 +134,19 @@ mod tests {
         assert_eq!(
             serde_json::to_string(&ErrorCode::SetupRequired).expect("serialises"),
             "\"setupRequired\""
+        );
+    }
+
+    #[test]
+    fn an_upstream_failure_is_a_bad_gateway_and_not_an_internal_error() {
+        // The status the plex.tv routes declare. A 500 here would be a status
+        // those operations never documented, and a client that cannot tell an
+        // outage from a fault.
+        assert_eq!(ErrorCode::Upstream.status(), StatusCode::BAD_GATEWAY);
+        assert_ne!(ErrorCode::Upstream.status(), ErrorCode::Internal.status());
+        assert_eq!(
+            serde_json::to_string(&ErrorCode::Upstream).expect("serialises"),
+            "\"upstream\""
         );
     }
 }

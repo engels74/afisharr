@@ -7,15 +7,15 @@ use std::{convert::Infallible, time::Duration};
 
 use axum::{
     extract::State,
-    response::sse::{Event, KeepAlive, Sse},
+    response::sse::{Event, Sse},
 };
 use tokio_stream::{
     Stream, StreamExt,
-    wrappers::{BroadcastStream, errors::BroadcastStreamRecvError},
+    wrappers::{BroadcastStream, IntervalStream, errors::BroadcastStreamRecvError},
 };
 
 use crate::{
-    authentication::Authenticated,
+    authentication::Administrator,
     state::ApiState,
     stream::{HEARTBEAT_SECONDS, Topic},
 };
@@ -51,11 +51,12 @@ pub struct StreamOpened {
     responses(
         (status = 200, description = "The event stream, multiplexed by topic", content_type = "text/event-stream"),
         (status = 401, description = "No accepted credential was presented", body = crate::error::Problem),
+        (status = 403, description = "That account does not administer this instance", body = crate::error::Problem),
     ),
 )]
 pub async fn stream(
     State(state): State<ApiState>,
-    _caller: Authenticated,
+    _caller: Administrator,
 ) -> Sse<impl Stream<Item = Result<Event, Infallible>>> {
     let opened = Event::default().event(Topic::Stream.as_event_name()).data(
         serde_json::to_string(&StreamOpened {
@@ -78,13 +79,22 @@ pub async fn stream(
         }
     });
 
-    let body = tokio_stream::once(Ok(opened)).chain(published);
+    // A named event on the stream's own topic, not `KeepAlive`. Axum's keep-alive
+    // writes an SSE *comment*, and a browser's `EventSource` never dispatches a
+    // comment frame to a listener — so on an idle but perfectly healthy stream
+    // no client listener is ever called, every watchdog expires, and every
+    // client reports a disconnection that has not happened (`I-UX-9`).
+    let mut ticker = tokio::time::interval(Duration::from_secs(HEARTBEAT_SECONDS));
+    ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+    let heartbeat = IntervalStream::new(ticker).skip(1).map(|_| {
+        Ok(Event::default()
+            .event(Topic::Stream.as_event_name())
+            .data(r#"{"heartbeat":true}"#))
+    });
 
-    Sse::new(body).keep_alive(
-        KeepAlive::new()
-            .interval(Duration::from_secs(HEARTBEAT_SECONDS))
-            .text("heartbeat"),
-    )
+    let body = tokio_stream::once(Ok(opened)).chain(published.merge(heartbeat));
+
+    Sse::new(body)
 }
 
 #[cfg(test)]

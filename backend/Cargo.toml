@@ -71,8 +71,16 @@ sqlx = { version = "0.9", default-features = false, features = [
 ] }
 subtle = "2.6.1"
 thiserror = "2.0"
-tokio = { version = "1.52", features = ["macros", "rt-multi-thread", "sync"] }
-tokio-stream = { version = "0.1.19", features = ["sync"] }
+tokio = { version = "1.52", features = [
+  "macros",
+  "rt-multi-thread",
+  "sync",
+  "time",
+] }
+# `time` for the stream's heartbeat: the browser's `EventSource` never
+# dispatches an SSE comment to a listener, so the heartbeat has to be a real
+# event on a real interval rather than a keep-alive comment.
+tokio-stream = { version = "0.1.19", features = ["sync", "time"] }
 tokio-util = { version = "0.7.19", features = ["io"] }
 toml = "1.1"
 tower = "0.5.3"

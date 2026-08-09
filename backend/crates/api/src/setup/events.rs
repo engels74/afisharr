@@ -5,7 +5,7 @@
 
 use afisharr_core::{
     identifier::Id,
-    jobs::{AppendRunEvent, EventLevel, RunTrigger, StartRun, find_open_run},
+    jobs::{AppendRunEvent, EventLevel, FinishRun, RunStatus, RunTrigger, StartRun, find_open_run},
 };
 
 use crate::state::ApiState;
@@ -44,6 +44,43 @@ pub async fn record_step(state: &ApiState, step: &str, message: &str) {
 
     if let Err(error) = appended {
         tracing::warn!(%error, step, "could not record a setup step");
+    }
+}
+
+/// Closes the wizard's run, recording how it ended.
+///
+/// `record_step` finds or opens a run and never closes one. Without this, a
+/// setup that finished perfectly leaves a `job_runs` row reading `Running`
+/// forever — and `status` is the column the logs page filters on and the column
+/// `find_open_run` matches, so the next wizard on the same instance would also
+/// append into a run that ended months ago.
+///
+/// Best effort, for the same reason `record_step` is: setup has succeeded by
+/// the time this is called, and failing it over an audit line would be the tail
+/// wagging the dog.
+pub async fn finish_run(state: &ApiState, status: RunStatus) {
+    let Some(run_id) = find_open_run(state.database().readers(), SETUP_JOB_ID)
+        .await
+        .inspect_err(|error| tracing::warn!(%error, "could not read the setup run"))
+        .ok()
+        .flatten()
+    else {
+        return;
+    };
+
+    let finished = state
+        .database()
+        .writer()
+        .submit(FinishRun {
+            run_id,
+            status,
+            error: None,
+            at: state.clock().now(),
+        })
+        .await;
+
+    if let Err(error) = finished {
+        tracing::warn!(%error, "could not close the setup run");
     }
 }
 

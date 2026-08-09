@@ -60,6 +60,26 @@ struct Key {
     address: Option<IpAddr>,
 }
 
+impl Key {
+    /// The key one request is counted under.
+    ///
+    /// The address is dropped for the buckets that do not count per address,
+    /// and it is dropped *here* rather than at the call sites. A caller that
+    /// remembered to pass `None` and a caller that forgot would be two counters
+    /// for one account, which is the failure this normalisation exists to make
+    /// unreachable (P7).
+    fn of(bucket: &Bucket, address: Option<IpAddr>) -> Self {
+        Self {
+            bucket: bucket.clone(),
+            address: if bucket.counts_per_address() {
+                address
+            } else {
+                None
+            },
+        }
+    }
+}
+
 impl RateLimiter {
     /// An empty limiter reading `clock`.
     #[must_use]
@@ -78,10 +98,7 @@ impl RateLimiter {
     #[must_use]
     pub fn check(&self, bucket: &Bucket, address: Option<IpAddr>) -> Decision {
         let now = self.clock.now();
-        let key = Key {
-            bucket: bucket.clone(),
-            address,
-        };
+        let key = Key::of(bucket, address);
         let policy = bucket.policy();
         let counters = self
             .counters
@@ -97,10 +114,7 @@ impl RateLimiter {
     pub fn record(&self, bucket: &Bucket, address: Option<IpAddr>) -> Decision {
         let now = self.clock.now();
         let policy = bucket.policy();
-        let key = Key {
-            bucket: bucket.clone(),
-            address,
-        };
+        let key = Key::of(bucket, address);
 
         let mut counters = self
             .counters
@@ -133,7 +147,20 @@ impl RateLimiter {
         }
 
         counter.hits += 1;
-        if counter.hits > policy.allowance {
+        // A lockout bucket engages the moment its allowance is *spent*, not
+        // one request after it is exceeded. The difference is the whole of
+        // whether the escalation ever runs: the failure-only path checks
+        // before each attempt and records after it, so the attempt that would
+        // have carried the count past the allowance is refused by `check` and
+        // never recorded. `consecutive_lockouts` then never grows, and every
+        // attack wave gets the fixed window instead of the doubling lockout
+        // PRD §21.4.3 asks for.
+        let spent = if policy.lockout.is_some() {
+            counter.hits >= policy.allowance
+        } else {
+            counter.hits > policy.allowance
+        };
+        if spent {
             return Decision::Refused {
                 retry_after_seconds: engage_lockout(counter, policy, now),
             };
@@ -146,10 +173,7 @@ impl RateLimiter {
     /// A successful sign-in runs this: the failure count exists to slow a
     /// guesser down, and the operator who just proved who they are is not one.
     pub fn forget(&self, bucket: &Bucket, address: Option<IpAddr>) {
-        let key = Key {
-            bucket: bucket.clone(),
-            address,
-        };
+        let key = Key::of(bucket, address);
         let mut counters = self
             .counters
             .write()
@@ -253,6 +277,45 @@ mod tests {
     }
 
     #[test]
+    fn one_account_is_one_counter_however_many_addresses_try_it() {
+        // The attack this closes: rotate the source address and get the whole
+        // allowance again against the same account, five attempts at a time,
+        // for as many addresses as the attacker can reach the instance from.
+        let (_clock, limiter) = limiter();
+        let bucket = Bucket::LoginAccount {
+            username: "operator".to_owned(),
+        };
+        for n in 0..5 {
+            let _ = limiter.record(&bucket, address(&format!("203.0.113.{n}")));
+        }
+        assert!(matches!(
+            limiter.check(&bucket, address("203.0.113.99")),
+            Decision::Refused { .. }
+        ));
+    }
+
+    #[test]
+    fn the_lockout_engages_when_the_allowance_is_spent_rather_than_never() {
+        // `check` runs before an attempt and the failure is recorded after it,
+        // so a lockout that waited for `hits > allowance` would be refused into
+        // existence by `check` and never engage.
+        let (_clock, limiter) = limiter();
+        let bucket = Bucket::LoginAccount {
+            username: "operator".to_owned(),
+        };
+        for _ in 0..5 {
+            let _ = limiter.record(&bucket, address("1.2.3.4"));
+        }
+        let Decision::Refused {
+            retry_after_seconds,
+        } = limiter.check(&bucket, address("1.2.3.4"))
+        else {
+            panic!("the account must be locked out once the allowance is spent");
+        };
+        assert_eq!(retry_after_seconds, 15 * 60);
+    }
+
+    #[test]
     fn the_window_lapses_and_the_allowance_returns() {
         let (clock, limiter) = limiter();
         for _ in 0..21 {
@@ -316,14 +379,14 @@ mod tests {
 
     fn spend_to_lockout(limiter: &RateLimiter, bucket: &Bucket) -> u64 {
         let mut last = Decision::Allowed;
-        for _ in 0..6 {
+        for _ in 0..5 {
             last = limiter.record(bucket, address("1.2.3.4"));
         }
         match last {
             Decision::Refused {
                 retry_after_seconds,
             } => retry_after_seconds,
-            Decision::Allowed => panic!("the sixth failure must lock the account out"),
+            Decision::Allowed => panic!("spending the allowance must lock the account out"),
         }
     }
 }

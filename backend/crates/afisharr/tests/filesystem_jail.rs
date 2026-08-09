@@ -10,7 +10,7 @@
 
 mod harness;
 
-use harness::{RunningInstance, TempInstance};
+use harness::{RunningInstance, TempInstance, Wizard};
 use reqwest::{Client, StatusCode};
 
 const PASSWORD: &str = "correct horse battery staple";
@@ -54,25 +54,9 @@ async fn instance_with_a_root() -> (TempInstance, tempfile::TempDir, RunningInst
     insert_root(&instance, &root).await;
 
     let running = RunningInstance::start(&instance).await;
-    let token = running.token.clone().expect("a fresh instance mints one");
+    let _wizard = Wizard::set_up(&running, "operator", PASSWORD).await;
+
     let client = browser();
-    client
-        .post(format!("{}/api/setup/claim", running.base_url))
-        .json(&serde_json::json!({ "token": token }))
-        .send()
-        .await
-        .expect("the claim route must answer");
-    client
-        .post(format!("{}/api/setup/admin", running.base_url))
-        .json(&serde_json::json!({ "username": "operator", "password": PASSWORD }))
-        .send()
-        .await
-        .expect("the admin route must answer");
-    client
-        .post(format!("{}/api/setup/complete", running.base_url))
-        .send()
-        .await
-        .expect("the complete route must answer");
     client
         .post(format!("{}/api/auth/login", running.base_url))
         .json(&serde_json::json!({ "username": "operator", "password": PASSWORD }))

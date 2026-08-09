@@ -21,7 +21,7 @@ use utoipa::ToSchema;
 
 use crate::{
     authentication::{Authenticated, session},
-    error::{AppError, AppResult, ErrorCode, Problem},
+    error::{AppError, AppResult, ErrorCode, JsonBody, Problem},
     proxy::ClientContext,
     ratelimit::{Bucket, Decision},
     state::ApiState,
@@ -82,6 +82,7 @@ impl From<&User> for SignedIn {
     request_body = Credentials,
     responses(
         (status = 200, description = "Signed in", body = SignedIn),
+        (status = 400, description = "The request body was not readable", body = Problem),
         (status = 401, description = "The credentials were not accepted", body = Problem),
         (status = 429, description = "Too many attempts", body = Problem),
     ),
@@ -91,8 +92,12 @@ pub async fn log_in(
     client: ClientContext,
     jar: CookieJar,
     headers: axum::http::HeaderMap,
-    Json(credentials): Json<Credentials>,
+    JsonBody(credentials): JsonBody<Credentials>,
 ) -> AppResult<(CookieJar, Json<SignedIn>)> {
+    // Keyed by the account name alone: the limiter drops the address for this
+    // bucket, so five failures is five failures however many source addresses
+    // they arrive from. Counting it per address would hand an attacker who can
+    // rotate their address the whole allowance again, every time (PRD §21.4.3).
     let account_bucket = Bucket::LoginAccount {
         username: credentials.username.clone(),
     };

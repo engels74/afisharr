@@ -5,7 +5,7 @@
 
 mod harness;
 
-use harness::{RunningInstance, TempInstance};
+use harness::{RunningInstance, TempInstance, Wizard};
 use reqwest::{Client, StatusCode};
 use tokio::io::AsyncBufReadExt;
 
@@ -20,26 +20,9 @@ fn browser() -> Client {
 
 async fn signed_in(instance: &TempInstance) -> (RunningInstance, Client) {
     let running = RunningInstance::start(instance).await;
-    let token = running.token.clone().expect("a fresh instance mints one");
-    let client = browser();
+    let _wizard = Wizard::set_up(&running, "operator", PASSWORD).await;
 
-    client
-        .post(format!("{}/api/setup/claim", running.base_url))
-        .json(&serde_json::json!({ "token": token }))
-        .send()
-        .await
-        .expect("the claim route must answer");
-    client
-        .post(format!("{}/api/setup/admin", running.base_url))
-        .json(&serde_json::json!({ "username": "operator", "password": PASSWORD }))
-        .send()
-        .await
-        .expect("the admin route must answer");
-    client
-        .post(format!("{}/api/setup/complete", running.base_url))
-        .send()
-        .await
-        .expect("the complete route must answer");
+    let client = browser();
     client
         .post(format!("{}/api/auth/login", running.base_url))
         .json(&serde_json::json!({ "username": "operator", "password": PASSWORD }))
@@ -129,8 +112,61 @@ async fn a_reconnecting_client_gets_the_same_opening_event_and_no_replay() {
     running.stop().await;
 }
 
+#[tokio::test]
+async fn an_idle_stream_beats_with_an_event_a_listener_can_observe() {
+    // `I-UX-9`: a browser's `EventSource` never dispatches an SSE *comment* to
+    // a listener, so a keep-alive comment leaves every client's watchdog
+    // expiring on a connection that is perfectly healthy. The beat has to be a
+    // named event with a body. Slow by construction — the interval is the
+    // server's fifteen seconds, and shortening it for the test would be
+    // testing a different number than the one that ships.
+    let instance = TempInstance::new();
+    let (running, client) = signed_in(&instance).await;
+
+    let response = client
+        .get(format!("{}/api/stream", running.base_url))
+        .send()
+        .await
+        .expect("the stream route must answer");
+
+    let events = tokio::time::timeout(
+        std::time::Duration::from_secs(30),
+        first_two_events(response),
+    )
+    .await
+    .expect("an idle stream must beat inside the watchdog window");
+
+    assert!(events[0].contains("\"heartbeatSeconds\":15"), "{events:?}");
+    assert!(
+        events[1].contains("event: stream"),
+        "the beat must be dispatchable: {events:?}"
+    );
+    assert!(
+        events[1].contains("\"heartbeat\":true"),
+        "the beat must carry a body a listener can read: {events:?}"
+    );
+
+    running.stop().await;
+}
+
 /// Reads the first complete event off an SSE response.
 async fn first_event(response: reqwest::Response) -> String {
+    first_events(response, 1).await.remove(0)
+}
+
+/// Reads the opening event and whatever the stream says next.
+async fn first_two_events(response: reqwest::Response) -> [String; 2] {
+    let mut events = first_events(response, 2).await;
+    let second = events.remove(1);
+    [events.remove(0), second]
+}
+
+/// Reads `wanted` complete events off an SSE response.
+///
+/// A comment frame — which is what a keep-alive is — starts with `:` and is
+/// deliberately kept, so a test that expects a dispatchable event fails loudly
+/// rather than blocking until its timeout.
+async fn first_events(response: reqwest::Response, wanted: usize) -> Vec<String> {
     let stream = response.bytes_stream();
     let reader = tokio_util::io::StreamReader::new(futures_util::TryStreamExt::map_err(
         stream,
@@ -138,19 +174,24 @@ async fn first_event(response: reqwest::Response) -> String {
     ));
     let mut lines = tokio::io::BufReader::new(reader).lines();
 
+    let mut events = Vec::with_capacity(wanted);
     let mut event = String::new();
     while let Some(line) = lines
         .next_line()
         .await
         .expect("the stream must be readable")
     {
-        if line.is_empty() && !event.is_empty() {
-            break;
+        if line.is_empty() {
+            if !event.is_empty() {
+                events.push(std::mem::take(&mut event));
+                if events.len() == wanted {
+                    break;
+                }
+            }
+            continue;
         }
-        if !line.is_empty() {
-            event.push_str(&line);
-            event.push('\n');
-        }
+        event.push_str(&line);
+        event.push('\n');
     }
-    event
+    events
 }

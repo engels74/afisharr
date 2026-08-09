@@ -29,6 +29,7 @@ use utoipa::OpenApi;
     ),
     paths(
         crate::health::route::health,
+        crate::setup::claim_status::claim_status,
         crate::setup::claim_routes::claim,
         crate::setup::claim_routes::recover,
         crate::setup::status::status,

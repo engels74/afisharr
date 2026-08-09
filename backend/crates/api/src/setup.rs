@@ -18,6 +18,7 @@
 
 pub(crate) mod admin;
 pub(crate) mod claim_routes;
+pub(crate) mod claim_status;
 mod events;
 mod gate;
 pub(crate) mod status;
@@ -25,6 +26,7 @@ mod step_view;
 
 pub use admin::{CreateAdmin, create_admin};
 pub use claim_routes::{ClaimGranted, ClaimRequest, RecoverRequest, claim, recover};
+pub use claim_status::{ClaimStatus, claim_status};
 pub use events::{SETUP_JOB_ID, record_step};
 pub use gate::{require_claim, require_setup_incomplete};
 pub use status::{SetupStatus, complete, status};

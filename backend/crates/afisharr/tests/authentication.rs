@@ -6,7 +6,7 @@
 mod harness;
 
 use afisharr_core::sessions;
-use harness::{RunningInstance, TempInstance};
+use harness::{RunningInstance, TempInstance, Wizard, csrf_from};
 use reqwest::{Client, StatusCode};
 
 const PASSWORD: &str = "correct horse battery staple";
@@ -22,49 +22,13 @@ fn browser() -> Client {
 /// A claimed instance with an administrator and setup finished.
 async fn signed_out_instance(instance: &TempInstance) -> RunningInstance {
     let running = RunningInstance::start(instance).await;
-    let token = running.token.clone().expect("a fresh instance mints one");
-    let holder = browser();
-
-    holder
-        .post(format!("{}/api/setup/claim", running.base_url))
-        .json(&serde_json::json!({ "token": token }))
-        .send()
-        .await
-        .expect("the claim route must answer");
-    holder
-        .post(format!("{}/api/setup/admin", running.base_url))
-        .json(&serde_json::json!({ "username": "operator", "password": PASSWORD }))
-        .send()
-        .await
-        .expect("the admin route must answer");
-    holder
-        .post(format!("{}/api/setup/complete", running.base_url))
-        .send()
-        .await
-        .expect("the complete route must answer");
-
+    let _wizard = Wizard::set_up(&running, "operator", PASSWORD).await;
     running
 }
 
-/// Signs `client` in and returns the CSRF token it must echo.
+/// Signs `client` in as the administrator and returns its CSRF token.
 async fn sign_in(client: &Client, base_url: &str) -> String {
-    let response = client
-        .post(format!("{base_url}/api/auth/login"))
-        .json(&serde_json::json!({ "username": "operator", "password": PASSWORD }))
-        .send()
-        .await
-        .expect("the login route must answer");
-    assert_eq!(response.status(), StatusCode::OK, "sign-in must succeed");
-
-    response
-        .headers()
-        .get_all("set-cookie")
-        .iter()
-        .filter_map(|value| value.to_str().ok())
-        .find_map(|cookie| cookie.strip_prefix("afisharr_csrf="))
-        .and_then(|rest| rest.split(';').next())
-        .map(str::to_owned)
-        .expect("sign-in must set a CSRF cookie")
+    sign_in_as(client, base_url, "operator").await
 }
 
 #[tokio::test]
@@ -325,6 +289,105 @@ async fn signing_out_revokes_the_session_that_asked() {
     );
 
     running.stop().await;
+}
+
+#[tokio::test]
+async fn an_account_without_administrator_rights_reaches_none_of_the_admin_surface() {
+    // Tier 0 is admin-only (D-007). The schema permits `is_admin = 0`, and
+    // without a boundary such an account holds a session this surface accepts
+    // and reaches the filesystem browser and the instance's API keys — the
+    // documented admin-only surface as ordinary authenticated access.
+    let instance = TempInstance::new();
+    let running = signed_out_instance(&instance).await;
+    create_ordinary_account(&running).await;
+
+    let client = browser();
+    let csrf = sign_in_as(&client, &running.base_url, "viewer").await;
+
+    // Self-scoped routes still work: knowing who you are is not a permission.
+    assert_eq!(
+        client
+            .get(format!("{}/api/auth/session", running.base_url))
+            .send()
+            .await
+            .expect("the session route must answer")
+            .status(),
+        StatusCode::OK
+    );
+
+    for route in [
+        "/api/files/roots",
+        "/api/files?root=assets",
+        "/api/settings/api-keys",
+        "/api/stream",
+    ] {
+        let response = client
+            .get(format!("{}{route}", running.base_url))
+            .send()
+            .await
+            .unwrap_or_else(|error| panic!("{route} must answer: {error}"));
+        assert_eq!(
+            response.status(),
+            StatusCode::FORBIDDEN,
+            "{route} answered an account that does not administer this instance"
+        );
+        let body: serde_json::Value = response.json().await.expect("a JSON body");
+        assert_eq!(body["code"], "forbidden", "{route}");
+    }
+
+    // And it cannot mint itself a key to come back with.
+    let refused = client
+        .post(format!("{}/api/settings/api-keys", running.base_url))
+        .header("x-afisharr-csrf", &csrf)
+        .json(&serde_json::json!({ "name": "Escalation" }))
+        .send()
+        .await
+        .expect("the key route must answer");
+    assert_eq!(refused.status(), StatusCode::FORBIDDEN);
+
+    running.stop().await;
+}
+
+/// Adds an enabled account with no administrator rights.
+async fn create_ordinary_account(running: &RunningInstance) {
+    use afisharr_core::{
+        accounts::{CreateUser, CreateUserOutcome},
+        identifier::Id,
+    };
+
+    let hash = afisharr_core::accounts::hash(PASSWORD.to_owned())
+        .await
+        .expect("the password must hash");
+    let outcome = running
+        .booted
+        .database
+        .writer()
+        .submit(CreateUser {
+            id: Id::generate(&afisharr_core::time::SystemClock),
+            username: "viewer".to_owned(),
+            password_hash: hash,
+            is_admin: false,
+            at: afisharr_core::time::Timestamp::EPOCH,
+        })
+        .await
+        .expect("the write must run")
+        .expect("the account must be readable");
+    assert!(
+        matches!(outcome, CreateUserOutcome::Created(_)),
+        "the ordinary account must be created"
+    );
+}
+
+/// Signs `client` in as `username` and returns the CSRF token it must echo.
+async fn sign_in_as(client: &Client, base_url: &str, username: &str) -> String {
+    let response = client
+        .post(format!("{base_url}/api/auth/login"))
+        .json(&serde_json::json!({ "username": username, "password": PASSWORD }))
+        .send()
+        .await
+        .expect("the login route must answer");
+    assert_eq!(response.status(), StatusCode::OK, "sign-in must succeed");
+    csrf_from(&response).expect("sign-in must set a CSRF cookie")
 }
 
 async fn user_id(running: &RunningInstance) -> String {

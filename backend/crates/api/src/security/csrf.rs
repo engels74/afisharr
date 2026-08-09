@@ -31,19 +31,28 @@ pub enum CsrfDecision {
 /// at all, which older clients do. Neither is a toggle, and there is no
 /// configuration that turns either off (D-002-class, PRD §21.4.2).
 ///
-/// A request carrying no session cookie is not forgeable: forgery works by
+/// A request carrying no ambient credential is not forgeable: forgery works by
 /// making a browser attach a credential it already holds, and a caller
 /// authenticating with an API key in a header attaches nothing by ambient
 /// authority. Those requests are allowed through, which is what keeps a
 /// scripted caller from needing a browser's cookie jar.
+///
+/// The session cookie is not the only ambient credential this surface has. The
+/// setup claim is one too: it is a cookie, the browser attaches it to any
+/// request another origin can cause, and behind it sit the routes that create
+/// the administrator and finish setup. A hostile page on the same registrable
+/// domain — another container on the same host, a second service behind the
+/// same name — can post to `/api/setup/complete` without ever reading the
+/// answer. So `carries_ambient_credential` is every cookie that authorises
+/// something, and the caller is the one that enumerates them (PRD §21.4.2).
 #[must_use]
 pub fn judge_csrf(
     method: &Method,
     headers: &HeaderMap,
     cookie_token: Option<&str>,
-    carries_session_cookie: bool,
+    carries_ambient_credential: bool,
 ) -> CsrfDecision {
-    if is_safe(method) || !carries_session_cookie {
+    if is_safe(method) || !carries_ambient_credential {
         return CsrfDecision::Allowed;
     }
 
@@ -210,12 +219,32 @@ mod tests {
     }
 
     #[test]
-    fn a_caller_with_no_session_cookie_is_not_forgeable_and_is_allowed() {
+    fn a_caller_with_no_ambient_credential_is_not_forgeable_and_is_allowed() {
         // An API-key caller attaches no ambient credential, so there is nothing
         // for another site to make a browser send on its behalf.
         assert_eq!(
             judge_csrf(&Method::POST, &HeaderMap::new(), None, false),
             CsrfDecision::Allowed
+        );
+    }
+
+    #[test]
+    fn a_setup_write_carrying_only_the_claim_cookie_is_still_judged() {
+        // The forgery this closes: a hostile same-site origin posts to
+        // `/api/setup/complete`, the browser attaches the claim cookie, and the
+        // attacker never has to read the answer.
+        let map = headers(&[
+            (ORIGIN, "https://evil.example"),
+            (HOST, "afisharr.example"),
+            (CSRF_HEADER, "token-value"),
+        ]);
+        assert_eq!(
+            judge_csrf(&Method::POST, &map, Some("token-value"), true),
+            CsrfDecision::ForeignOrigin
+        );
+        assert_eq!(
+            judge_csrf(&Method::POST, &HeaderMap::new(), None, true),
+            CsrfDecision::TokenMismatch
         );
     }
 

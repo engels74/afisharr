@@ -33,6 +33,7 @@ export class StreamConnection {
 	#retry: ReturnType<typeof setTimeout> | undefined;
 	#heartbeatMs = 15_000;
 	#stopped = false;
+	#url = '/api/stream';
 
 	/** Subscribes `handler` to `topic`, and returns the unsubscribe. */
 	on(topic: string, handler: TopicHandler): () => void {
@@ -58,11 +59,22 @@ export class StreamConnection {
 		};
 	}
 
-	/** Opens the connection. Safe to call again; a second call is a no-op. */
-	open(url = '/api/stream'): void {
-		if (this.#source || this.#stopped) {
+	/**
+	 * Opens the connection.
+	 *
+	 * Safe to call again while one is live; that call is a no-op. Calling it
+	 * after `close()` reopens: the root layout keeps one connection for the
+	 * life of the tab and closes it whenever it navigates into the login or
+	 * setup journey, so signing out and back in arrives here on an object that
+	 * has already been stopped. A `close()` that could not be undone would make
+	 * that a permanently dead stream with no error anywhere to explain it.
+	 */
+	open(url = this.#url): void {
+		this.#url = url;
+		if (this.#source) {
 			return;
 		}
+		this.#stopped = false;
 		this.status = this.#attempt === 0 ? 'connecting' : 'reconnecting';
 
 		const source = new EventSource(url, { withCredentials: true });
@@ -81,7 +93,7 @@ export class StreamConnection {
 		});
 
 		source.addEventListener('error', () => {
-			this.#dropAndRetry(url);
+			this.#dropAndRetry();
 		});
 
 		// The server's own topic carries the opening event and the lag notice.
@@ -134,16 +146,22 @@ export class StreamConnection {
 	 * Restarts the "one missed heartbeat" timer.
 	 *
 	 * The interval comes from the server's opening event rather than from a
-	 * constant here, so the two cannot drift apart.
+	 * constant here, so the two cannot drift apart. Firing it tears the
+	 * connection down and reconnects rather than only relabelling the status: a
+	 * half-open connection produces no `error` event at all, so leaving the
+	 * `EventSource` in place makes `open()` a no-op forever and neither the
+	 * backoff nor the registered refetchers ever run. The indicator would say
+	 * "disconnected" for as long as the tab is open and nothing would try to
+	 * fix it (`I-UX-9`).
 	 */
 	#armWatchdog(): void {
 		clearTimeout(this.#watchdog);
 		this.#watchdog = setTimeout(() => {
-			this.status = 'disconnected';
+			this.#dropAndRetry();
 		}, watchdogDelayMs(this.#heartbeatMs));
 	}
 
-	#dropAndRetry(url: string): void {
+	#dropAndRetry(): void {
 		this.#clearTimers();
 		this.#source?.close();
 		this.#source = undefined;
@@ -153,7 +171,7 @@ export class StreamConnection {
 		this.status = 'disconnected';
 		this.#attempt += 1;
 		this.#retry = setTimeout(() => {
-			this.open(url);
+			this.open();
 		}, backoffDelayMs(this.#attempt));
 	}
 

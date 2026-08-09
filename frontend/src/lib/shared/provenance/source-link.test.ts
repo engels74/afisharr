@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 import { beforeEach, describe, expect, test } from 'bun:test';
-import { recordProvenance, sourceHref } from './source-link';
+import { recordProvenance, sourceHref } from './source-link.svelte';
 
 beforeEach(() => {
 	recordProvenance({});
@@ -36,5 +36,18 @@ describe('the source link', () => {
 			repository: 'https://example.test/fork/',
 		});
 		expect(sourceHref()).toBe('https://example.test/fork/tree/v1.0.0');
+	});
+
+	test('a later recording replaces an earlier one', () => {
+		// The footer reads `sourceHref()` in the root layout. `current` is a
+		// rune, so this assignment invalidates that read; a plain module
+		// variable would leave the footer pointing at the repository root for
+		// the life of the page, which is the one thing AGPL §13 asks the link
+		// not to do.
+		recordProvenance({ version: '0.1.0' });
+		recordProvenance({ version: '3.1.4' });
+		expect(sourceHref()).toBe(
+			'https://github.com/engels74/afisharr/tree/v3.1.4',
+		);
 	});
 });

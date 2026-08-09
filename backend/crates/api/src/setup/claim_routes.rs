@@ -22,10 +22,11 @@ use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 
 use crate::{
-    error::{AppError, AppResult, ErrorCode, Problem},
+    authentication::session::csrf_cookie,
+    error::{AppError, AppResult, ErrorCode, JsonBody, Problem},
     proxy::ClientContext,
     ratelimit::{Bucket, Decision},
-    security::set,
+    security::{CSRF_COOKIE, set},
     setup::events::record_step,
     state::ApiState,
 };
@@ -64,6 +65,7 @@ pub struct ClaimGranted {
     request_body = ClaimRequest,
     responses(
         (status = 200, description = "The wizard is now held by this browser", body = ClaimGranted),
+        (status = 400, description = "The request body was not readable", body = Problem),
         (status = 401, description = "The token was not accepted", body = Problem),
         (status = 409, description = "Another browser holds the wizard", body = Problem),
         (status = 429, description = "Too many attempts", body = Problem),
@@ -73,7 +75,7 @@ pub async fn claim(
     State(state): State<ApiState>,
     client: ClientContext,
     jar: CookieJar,
-    Json(request): Json<ClaimRequest>,
+    JsonBody(request): JsonBody<ClaimRequest>,
 ) -> AppResult<(CookieJar, Json<ClaimGranted>)> {
     let now = state.clock().now();
     let existing = jar
@@ -126,6 +128,7 @@ pub async fn claim(
     request_body = RecoverRequest,
     responses(
         (status = 200, description = "The wizard is now held by this browser", body = ClaimGranted),
+        (status = 400, description = "The request body was not readable", body = Problem),
         (status = 401, description = "The credentials were not accepted", body = Problem),
         (status = 409, description = "Another browser holds the wizard", body = Problem),
         (status = 429, description = "Too many attempts", body = Problem),
@@ -135,7 +138,7 @@ pub async fn recover(
     State(state): State<ApiState>,
     client: ClientContext,
     jar: CookieJar,
-    Json(request): Json<RecoverRequest>,
+    JsonBody(request): JsonBody<RecoverRequest>,
 ) -> AppResult<(CookieJar, Json<ClaimGranted>)> {
     let now = state.clock().now();
 
@@ -171,7 +174,12 @@ pub async fn recover(
     granted
 }
 
-/// Mints or renews the claim and attaches the cookie.
+/// Mints or renews the claim and attaches the cookies.
+///
+/// Two cookies, not one, and for the same reason signing in sets two: the claim
+/// is an ambient credential a browser attaches to any request another origin
+/// can cause, so the CSRF check applies to it, and the check needs a token the
+/// page can echo (PRD §21.4.2).
 async fn grant(
     state: &ApiState,
     client: ClientContext,
@@ -194,6 +202,13 @@ async fn grant(
         ClaimOutcome::Blocked { expires_at } => return Err(held_elsewhere(now, expires_at)),
     };
 
+    // Only when the browser does not already hold one: a renewal that rotated
+    // the token would invalidate the value a form read a moment ago and refuse
+    // the submission that follows.
+    let mut jar = jar;
+    if jar.get(CSRF_COOKIE).is_none() {
+        jar = jar.add(csrf_cookie(client.scheme));
+    }
     let jar = jar.add(set(
         CLAIM_COOKIE,
         cookie_value,

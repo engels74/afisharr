@@ -123,11 +123,50 @@ impl WriteOperation for RecordPinLogin {
     }
 }
 
-/// Closes an attempt, recording how it ended.
+/// Claims an attempt for the request that is about to authorise it.
 ///
-/// Idempotent by the `consumed_at IS NULL` clause, and that matters: the
-/// interface polls, so two polls can race a token appearing, and the second
-/// must not reopen a login the first finished.
+/// The one write that decides which of two overlapping polls proceeds. The
+/// interface polls on a timer, so two requests can be in flight when the token
+/// appears; both read the attempt as open, both are told `Authorized` by
+/// plex.tv, and both mint a session unless something makes the transition
+/// happen once. This is that something: a single `consumed_at IS NULL` update
+/// through the serialised write actor (D-024), answering `true` exactly once.
+///
+/// The result is recorded afterwards by [`CompletePinLogin`], because how the
+/// attempt ended is not known until the authorisation it guards has run.
+#[derive(Debug)]
+pub struct ClaimPinLogin {
+    /// The attempt being claimed.
+    pub id: String,
+    /// The instant of the claim.
+    pub at: Timestamp,
+}
+
+impl WriteOperation for ClaimPinLogin {
+    type Output = bool;
+
+    async fn execute(self, conn: &mut SqliteConnection) -> Result<bool, sqlx::Error> {
+        let at = self.at.as_millis();
+        let affected = sqlx::query!(
+            "UPDATE plex_pin_logins SET consumed_at = ?2
+             WHERE id = ?1 AND consumed_at IS NULL",
+            self.id,
+            at
+        )
+        .execute(&mut *conn)
+        .await?
+        .rows_affected();
+        Ok(affected == 1)
+    }
+}
+
+/// Records how an attempt ended, closing it if it is not closed already.
+///
+/// Guarded on `result IS NULL` rather than on `consumed_at IS NULL`, so it can
+/// finalise a row [`ClaimPinLogin`] has already stamped and still refuse to
+/// overwrite an outcome that is recorded. Idempotent either way, and that
+/// matters: the interface polls, and the second of two polls must not reopen
+/// or relabel a login the first finished.
 #[derive(Debug)]
 pub struct CompletePinLogin {
     /// The attempt being closed.
@@ -145,8 +184,8 @@ impl WriteOperation for CompletePinLogin {
         let at = self.at.as_millis();
         let result = self.result.as_text();
         let affected = sqlx::query!(
-            "UPDATE plex_pin_logins SET consumed_at = ?2, result = ?3
-             WHERE id = ?1 AND consumed_at IS NULL",
+            "UPDATE plex_pin_logins SET consumed_at = COALESCE(consumed_at, ?2), result = ?3
+             WHERE id = ?1 AND result IS NULL",
             self.id,
             at,
             result

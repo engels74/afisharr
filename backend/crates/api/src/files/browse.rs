@@ -11,16 +11,13 @@
 #![allow(clippy::missing_errors_doc)]
 
 use afisharr_core::filesystem::{ContainmentError, Entry, EntryKind, list};
-use axum::{
-    Json,
-    extract::{Query, State},
-};
+use axum::{Json, extract::State};
 use serde::{Deserialize, Serialize};
 use utoipa::{IntoParams, ToSchema};
 
 use crate::{
-    authentication::Authenticated,
-    error::{AppError, AppResult, ErrorCode, Problem},
+    authentication::Administrator,
+    error::{AppError, AppResult, ErrorCode, Problem, QueryParams},
     state::ApiState,
 };
 
@@ -92,9 +89,10 @@ pub struct DirectoryListing {
     responses(
         (status = 200, description = "Every enabled root", body = Vec<RootView>),
         (status = 401, description = "No accepted credential was presented", body = Problem),
+        (status = 403, description = "That account does not administer this instance", body = Problem),
     ),
 )]
-pub async fn roots(State(state): State<ApiState>, _caller: Authenticated) -> Json<Vec<RootView>> {
+pub async fn roots(State(state): State<ApiState>, _caller: Administrator) -> Json<Vec<RootView>> {
     Json(
         state
             .asset_roots()
@@ -116,15 +114,16 @@ pub async fn roots(State(state): State<ApiState>, _caller: Authenticated) -> Jso
     params(BrowseQuery),
     responses(
         (status = 200, description = "The directory's contents", body = DirectoryListing),
+        (status = 400, description = "The query was not readable", body = Problem),
         (status = 401, description = "No accepted credential was presented", body = Problem),
-        (status = 403, description = "The path is not inside the root", body = Problem),
+        (status = 403, description = "The path is not inside the root, or that account does not administer this instance", body = Problem),
         (status = 404, description = "No such root", body = Problem),
     ),
 )]
 pub async fn browse(
     State(state): State<ApiState>,
-    _caller: Authenticated,
-    Query(query): Query<BrowseQuery>,
+    _caller: Administrator,
+    QueryParams(query): QueryParams<BrowseQuery>,
 ) -> AppResult<Json<DirectoryListing>> {
     let root = state
         .asset_roots()

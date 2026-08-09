@@ -6,10 +6,10 @@
 	import type { Problem } from '$lib/api/client';
 	import { BlockedState, ErrorState } from '$lib/components/state';
 	import { t } from '$lib/shared/i18n';
-	import { claim, recover, type SetupStatus } from './setup-client';
+	import { type ClaimStatus, claim, recover } from './setup-client';
 
 	interface Props {
-		status: SetupStatus;
+		status: ClaimStatus;
 		onclaimed: () => void;
 	}
 

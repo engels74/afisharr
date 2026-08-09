@@ -10,8 +10,10 @@
 // free to drift, with nothing checking it (§24.5).
 #![allow(clippy::missing_errors_doc)]
 
-use afisharr_core::setup::{
-    CLAIM_COOKIE, ClaimState, CompleteSetup, Evidence, SetupStep, inspect, read_evidence,
+use afisharr_core::{
+    accounts,
+    jobs::RunStatus,
+    setup::{CLAIM_COOKIE, ClaimState, CompleteSetup, Evidence, SetupStep, inspect, read_evidence},
 };
 use axum::{Json, extract::State};
 use axum_extra::extract::CookieJar;
@@ -19,10 +21,13 @@ use serde::Serialize;
 use utoipa::ToSchema;
 
 use crate::{
-    error::{AppError, AppResult, Problem},
+    error::{AppError, AppResult, ErrorCode, Problem},
     proxy::ClientContext,
     security::expire,
-    setup::{StepView, events::record_step},
+    setup::{
+        StepView,
+        events::{finish_run, record_step},
+    },
     state::ApiState,
 };
 
@@ -93,6 +98,8 @@ pub async fn status(State(state): State<ApiState>, jar: CookieJar) -> AppResult<
 /// `instance.setup_completed_at` is written, the `setup:claim` lease is
 /// deleted, the in-memory token is cleared, and the cookie is expired. From
 /// then on the banner prints nothing on restart and these endpoints answer 404.
+///
+/// All four are irreversible, which is why the prerequisite is checked first.
 #[utoipa::path(
     post,
     path = "/api/setup/complete",
@@ -100,7 +107,7 @@ pub async fn status(State(state): State<ApiState>, jar: CookieJar) -> AppResult<
     responses(
         (status = 200, description = "Setup is finished", body = SetupStatus),
         (status = 404, description = "Setup has already been completed", body = Problem),
-        (status = 409, description = "Another browser holds the wizard", body = Problem),
+        (status = 409, description = "Another browser holds the wizard, or no administrator exists yet", body = Problem),
     ),
 )]
 pub async fn complete(
@@ -109,6 +116,23 @@ pub async fn complete(
     jar: CookieJar,
 ) -> AppResult<(CookieJar, Json<SetupStatus>)> {
     let now = state.clock().now();
+
+    // Nothing below is reversible. Completion writes `setup_completed_at`,
+    // deletes the claim, and clears the token, and from that moment the setup
+    // routes answer 404 while `require_setup_completed` refuses everything
+    // else. On an instance with no administrator that is a permanent lockout:
+    // no credential exists to sign in with, the recovery door needs the account
+    // that does not exist, and the door that would create one is gone. A caller
+    // holding only a valid claim must not be able to reach it (`I-SEC-8`).
+    if !accounts::admin_exists(state.database().readers())
+        .await
+        .map_err(AppError::internal)?
+    {
+        return Err(AppError::of(
+            ErrorCode::Conflict,
+            "Setup cannot be completed until an administrator account exists.",
+        ));
+    }
 
     state
         .database()
@@ -120,6 +144,7 @@ pub async fn complete(
     state.bootstrap().clear();
     state.mark_setup_completed();
     record_step(&state, "review", "Setup was completed.").await;
+    finish_run(&state, RunStatus::Ok).await;
 
     let jar = jar.add(expire(CLAIM_COOKIE, "/api/setup", client.scheme));
     Ok((

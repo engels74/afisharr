@@ -22,8 +22,8 @@ use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 
 use crate::{
-    authentication::Authenticated,
-    error::{AppError, AppResult, ErrorCode, Problem},
+    authentication::Administrator,
+    error::{AppError, AppResult, ErrorCode, JsonBody, Problem},
     state::ApiState,
 };
 
@@ -93,11 +93,12 @@ pub struct IssuedKey {
     responses(
         (status = 200, description = "Every key, newest first", body = Vec<ApiKeyView>),
         (status = 401, description = "No accepted credential was presented", body = Problem),
+        (status = 403, description = "That account does not administer this instance", body = Problem),
     ),
 )]
 pub async fn list(
     State(state): State<ApiState>,
-    _caller: Authenticated,
+    _caller: Administrator,
 ) -> AppResult<Json<Vec<ApiKeyView>>> {
     let keys = api_keys::list(state.database().readers())
         .await
@@ -115,12 +116,13 @@ pub async fn list(
         (status = 200, description = "The key, with its plaintext", body = IssuedKey),
         (status = 400, description = "The name was refused", body = Problem),
         (status = 401, description = "No accepted credential was presented", body = Problem),
+        (status = 403, description = "That account does not administer this instance", body = Problem),
     ),
 )]
 pub async fn create(
     State(state): State<ApiState>,
-    caller: Authenticated,
-    Json(request): Json<NewApiKey>,
+    Administrator(caller): Administrator,
+    JsonBody(request): JsonBody<NewApiKey>,
 ) -> AppResult<Json<IssuedKey>> {
     let name = request.name.trim().to_owned();
     if name.is_empty() {
@@ -159,12 +161,13 @@ pub async fn create(
     responses(
         (status = 204, description = "The key is revoked"),
         (status = 401, description = "No accepted credential was presented", body = Problem),
+        (status = 403, description = "That account does not administer this instance", body = Problem),
         (status = 404, description = "No such key, or it was already revoked", body = Problem),
     ),
 )]
 pub async fn revoke(
     State(state): State<ApiState>,
-    _caller: Authenticated,
+    _caller: Administrator,
     Path(id): Path<String>,
 ) -> AppResult<axum::http::StatusCode> {
     let revoked = state

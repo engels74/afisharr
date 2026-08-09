@@ -4,29 +4,41 @@
 -->
 <script lang="ts">
 	import { goto } from '$app/navigation';
-	import { LoadingState } from '$lib/components/state';
-	import { ClaimForm, readStatus, type SetupStatus } from '$lib/features/setup';
+	import { ErrorState, LoadingState } from '$lib/components/state';
+	import {
+		ClaimForm,
+		type ClaimStatus,
+		readClaimStatus,
+		readStatus,
+	} from '$lib/features/setup';
 	import { t } from '$lib/shared/i18n';
 
-	let status = $state<SetupStatus | undefined>(undefined);
+	let status = $state<ClaimStatus | undefined>(undefined);
+	let refusal = $state<string | undefined>(undefined);
 	let startedAt = Date.now();
 	let elapsed = $state(0);
 
+	/**
+	 * Every fact this page renders comes from the server.
+	 *
+	 * `/api/setup/claim` is the one setup read available before the gate is
+	 * passed, which is what this page is for. `/api/setup/status` is behind the
+	 * gate and is consulted only once the claim is held, to learn whether the
+	 * derived step has already moved on.
+	 */
 	async function load() {
-		const result = await readStatus();
-		// A refusal here is the gate working: an unclaimed instance answers
-		// `setupRequired`, which means step one, which is this page.
-		status =
-			result.outcome === 'ok'
-				? result.value
-				: {
-						step: 'claim',
-						ordinal: 1,
-						claimHeld: false,
-						recoveryAvailable: false,
-						tokenLive: true,
-					};
-		if (status.claimHeld && status.step !== 'claim') {
+		const gate = await readClaimStatus();
+		if (gate.outcome === 'refused') {
+			refusal = gate.problem.message;
+			return;
+		}
+		status = gate.value;
+
+		if (!status.claimHeld) {
+			return;
+		}
+		const derived = await readStatus();
+		if (derived.outcome === 'ok' && derived.value.step !== 'claim') {
 			await goto('/setup/admin');
 		}
 	}
@@ -41,7 +53,9 @@
 	});
 </script>
 
-{#if status}
+{#if refusal}
+	<ErrorState state={{ kind: 'error', summary: refusal }} />
+{:else if status}
 	<p class="text-xs text-[var(--muted-foreground)]">
 		{t('setup.step', { ordinal: status.ordinal })}
 	</p>

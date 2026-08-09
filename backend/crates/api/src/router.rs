@@ -20,8 +20,14 @@ use axum::{
 use std::net::SocketAddr;
 
 use crate::{
-    authentication, error::AppError, files, health, interface, keys, proxy::ClientContext,
-    security, setup, state::ApiState, stream,
+    authentication,
+    error::AppError,
+    files, health, interface, keys,
+    proxy::ClientContext,
+    ratelimit::{Bucket, Decision},
+    security, setup,
+    state::ApiState,
+    stream,
 };
 
 /// Builds the router for `state`.
@@ -61,7 +67,8 @@ fn open_routes(_state: &ApiState) -> Router<ApiState> {
 /// The wizard, behind the claim gate.
 ///
 /// `claim` and `recover` are outside the gate — they are how the gate is
-/// passed. Everything else is inside it.
+/// passed, and `GET /setup/claim` is what the claim page renders itself from
+/// before it has one. Everything else is inside it.
 fn setup_routes(state: &ApiState) -> Router<ApiState> {
     let gated = Router::new()
         .route("/setup/status", get(setup::status))
@@ -70,7 +77,7 @@ fn setup_routes(state: &ApiState) -> Router<ApiState> {
         .layer(from_fn_with_state(state.clone(), setup::require_claim));
 
     Router::new()
-        .route("/setup/claim", post(setup::claim))
+        .route("/setup/claim", get(setup::claim_status).post(setup::claim))
         .route("/setup/recover", post(setup::recover))
         .merge(gated)
         .layer(from_fn_with_state(
@@ -102,7 +109,45 @@ fn protected_routes(state: &ApiState) -> Router<ApiState> {
         .route("/settings/api-keys", get(keys::list).post(keys::create))
         .route("/settings/api-keys/{id}", delete(keys::revoke))
         .route("/stream", get(stream::stream))
+        // Read outside-in: setup first, so an unconfigured instance refuses
+        // before it spends anybody's budget, then the API limit over everything
+        // that survives. The limit is a layer and not a per-handler call for
+        // the same reason the setup gate is — a route added later inherits it
+        // without anybody remembering to (PRD §21.4.3).
+        .layer(from_fn_with_state(state.clone(), api_rate_limit))
         .layer(from_fn_with_state(state.clone(), require_setup_completed))
+}
+
+/// Counts every call to a protected route against the caller's API budget.
+///
+/// `Bucket::Api` is 600 requests a minute (PRD §21.4.3). Without this it is a
+/// table entry with no enforcement: a caller holding a valid session or key
+/// could drive the database, the filesystem browser, and the stream as fast as
+/// the process answers, indefinitely.
+async fn api_rate_limit(
+    State(state): State<ApiState>,
+    request: Request<Body>,
+    next: Next,
+) -> Result<Response, AppError> {
+    let client = request
+        .extensions()
+        .get::<ClientContext>()
+        .copied()
+        .ok_or_else(|| AppError::internal("the client context layer is not installed"))?;
+
+    if let Decision::Refused {
+        retry_after_seconds,
+    } = state.limiter().record(&Bucket::Api, Some(client.address))
+    {
+        return Err(AppError::new(
+            crate::error::Problem::new(
+                crate::error::ErrorCode::RateLimited,
+                "Too many requests from this address. Try again shortly.",
+            )
+            .retry_after(retry_after_seconds),
+        ));
+    }
+    Ok(next.run(request).await)
 }
 
 /// The answer for a path under `/api` that no route claims.
@@ -133,6 +178,12 @@ async fn envelope(
 }
 
 /// Refuses a state-changing request that another site could have caused.
+///
+/// Enumerating the ambient credentials is this layer's job, not the judge's:
+/// the judge decides, and the perimeter says what a browser could have been
+/// made to attach. There are two. The session cookie is the obvious one; the
+/// setup claim is the one that is easy to miss, and behind it sit the routes
+/// that create the administrator and finish setup.
 async fn csrf(
     State(_state): State<ApiState>,
     request: Request<Body>,
@@ -141,7 +192,8 @@ async fn csrf(
     use axum_extra::extract::CookieJar;
 
     let jar = CookieJar::from_headers(request.headers());
-    let carries_session = jar.get(security::SESSION_COOKIE).is_some();
+    let carries_ambient_credential = jar.get(security::SESSION_COOKIE).is_some()
+        || jar.get(afisharr_core::setup::CLAIM_COOKIE).is_some();
     let token = jar
         .get(security::CSRF_COOKIE)
         .map(|cookie| cookie.value().to_owned());
@@ -150,7 +202,7 @@ async fn csrf(
         request.method(),
         request.headers(),
         token.as_deref(),
-        carries_session,
+        carries_ambient_credential,
     ) {
         security::CsrfDecision::Allowed => Ok(next.run(request).await),
         security::CsrfDecision::ForeignOrigin => Err(AppError::of(

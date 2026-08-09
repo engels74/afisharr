@@ -6,6 +6,13 @@
 import AdminForm from './admin-form.svelte';
 import ClaimForm from './claim-form.svelte';
 
-export type { SetupResult, SetupStatus } from './setup-client';
-export { claim, createAdmin, readStatus, recover } from './setup-client';
+export type { ClaimStatus, SetupResult, SetupStatus } from './setup-client';
+export {
+	claim,
+	completeSetup,
+	createAdmin,
+	readClaimStatus,
+	readStatus,
+	recover,
+} from './setup-client';
 export { AdminForm, ClaimForm };

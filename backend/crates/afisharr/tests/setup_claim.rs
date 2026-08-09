@@ -11,7 +11,7 @@
 
 mod harness;
 
-use harness::{RunningInstance, TempInstance};
+use harness::{RunningInstance, TempInstance, Wizard};
 use reqwest::{Client, StatusCode};
 
 fn client() -> Client {
@@ -240,17 +240,10 @@ async fn a_restart_with_setup_incomplete_invalidates_the_previous_token() {
 async fn the_claim_page_offers_recovery_only_once_an_administrator_exists() {
     let instance = TempInstance::new();
     let running = RunningInstance::start(&instance).await;
-    let token = running.token.clone().expect("a fresh instance mints one");
-    let holder = client();
+    let wizard = Wizard::claim(&running).await;
 
-    holder
-        .post(format!("{}/api/setup/claim", running.base_url))
-        .json(&serde_json::json!({ "token": token }))
-        .send()
-        .await
-        .expect("the claim route must answer");
-
-    let before: serde_json::Value = holder
+    let before: serde_json::Value = wizard
+        .client
         .get(format!("{}/api/setup/status", running.base_url))
         .send()
         .await
@@ -260,18 +253,13 @@ async fn the_claim_page_offers_recovery_only_once_an_administrator_exists() {
         .expect("a JSON body");
     assert_eq!(before["recoveryAvailable"], false);
 
-    let created = holder
-        .post(format!("{}/api/setup/admin", running.base_url))
-        .json(&serde_json::json!({
-            "username": "operator",
-            "password": "correct horse battery staple",
-        }))
-        .send()
-        .await
-        .expect("the admin route must answer");
+    let created = wizard
+        .create_admin(&running, "operator", "correct horse battery staple")
+        .await;
     assert_eq!(created.status(), StatusCode::OK);
 
-    let after: serde_json::Value = holder
+    let after: serde_json::Value = wizard
+        .client
         .get(format!("{}/api/setup/status", running.base_url))
         .send()
         .await
@@ -286,29 +274,60 @@ async fn the_claim_page_offers_recovery_only_once_an_administrator_exists() {
 }
 
 #[tokio::test]
+async fn the_claim_page_reads_its_own_facts_before_it_holds_a_claim() {
+    // `/api/setup/status` is behind the claim gate, so the page that has to be
+    // drawn *before* a claim exists cannot read it. Without a source for these
+    // two facts the interface invents them, and an operator whose token died
+    // with a restart is shown a token field and no recovery form (PRD §7.14).
+    let instance = TempInstance::new();
+    let running = RunningInstance::start(&instance).await;
+
+    let unclaimed: serde_json::Value = bare_client()
+        .get(format!("{}/api/setup/claim", running.base_url))
+        .send()
+        .await
+        .expect("the claim status route must answer")
+        .json()
+        .await
+        .expect("a JSON body");
+    assert_eq!(unclaimed["claimHeld"], false);
+    assert_eq!(unclaimed["recoveryAvailable"], false);
+    assert_eq!(unclaimed["tokenLive"], true, "a fresh instance mints one");
+
+    let wizard = Wizard::claim(&running).await;
+    let created = wizard
+        .create_admin(&running, "operator", "correct horse battery staple")
+        .await;
+    assert_eq!(created.status(), StatusCode::OK);
+
+    // A second browser, with no claim of its own, is told the recovery door
+    // is shut — because this one holds the wizard — and the first is told it
+    // holds it.
+    let held: serde_json::Value = wizard
+        .client
+        .get(format!("{}/api/setup/claim", running.base_url))
+        .send()
+        .await
+        .expect("the claim status route must answer")
+        .json()
+        .await
+        .expect("a JSON body");
+    assert_eq!(held["claimHeld"], true);
+    assert_eq!(held["recoveryAvailable"], true);
+
+    running.stop().await;
+}
+
+#[tokio::test]
 async fn a_second_administrator_cannot_be_created_through_the_wizard() {
     let instance = TempInstance::new();
     let running = RunningInstance::start(&instance).await;
-    let token = running.token.clone().expect("a fresh instance mints one");
-    let holder = client();
-
-    holder
-        .post(format!("{}/api/setup/claim", running.base_url))
-        .json(&serde_json::json!({ "token": token }))
-        .send()
-        .await
-        .expect("the claim route must answer");
+    let wizard = Wizard::claim(&running).await;
 
     for expected in [StatusCode::OK, StatusCode::CONFLICT] {
-        let response = holder
-            .post(format!("{}/api/setup/admin", running.base_url))
-            .json(&serde_json::json!({
-                "username": "operator",
-                "password": "correct horse battery staple",
-            }))
-            .send()
-            .await
-            .expect("the admin route must answer");
+        let response = wizard
+            .create_admin(&running, "operator", "correct horse battery staple")
+            .await;
         assert_eq!(response.status(), expected);
     }
 
@@ -316,28 +335,96 @@ async fn a_second_administrator_cannot_be_created_through_the_wizard() {
 }
 
 #[tokio::test]
-async fn completing_setup_turns_the_wizard_into_a_404() {
+async fn setup_cannot_be_completed_before_an_administrator_exists() {
+    // The lockout this closes: completion writes `setup_completed_at`, deletes
+    // the claim, and clears the token. On an instance with no administrator
+    // that leaves no credential to sign in with and no door to create one.
     let instance = TempInstance::new();
     let running = RunningInstance::start(&instance).await;
-    let token = running.token.clone().expect("a fresh instance mints one");
-    let holder = client();
+    let wizard = Wizard::claim(&running).await;
 
-    holder
-        .post(format!("{}/api/setup/claim", running.base_url))
-        .json(&serde_json::json!({ "token": token }))
+    let refused = wizard.complete(&running).await;
+    assert_eq!(refused.status(), StatusCode::CONFLICT);
+    let body: serde_json::Value = refused.json().await.expect("a JSON body");
+    assert_eq!(body["code"], "conflict");
+
+    // And nothing was committed on the way: the wizard still works, and the
+    // administrator can still be created.
+    let created = wizard
+        .create_admin(&running, "operator", "correct horse battery staple")
+        .await;
+    assert_eq!(created.status(), StatusCode::OK);
+    assert_eq!(wizard.complete(&running).await.status(), StatusCode::OK);
+
+    running.stop().await;
+}
+
+#[tokio::test]
+async fn a_setup_write_without_the_csrf_token_is_refused() {
+    // The claim is an ambient credential: a browser attaches it to any request
+    // another origin can cause, and behind it sit the routes that create the
+    // administrator and finish setup.
+    let instance = TempInstance::new();
+    let running = RunningInstance::start(&instance).await;
+    let wizard = Wizard::claim(&running).await;
+
+    let refused = wizard
+        .client
+        .post(format!("{}/api/setup/admin", running.base_url))
+        .json(&serde_json::json!({
+            "username": "operator",
+            "password": "correct horse battery staple",
+        }))
         .send()
         .await
-        .expect("the claim route must answer");
+        .expect("the admin route must answer");
+    assert_eq!(refused.status(), StatusCode::FORBIDDEN);
+    let body: serde_json::Value = refused.json().await.expect("a JSON body");
+    assert_eq!(body["code"], "forbidden");
 
-    let completed = holder
-        .post(format!("{}/api/setup/complete", running.base_url))
-        .send()
-        .await
-        .expect("the complete route must answer");
+    assert!(
+        !afisharr_core::accounts::admin_exists(running.booted.database.readers())
+            .await
+            .expect("the query must run"),
+        "a forged setup write created an administrator"
+    );
+
+    running.stop().await;
+}
+
+#[tokio::test]
+async fn completing_setup_turns_the_wizard_into_a_404_and_expires_the_claim() {
+    let instance = TempInstance::new();
+    let running = RunningInstance::start(&instance).await;
+    let wizard = Wizard::claim(&running).await;
+
+    let created = wizard
+        .create_admin(&running, "operator", "correct horse battery staple")
+        .await;
+    assert_eq!(created.status(), StatusCode::OK);
+
+    let completed = wizard.complete(&running).await;
     assert_eq!(completed.status(), StatusCode::OK);
 
+    // The claim cookie is gone rather than renewed: the gate must not append a
+    // refreshed copy after the handler's removal, or the browser keeps the
+    // later value and the claim outlives the setup that ended it.
+    let claim_cookies: Vec<&str> = completed
+        .headers()
+        .get_all("set-cookie")
+        .iter()
+        .filter_map(|value| value.to_str().ok())
+        .filter(|value| value.starts_with("afisharr_setup_claim="))
+        .collect();
+    assert_eq!(claim_cookies.len(), 1, "{claim_cookies:?}");
+    assert!(
+        claim_cookies[0].contains("afisharr_setup_claim=;"),
+        "the claim cookie must be removed, not refreshed: {claim_cookies:?}"
+    );
+
     for path in ["/api/setup/status", "/api/setup/claim"] {
-        let response = holder
+        let response = wizard
+            .client
             .get(format!("{}{path}", running.base_url))
             .send()
             .await
@@ -348,6 +435,37 @@ async fn completing_setup_turns_the_wizard_into_a_404() {
             "{path} still answers after setup completed"
         );
     }
+
+    running.stop().await;
+}
+
+#[tokio::test]
+async fn a_completed_setup_closes_the_run_it_opened() {
+    // `record_step` opens one `job_runs` row for the whole wizard and never
+    // closes it. A completed setup that only appended events is queried and
+    // shown as a job that runs forever.
+    let instance = TempInstance::new();
+    let running = RunningInstance::start(&instance).await;
+    let wizard = Wizard::claim(&running).await;
+    let created = wizard
+        .create_admin(&running, "operator", "correct horse battery staple")
+        .await;
+    assert_eq!(created.status(), StatusCode::OK);
+    assert_eq!(wizard.complete(&running).await.status(), StatusCode::OK);
+
+    let statuses: Vec<String> =
+        sqlx::query_scalar("SELECT status FROM job_runs WHERE job_id = 'setup'")
+            .fetch_all(running.booted.database.readers())
+            .await
+            .expect("the query must run");
+    assert_eq!(statuses, vec!["Ok".to_owned()], "{statuses:?}");
+
+    let finished: Vec<Option<i64>> =
+        sqlx::query_scalar("SELECT finished_at FROM job_runs WHERE job_id = 'setup'")
+            .fetch_all(running.booted.database.readers())
+            .await
+            .expect("the query must run");
+    assert!(finished.iter().all(Option::is_some), "{finished:?}");
 
     running.stop().await;
 }

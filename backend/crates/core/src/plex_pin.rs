@@ -11,5 +11,6 @@
 mod store;
 
 pub use store::{
-    CompletePinLogin, PinLogin, PinLoginResult, RecordPinLogin, find as find_pin_login,
+    ClaimPinLogin, CompletePinLogin, PinLogin, PinLoginResult, RecordPinLogin,
+    find as find_pin_login,
 };

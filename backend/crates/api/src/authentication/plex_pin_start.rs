@@ -17,7 +17,7 @@ use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 
 use crate::{
-    error::{AppError, AppResult, ErrorCode, Problem},
+    error::{AppError, AppResult, ErrorCode, JsonBody, Problem},
     proxy::ClientContext,
     ratelimit::{Bucket, Decision},
     state::ApiState,
@@ -56,6 +56,7 @@ pub struct PinStarted {
     request_body = StartPin,
     responses(
         (status = 200, description = "A pin was created", body = PinStarted),
+        (status = 400, description = "The request body was not readable", body = Problem),
         (status = 429, description = "Too many attempts", body = Problem),
         (status = 502, description = "plex.tv could not be reached", body = Problem),
     ),
@@ -63,7 +64,7 @@ pub struct PinStarted {
 pub async fn start_plex_pin(
     State(state): State<ApiState>,
     client: ClientContext,
-    Json(request): Json<StartPin>,
+    JsonBody(request): JsonBody<StartPin>,
 ) -> AppResult<Json<PinStarted>> {
     // A pin creation reaches plex.tv on the caller's behalf, so it counts
     // against the provider bucket rather than the general API one (§21.4.3).
@@ -129,6 +130,11 @@ pub async fn start_plex_pin(
 }
 
 /// Renders a plex.tv failure in the operator's terms.
+///
+/// The status matters as much as the sentence. Both plex.tv routes document a
+/// transport failure as 502, and `Internal` maps to 500 — a status the
+/// operation never declared, and one that tells a generated client nothing
+/// about whether the fault is upstream or here (§24.5).
 pub(crate) fn plex_failure(error: PinError) -> AppError {
     match &error {
         PinError::ClientIdentifierMismatch { .. } => AppError::of(
@@ -136,15 +142,17 @@ pub(crate) fn plex_failure(error: PinError) -> AppError {
             "plex.tv issued the sign-in under a different client identifier. \
              Start the sign-in again.",
         ),
+        // A response this build cannot follow is still plex.tv answering with
+        // something unusable, not Afisharr failing: 502, like the outage.
         PinError::NoIdentifier => AppError::of(
-            ErrorCode::Internal,
+            ErrorCode::Upstream,
             "plex.tv created a sign-in this build cannot follow.",
         ),
         // `PinError` is `#[non_exhaustive]`; a transport failure and anything
         // added later read the same way to an operator, and neither is
         // something they can correct from here.
         PinError::Transport(_) | _ => AppError::of(
-            ErrorCode::Internal,
+            ErrorCode::Upstream,
             "plex.tv did not respond. Sign-in cannot continue until it does.",
         ),
     }
@@ -163,9 +171,15 @@ mod tests {
     }
 
     #[test]
-    fn a_transport_failure_does_not_put_the_provider_message_in_the_body() {
+    fn a_transport_failure_answers_the_status_the_route_documents() {
+        // 502, not 500: the route's contract declares an upstream failure, and
+        // a client that received 500 could not tell an outage from a fault.
         let error = plex_failure(PinError::NoIdentifier);
-        assert_eq!(error.problem().code, ErrorCode::Internal);
+        assert_eq!(error.problem().code, ErrorCode::Upstream);
+        assert_eq!(
+            error.problem().code.status(),
+            axum::http::StatusCode::BAD_GATEWAY
+        );
         assert!(
             !error.problem().message.contains("identifier this build"),
             "{}",

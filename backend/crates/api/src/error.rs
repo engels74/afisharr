@@ -12,8 +12,10 @@
 
 mod app_error;
 mod code;
+mod extractors;
 mod problem;
 
 pub use app_error::{AppError, AppResult};
 pub use code::ErrorCode;
+pub use extractors::{JsonBody, QueryParams};
 pub use problem::{Mismatch, Problem};

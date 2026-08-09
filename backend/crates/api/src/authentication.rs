@@ -18,12 +18,12 @@ mod guard;
 pub(crate) mod password_login;
 pub(crate) mod plex_pin_poll;
 pub(crate) mod plex_pin_start;
-mod session;
+pub(crate) mod session;
 
 pub use account_routes::{
     PasswordChange, PasswordChanged, SessionView, change_password, list_sessions, revoke_session,
 };
-pub use guard::{Authenticated, Credential};
+pub use guard::{Administrator, Authenticated, Credential};
 pub(crate) use password_login::ABSENT_ACCOUNT_HASH;
 pub use password_login::{Credentials, SignedIn, log_in, log_out, whoami};
 pub use plex_pin_poll::{PinState, poll_plex_pin};

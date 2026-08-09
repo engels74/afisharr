@@ -11,7 +11,7 @@
 mod harness;
 
 use afisharr_core::{accounts, storage::WriteOperation};
-use harness::{PlexTvStub, RunningInstance, TempInstance};
+use harness::{PlexTvStub, RunningInstance, TempInstance, Wizard};
 use reqwest::{Client, StatusCode};
 
 const PASSWORD: &str = "correct horse battery staple";
@@ -27,27 +27,7 @@ fn browser() -> Client {
 /// A configured instance whose Plex client points at `stub`.
 async fn configured(instance: &TempInstance, stub: &PlexTvStub) -> RunningInstance {
     let running = RunningInstance::start_against_plex(instance, &stub.base_url).await;
-    let token = running.token.clone().expect("a fresh instance mints one");
-    let holder = browser();
-
-    holder
-        .post(format!("{}/api/setup/claim", running.base_url))
-        .json(&serde_json::json!({ "token": token }))
-        .send()
-        .await
-        .expect("the claim route must answer");
-    holder
-        .post(format!("{}/api/setup/admin", running.base_url))
-        .json(&serde_json::json!({ "username": "operator", "password": PASSWORD }))
-        .send()
-        .await
-        .expect("the admin route must answer");
-    holder
-        .post(format!("{}/api/setup/complete", running.base_url))
-        .send()
-        .await
-        .expect("the complete route must answer");
-
+    let _wizard = Wizard::set_up(&running, "operator", PASSWORD).await;
     running
 }
 
@@ -312,4 +292,133 @@ async fn a_plex_sign_in_is_refused_before_the_instance_is_set_up() {
 
     running.stop().await;
     stub.stop().await;
+}
+
+#[tokio::test]
+async fn two_overlapping_polls_produce_one_session_and_not_two() {
+    // The interface polls on a timer, so two requests are in flight whenever a
+    // poll takes longer than the interval. Both read the attempt as open, both
+    // are told `Authorized`, and without an atomic claim both store the token,
+    // refresh the account, and mint a session — two valid sessions from one
+    // exchange, one of which nobody is holding on purpose.
+    let stub = PlexTvStub::start().await;
+    let instance = TempInstance::new();
+    let running = configured(&instance, &stub).await;
+    link_plex_account(&running, 4242).await;
+
+    let client = browser();
+    let started: serde_json::Value = client
+        .post(format!("{}/api/auth/plex/pin", running.base_url))
+        .json(&serde_json::json!({ "oauth": false }))
+        .send()
+        .await
+        .expect("the start route must answer")
+        .json()
+        .await
+        .expect("a JSON body");
+    let attempt = started["id"].as_str().expect("an attempt id").to_owned();
+
+    stub.authorize();
+
+    let poll = || {
+        let url = format!("{}/api/auth/plex/pin/{attempt}", running.base_url);
+        // A jar of its own per request, so a session cookie set by one does not
+        // make the other look like the same browser.
+        async move {
+            reqwest::Client::new()
+                .get(url)
+                .send()
+                .await
+                .expect("the poll route must answer")
+        }
+    };
+    let (first, second) = tokio::join!(poll(), poll());
+
+    let bodies: Vec<serde_json::Value> = vec![
+        first.json().await.expect("a JSON body"),
+        second.json().await.expect("a JSON body"),
+    ];
+    let authorized = bodies
+        .iter()
+        .filter(|body| body["state"] == "authorized")
+        .count();
+    assert_eq!(authorized, 1, "exactly one poll may sign in: {bodies:?}");
+
+    let sessions: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM sessions")
+        .fetch_one(running.booted.database.readers())
+        .await
+        .expect("the query must run");
+    assert_eq!(sessions, 1, "one exchange must produce one session");
+
+    running.stop().await;
+    stub.stop().await;
+}
+
+#[tokio::test]
+async fn polling_is_counted_against_the_provider_budget() {
+    // A pin identifier is a public string carrying no credential. A limit spent
+    // only when the pin is created leaves anyone who has seen one able to drive
+    // unbounded traffic at plex.tv under this instance's client identifier.
+    const PROVIDER_ALLOWANCE: usize = 60;
+
+    let stub = PlexTvStub::start().await;
+    let instance = TempInstance::new();
+    let running = configured(&instance, &stub).await;
+
+    let client = browser();
+    let started: serde_json::Value = client
+        .post(format!("{}/api/auth/plex/pin", running.base_url))
+        .json(&serde_json::json!({ "oauth": false }))
+        .send()
+        .await
+        .expect("the start route must answer")
+        .json()
+        .await
+        .expect("a JSON body");
+    let attempt = started["id"].as_str().expect("an attempt id").to_owned();
+
+    // Creating the pin spent one, so the rest of the allowance is polls.
+    for n in 1..PROVIDER_ALLOWANCE {
+        let response = client
+            .get(format!("{}/api/auth/plex/pin/{attempt}", running.base_url))
+            .send()
+            .await
+            .expect("the poll route must answer");
+        assert_eq!(response.status(), StatusCode::OK, "poll {n}");
+    }
+
+    let refused = client
+        .get(format!("{}/api/auth/plex/pin/{attempt}", running.base_url))
+        .send()
+        .await
+        .expect("the poll route must answer");
+    assert_eq!(refused.status(), StatusCode::TOO_MANY_REQUESTS);
+    let body: serde_json::Value = refused.json().await.expect("a JSON body");
+    assert_eq!(body["code"], "rateLimited");
+
+    running.stop().await;
+    stub.stop().await;
+}
+
+#[tokio::test]
+async fn an_unreachable_plex_answers_the_status_the_route_documents() {
+    // 502, and not 500. The operation declares an upstream failure, and a
+    // generated client that received 500 could not tell an outage it should
+    // wait out from a fault it should report.
+    let stub = PlexTvStub::start().await;
+    let instance = TempInstance::new();
+    let running = configured(&instance, &stub).await;
+    stub.stop().await;
+
+    let response = browser()
+        .post(format!("{}/api/auth/plex/pin", running.base_url))
+        .json(&serde_json::json!({ "oauth": false }))
+        .send()
+        .await
+        .expect("the start route must answer");
+    assert_eq!(response.status(), StatusCode::BAD_GATEWAY);
+    let body: serde_json::Value = response.json().await.expect("a JSON body");
+    assert_eq!(body["code"], "upstream");
+
+    running.stop().await;
 }

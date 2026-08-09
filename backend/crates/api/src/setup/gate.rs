@@ -101,6 +101,16 @@ pub async fn require_claim(
     };
 
     let mut response = next.run(request).await;
+
+    // The handler gets the last word on this cookie. Completion answers with a
+    // removal cookie of the same name and path, and a refreshed one appended
+    // after it is the value the browser keeps — so the claim would survive a
+    // setup that has explicitly expired it, which is the opposite of what the
+    // completion contract says happens (PRD §19.6.1).
+    if already_set(&response) {
+        return Ok(response);
+    }
+
     let refreshed = set(
         CLAIM_COOKIE,
         cookie_value,
@@ -115,6 +125,22 @@ pub async fn require_claim(
             .append(axum::http::header::SET_COOKIE, header);
     }
     Ok(response)
+}
+
+/// Whether the handler already spoke about the claim cookie.
+fn already_set(response: &Response) -> bool {
+    response
+        .headers()
+        .get_all(axum::http::header::SET_COOKIE)
+        .iter()
+        .filter_map(|value| value.to_str().ok())
+        .any(|value| {
+            value
+                .split(';')
+                .next()
+                .and_then(|pair| pair.split_once('='))
+                .is_some_and(|(name, _)| name.trim() == CLAIM_COOKIE)
+        })
 }
 
 /// The refusal a second browser gets, carrying when the hold lapses.
@@ -149,5 +175,28 @@ mod tests {
     fn a_hold_that_lapses_within_a_second_still_reports_at_least_one() {
         assert_eq!(blocked(1).problem().retry_after_seconds, Some(1));
         assert_eq!(blocked(-5).problem().retry_after_seconds, Some(1));
+    }
+
+    #[test]
+    fn a_response_that_already_removes_the_claim_is_left_alone() {
+        // The completion handler expires the cookie. A refreshed one appended
+        // after it is the value the browser keeps, so the claim would outlive
+        // the setup that ended it.
+        let removal =
+            crate::security::expire(CLAIM_COOKIE, "/api/setup", crate::proxy::Scheme::Http);
+        let response = Response::builder()
+            .header(axum::http::header::SET_COOKIE, removal.to_string())
+            .body(axum::body::Body::empty())
+            .expect("the response must build");
+        assert!(already_set(&response));
+    }
+
+    #[test]
+    fn a_response_setting_some_other_cookie_still_gets_the_renewal() {
+        let response = Response::builder()
+            .header(axum::http::header::SET_COOKIE, "afisharr_csrf=abc; Path=/")
+            .body(axum::body::Body::empty())
+            .expect("the response must build");
+        assert!(!already_set(&response));
     }
 }

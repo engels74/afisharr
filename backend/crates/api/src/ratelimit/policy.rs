@@ -75,6 +75,19 @@ impl Bucket {
     pub const fn counts_failures_only(&self) -> bool {
         matches!(self, Self::LoginAccount { .. } | Self::LoginAddress)
     }
+
+    /// Whether this bucket is counted separately per client address.
+    ///
+    /// `LoginAccount` is not, and that is the whole of its value: the bucket
+    /// already names the account, and an attacker who can vary their source
+    /// address cannot vary the account they are trying to get into. Counting
+    /// it per address would hand them the full allowance again from every
+    /// address they can reach the instance from, which for anything behind a
+    /// residential connection or a botnet is unbounded (PRD §21.4.3).
+    #[must_use]
+    pub const fn counts_per_address(&self) -> bool {
+        !matches!(self, Self::LoginAccount { .. })
+    }
 }
 
 /// A limit: how many, over how long, and what happens after.
@@ -151,6 +164,23 @@ mod tests {
         assert!(!Bucket::Api.counts_failures_only());
         assert!(!Bucket::Provider.counts_failures_only());
         assert!(!Bucket::SetupAttempt.counts_failures_only());
+    }
+
+    #[test]
+    fn only_the_account_bucket_is_counted_without_an_address() {
+        // The bucket already names the account. Adding the address to the key
+        // would give a guesser five attempts per address instead of five in
+        // total, which is the limit not existing.
+        assert!(
+            !Bucket::LoginAccount {
+                username: "operator".to_owned()
+            }
+            .counts_per_address()
+        );
+        assert!(Bucket::LoginAddress.counts_per_address());
+        assert!(Bucket::SetupAttempt.counts_per_address());
+        assert!(Bucket::Api.counts_per_address());
+        assert!(Bucket::Provider.counts_per_address());
     }
 
     #[test]

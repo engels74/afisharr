@@ -45,7 +45,7 @@ pub async fn issue(
     user_agent: Option<String>,
 ) -> AppResult<IssuedSession> {
     let token = SessionToken::generate();
-    let csrf = hex_token();
+    let csrf = csrf_cookie(client.scheme);
 
     state
         .database()
@@ -70,16 +70,27 @@ pub async fn issue(
                 client.scheme,
                 true,
             ),
-            set(
-                CSRF_COOKIE,
-                csrf,
-                "/",
-                ABSOLUTE_LIFETIME_MILLIS / 1000,
-                client.scheme,
-                false,
-            ),
+            csrf,
         ],
     })
+}
+
+/// A fresh CSRF cookie.
+///
+/// Minted here rather than only inside `issue`, because signing in is not the
+/// only thing that hands a browser an ambient credential: the setup claim is a
+/// cookie too, and the CSRF check over it needs a token the page can echo. One
+/// definition, so the two cannot disagree about the path, the lifetime, or the
+/// `HttpOnly` flag the double-submit check depends on being off (P7).
+pub(crate) fn csrf_cookie(scheme: Scheme) -> Cookie<'static> {
+    set(
+        CSRF_COOKIE,
+        hex_token(),
+        "/",
+        ABSOLUTE_LIFETIME_MILLIS / 1000,
+        scheme,
+        false,
+    )
 }
 
 /// Revokes one session and returns the cookies that clear it.

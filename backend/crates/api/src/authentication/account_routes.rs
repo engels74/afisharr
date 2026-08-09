@@ -25,7 +25,7 @@ use utoipa::ToSchema;
 
 use crate::{
     authentication::{Authenticated, session},
-    error::{AppError, AppResult, ErrorCode, Problem},
+    error::{AppError, AppResult, ErrorCode, JsonBody, Problem},
     proxy::ClientContext,
     state::ApiState,
 };
@@ -104,7 +104,7 @@ pub async fn change_password(
     caller: Authenticated,
     jar: CookieJar,
     headers: axum::http::HeaderMap,
-    Json(request): Json<PasswordChange>,
+    JsonBody(request): JsonBody<PasswordChange>,
 ) -> AppResult<(CookieJar, Json<PasswordChanged>)> {
     if request.new_password.chars().count() < MINIMUM_PASSWORD_LENGTH {
         return Err(AppError::new(

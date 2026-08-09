@@ -29,7 +29,17 @@ export interface Provenance {
 	readonly repository?: string;
 }
 
-let current: Provenance = {};
+/**
+ * What the instance reported about itself.
+ *
+ * A rune, not a plain module variable. The footer is rendered from
+ * `sourceHref()` inside the root layout, which evaluates once; a plain
+ * assignment would not invalidate that expression, so the health response that
+ * finally names the running version would land with the link still pointing at
+ * the repository root — which is the exact failure the "resolves to the running
+ * version" obligation is about (D-028, AGPL §13).
+ */
+let current = $state<Provenance>({});
 
 /**
  * Records what the instance reported about itself.
