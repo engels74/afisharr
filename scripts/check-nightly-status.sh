@@ -16,12 +16,17 @@
 #
 # The waiver therefore lives on a pull request, and this gate decides only where
 # one exists to carry it: the pull request's own check, and the merge queue run
-# that merges it. `github.event.pull_request.body` is populated for the first
-# and empty for the second, so the merge queue resolves the body from the
-# reference naming the queued pull request — otherwise a waived pull request
-# passes its check and is blocked again on the way in. A push to `main` is after
-# that decision, and the release lane runs the whole nightly suite itself rather
-# than reading its last result, so neither gates.
+# that merges it. Otherwise a waived pull request passes its check and is blocked
+# again on the way in. A push to `main` is after that decision, and the release
+# lane runs the whole nightly suite itself rather than reading its last result,
+# so neither gates.
+#
+# Each of those two events names a pull request — the payload's number, or the
+# `gh-readonly-queue` reference the queue builds from — and the description is
+# then read live. Never from the event payload: `pull_request` does not fire on
+# `edited`, and a re-run replays the payload it started with, so a waiver added
+# because this gate asked for one would be invisible to every run that could act
+# on it.
 #
 # Three states, and only the first two are inputs to a decision (P1). A nightly
 # that *failed* blocks. A nightly that has never run — no workflow on `main`
@@ -68,24 +73,14 @@ esac
 
 case "${GITHUB_EVENT_NAME:-}" in
 pull_request)
-	body="${PR_BODY:-}"
+	pr_number="${PR_NUMBER:-}"
+	named_by="the event payload"
 	;;
 merge_group)
 	# refs/heads/gh-readonly-queue/<base branch>/pr-<number>-<sha>
-	queued=$(printf '%s' "${MERGE_GROUP_HEAD_REF:-}" |
+	pr_number=$(printf '%s' "${MERGE_GROUP_HEAD_REF:-}" |
 		sed -n 's|.*/pr-\([0-9][0-9]*\)-[0-9a-f]*$|\1|p')
-	if [ -z "$queued" ]; then
-		echo "The last nightly run on main concluded '$last_conclusion'." >&2
-		echo "No pull request could be read from '${MERGE_GROUP_HEAD_REF:-}', so a" >&2
-		echo "waiver on it is unobservable rather than absent." >&2
-		exit 1
-	fi
-	if ! body=$(gh api "repos/$repo/pulls/$queued" --jq '.body // ""'); then
-		echo "The last nightly run on main concluded '$last_conclusion'." >&2
-		echo "Could not read pull request #$queued's body, so a waiver on it is" >&2
-		echo "unobservable rather than absent." >&2
-		exit 1
-	fi
+	named_by="'${MERGE_GROUP_HEAD_REF:-}'"
 	;;
 push | workflow_dispatch)
 	# A push to `main` is after the merge the gate decides, and the release
@@ -106,6 +101,24 @@ push | workflow_dispatch)
 	;;
 esac
 
+if [ -z "$pr_number" ]; then
+	echo "The last nightly run on main concluded '$last_conclusion'." >&2
+	echo "No pull request could be read from $named_by, so a waiver on it is" >&2
+	echo "unobservable rather than absent." >&2
+	exit 1
+fi
+
+# Read live rather than from the event payload. `pull_request` fires on
+# `opened`, `synchronize`, and `reopened` — not on `edited` — and a re-run
+# replays the original payload, so a waiver added when this gate asked for one
+# would never be seen by the run the author re-runs.
+if ! body=$(gh api "repos/$repo/pulls/$pr_number" --jq '.body // ""'); then
+	echo "The last nightly run on main concluded '$last_conclusion'." >&2
+	echo "Could not read pull request #$pr_number's body, so a waiver on it is" >&2
+	echo "unobservable rather than absent." >&2
+	exit 1
+fi
+
 reason=$(printf '%s' "$body" | sed -n 's/^Nightly-Waiver:[[:space:]]*//p' | head -n 1)
 
 if [ -n "$reason" ]; then
@@ -121,6 +134,10 @@ Fix it, or waive it with a named reason by adding a line to this pull request's
 description:
 
     Nightly-Waiver: <why this merge should not wait for the nightly fix>
+
+Then re-run this job. Editing a description does not start a workflow run, and
+this job reads the description as it stands when it runs rather than as the
+event that started the run recorded it.
 
 Recorded as D-035.
 EOF
