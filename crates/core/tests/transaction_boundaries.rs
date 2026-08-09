@@ -17,12 +17,21 @@
 use std::path::{Path, PathBuf};
 
 /// Calls that leave the process. A file that opens a transaction may not use one.
-const EXTERNAL_IO: [&str; 6] = [
+///
+/// Matched as bare `fs::` and `net::` rather than as fully-qualified paths,
+/// because the prevailing style here imports the module and calls through it —
+/// `use std::{fs, io, path::Path};` then `fs::read(path)` in
+/// `secrets::key_file`. A pattern that only caught `std::fs::` would read as a
+/// guard while the shape the codebase actually writes walked straight past it.
+/// The `std::`/`tokio::` entries stay for the import that renames the module.
+const EXTERNAL_IO: [&str; 8] = [
     "reqwest",
+    "fs::",
+    "net::",
+    "std::fs",
+    "std::net",
     "tokio::fs",
     "tokio::net",
-    "std::fs::",
-    "std::net::",
     "spawn_blocking",
 ];
 
@@ -41,13 +50,13 @@ fn no_file_holds_a_transaction_across_external_io() {
             continue;
         }
 
-        for call in EXTERNAL_IO {
-            if source.contains(call) {
-                offences.push(format!(
-                    "{}: transactional code calls {call}",
-                    file.display()
-                ));
-            }
+        let calls = external_io(source);
+        if !calls.is_empty() {
+            offences.push(format!(
+                "{}: transactional code calls {}",
+                file.display(),
+                calls.join(", ")
+            ));
         }
     }
 
@@ -70,6 +79,39 @@ fn the_scan_actually_reaches_the_files_it_claims_to_check() {
         found.len(),
         1,
         "expected to scan crates/core/src/settings/store.rs"
+    );
+}
+
+/// Every external-I/O marker the source carries.
+fn external_io(source: &str) -> Vec<&'static str> {
+    EXTERNAL_IO
+        .into_iter()
+        .filter(|call| source.contains(call))
+        .collect()
+}
+
+/// The scan sees the call, not one way of spelling it.
+///
+/// A guard that only matched `std::fs::` walked past the file that actually
+/// writes to disk here, because that file imports the module and calls
+/// `fs::read`. Each assertion pins one entry shape that nothing else covers.
+#[test]
+fn the_scan_recognises_every_spelling_it_claims_to() {
+    assert!(
+        !external_io("use std::{fs, io};\nfn f() { fs::read(\"x\").ok(); }").is_empty(),
+        "an imported module is the shape this codebase writes"
+    );
+    assert!(
+        !external_io("use std::fs as filesystem;").is_empty(),
+        "a renamed import is the only reason the std:: and tokio:: entries stay"
+    );
+    assert!(
+        !external_io("fn f() { let _ = std::net::TcpStream::connect(\"x\"); }").is_empty(),
+        "a fully-qualified path is still caught"
+    );
+    assert!(
+        external_io("fn f() { let _ = 1 + 1; }").is_empty(),
+        "arithmetic is not external I/O"
     );
 }
 
