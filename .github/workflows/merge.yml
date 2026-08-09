@@ -210,6 +210,7 @@ jobs:
       - rust-supply-chain
       - rust-miri
       - structure
+      - frontend-install
       - frontend-format-lint
       - frontend-typecheck
       - frontend-test-unit
@@ -218,10 +219,17 @@ jobs:
       - contract-check
       - nightly-status
     steps:
-      # Every lane above must be green. "Parallel" never means "optional".
+      # Every lane above must succeed. "Parallel" never means "optional", and
+      # neither does "skipped": a job whose `needs` failed reports `skipped`
+      # rather than `failure`, so this asserts the result positively instead of
+      # naming the two ways it knows how to fail.
       - name: assert every lane succeeded
+        env:
+          LANE_RESULTS: ${{ toJSON(needs) }}
         run: |
-          if [ "${{ contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled') }}" = "true" ]; then
+          printf '%s' "${LANE_RESULTS}" | jq -r 'to_entries[] | "\(.key): \(.value.result)"'
+          if ! printf '%s' "${LANE_RESULTS}" |
+            jq -e 'length > 0 and all(.[]; .result == "success")' >/dev/null; then
             echo "One or more merge lanes did not succeed." >&2
             exit 1
           fi
