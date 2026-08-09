@@ -23,7 +23,10 @@ serde_json = { workspace = true }
 sha2.workspace = true
 sqlx = { workspace = true }
 thiserror = { workspace = true }
-tokio = { workspace = true }
+# `fs` is used directly by `backup` and `storage`. Declared rather than taken
+# from sqlx's `runtime-tokio`, which enables it today: a crate that compiles on
+# a feature it never asked for breaks when the dependency that supplied it moves.
+tokio = { workspace = true, features = ["fs"] }
 tracing = { workspace = true }
 ulid = { workspace = true }
 
