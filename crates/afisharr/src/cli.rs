@@ -40,9 +40,12 @@ impl Cli {
         let paths = DataPaths::from_env()?;
         let configured = crate::configuration::load(&paths.config_file())?;
 
-        // Logging is initialised from the configured level before anything can
-        // fail interestingly, so a failed start is a log line rather than a
-        // bare process exit.
+        // Logging is initialised from the configured document before anything
+        // can fail interestingly, so a failed start is a log line rather than a
+        // bare process exit. That also puts `logging` outside the rule that the
+        // stored settings row is the source of truth — the row lives in a
+        // database this has not opened yet. `configuration::load` carries the
+        // list of groups decided before the row can be read.
         let _log_guard = observability::init(&paths.logs(), &configured.logging)?;
 
         match self.command.unwrap_or(Command::Start) {
