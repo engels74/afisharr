@@ -45,7 +45,7 @@ impl Id {
     ///
     /// The clock is injected rather than read so a test can mint identifiers
     /// with a chosen ordering.
-    pub fn generate(clock: &impl Clock) -> Self {
+    pub fn generate(clock: &dyn Clock) -> Self {
         let millis = u64::try_from(clock.now().as_millis()).unwrap_or(0);
         Self {
             text: Ulid::from_parts(millis, rand_128()).to_string(),

@@ -1,0 +1,190 @@
+// SPDX-FileCopyrightText: 2026 Afisharr contributors
+// SPDX-License-Identifier: AGPL-3.0-or-later
+
+//! The limit table from PRD §21.4.3, as data.
+
+/// One counted class of request.
+///
+/// The bucket names *what is being protected*, not which route asked. Two
+/// routes that reach a provider share one bucket because the thing being
+/// protected — the operator's provider quota — is one thing.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub enum Bucket {
+    /// Failed sign-ins against one account name.
+    LoginAccount {
+        /// The username that was tried.
+        username: String,
+    },
+    /// Failed sign-ins from one address.
+    LoginAddress,
+    /// Claim and recovery attempts from one address.
+    SetupAttempt,
+    /// Authenticated calls from one address.
+    Api,
+    /// Calls that reach a third-party service on the caller's behalf.
+    Provider,
+}
+
+impl Bucket {
+    /// The limit this bucket is counted against.
+    #[must_use]
+    pub const fn policy(&self) -> Policy {
+        match self {
+            // Five failures in fifteen minutes, then a lockout that doubles to
+            // twenty-four hours. The lockout is per account rather than per
+            // address because an attacker who can vary their address cannot
+            // vary the account they are trying to get into.
+            Self::LoginAccount { .. } => Policy {
+                allowance: 5,
+                window_millis: 15 * 60 * 1000,
+                lockout: Some(Lockout {
+                    initial_millis: 15 * 60 * 1000,
+                    ceiling_millis: 24 * 60 * 60 * 1000,
+                }),
+            },
+            Self::LoginAddress => Policy {
+                allowance: 20,
+                window_millis: 15 * 60 * 1000,
+                lockout: None,
+            },
+            Self::SetupAttempt => Policy {
+                allowance: 5,
+                window_millis: 15 * 60 * 1000,
+                lockout: None,
+            },
+            Self::Api => Policy {
+                allowance: 600,
+                window_millis: 60 * 1000,
+                lockout: None,
+            },
+            // Protects the operator's provider quota, not this instance.
+            Self::Provider => Policy {
+                allowance: 60,
+                window_millis: 60 * 1000,
+                lockout: None,
+            },
+        }
+    }
+
+    /// Whether this bucket counts every request or only the failures.
+    ///
+    /// A login limit that counted successes would lock out the operator who
+    /// signs in from four devices; an API limit that counted only failures
+    /// would not be a rate limit at all.
+    #[must_use]
+    pub const fn counts_failures_only(&self) -> bool {
+        matches!(self, Self::LoginAccount { .. } | Self::LoginAddress)
+    }
+}
+
+/// A limit: how many, over how long, and what happens after.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Policy {
+    /// How many are permitted inside the window.
+    pub allowance: u32,
+    /// The window, in milliseconds.
+    pub window_millis: i64,
+    /// The escalating lockout applied once the allowance is spent.
+    pub lockout: Option<Lockout>,
+}
+
+/// An exponential lockout, bounded.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Lockout {
+    /// The first lockout's length.
+    pub initial_millis: i64,
+    /// The longest a lockout ever gets, however many times it doubles.
+    pub ceiling_millis: i64,
+}
+
+impl Lockout {
+    /// The length of the `n`-th consecutive lockout, one-based.
+    ///
+    /// Doubling, capped. The cap is the point: an unbounded doubling locks a
+    /// household out of its own instance for a year over a fat-fingered
+    /// password, which is a denial of service the attacker did not have to
+    /// build.
+    #[must_use]
+    pub fn duration_millis(&self, consecutive: u32) -> i64 {
+        let doublings = if consecutive == 0 { 0 } else { consecutive - 1 };
+        let Some(shift) = self.initial_millis.checked_shl(doublings.min(63)) else {
+            return self.ceiling_millis;
+        };
+        if shift <= 0 || shift > self.ceiling_millis {
+            self.ceiling_millis
+        } else {
+            shift
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_limit_table_matches_the_one_in_the_requirements() {
+        assert_eq!(
+            Bucket::LoginAccount {
+                username: "operator".to_owned()
+            }
+            .policy()
+            .allowance,
+            5
+        );
+        assert_eq!(Bucket::LoginAddress.policy().allowance, 20);
+        assert_eq!(Bucket::SetupAttempt.policy().allowance, 5);
+        assert_eq!(Bucket::Api.policy().allowance, 600);
+        assert_eq!(Bucket::Api.policy().window_millis, 60 * 1000);
+        assert_eq!(Bucket::Provider.policy().allowance, 60);
+    }
+
+    #[test]
+    fn only_the_login_buckets_count_failures_only() {
+        assert!(
+            Bucket::LoginAccount {
+                username: "operator".to_owned()
+            }
+            .counts_failures_only()
+        );
+        assert!(Bucket::LoginAddress.counts_failures_only());
+        assert!(!Bucket::Api.counts_failures_only());
+        assert!(!Bucket::Provider.counts_failures_only());
+        assert!(!Bucket::SetupAttempt.counts_failures_only());
+    }
+
+    #[test]
+    fn the_lockout_doubles_from_fifteen_minutes() {
+        let lockout = Lockout {
+            initial_millis: 15 * 60 * 1000,
+            ceiling_millis: 24 * 60 * 60 * 1000,
+        };
+        assert_eq!(lockout.duration_millis(1), 15 * 60 * 1000);
+        assert_eq!(lockout.duration_millis(2), 30 * 60 * 1000);
+        assert_eq!(lockout.duration_millis(3), 60 * 60 * 1000);
+    }
+
+    #[test]
+    fn the_lockout_stops_doubling_at_twenty_four_hours() {
+        let lockout = Lockout {
+            initial_millis: 15 * 60 * 1000,
+            ceiling_millis: 24 * 60 * 60 * 1000,
+        };
+        for consecutive in 8..64 {
+            assert_eq!(
+                lockout.duration_millis(consecutive),
+                24 * 60 * 60 * 1000,
+                "lockout {consecutive} exceeded the ceiling"
+            );
+        }
+    }
+
+    #[test]
+    fn a_very_large_lockout_count_does_not_overflow_into_a_short_lockout() {
+        let lockout = Lockout {
+            initial_millis: 15 * 60 * 1000,
+            ceiling_millis: 24 * 60 * 60 * 1000,
+        };
+        assert_eq!(lockout.duration_millis(u32::MAX), 24 * 60 * 60 * 1000);
+    }
+}

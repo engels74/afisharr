@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT INTO plex_pin_logins (\n                 id, plex_pin_id, code, mode, client_identifier, created_at, expires_at)\n             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 7
+    },
+    "nullable": []
+  },
+  "hash": "2d3cad81f1a27f67716e5007e9de9bf0452df6d35de04b0e88a045133bc7b3ae"
+}

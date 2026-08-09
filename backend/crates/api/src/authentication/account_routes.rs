@@ -1,0 +1,311 @@
+// SPDX-FileCopyrightText: 2026 Afisharr contributors
+// SPDX-License-Identifier: AGPL-3.0-or-later
+
+//! Changing a password, and managing the sessions that outlive it.
+
+// Route handlers in this file document their failures in their
+// `#[utoipa::path(responses(...))]` block: that block is the contract the
+// generated TypeScript client is built from, and it is machine-checked. A prose
+// `# Errors` section beside it would be a second statement of the same facts,
+// free to drift, with nothing checking it (§24.5).
+#![allow(clippy::missing_errors_doc)]
+
+use afisharr_core::{
+    accounts::{self, SetPassword},
+    sessions::{self, Session},
+};
+use axum::{
+    Json,
+    extract::{Path, State},
+    http::{StatusCode, header::USER_AGENT},
+};
+use axum_extra::extract::CookieJar;
+use serde::{Deserialize, Serialize};
+use utoipa::ToSchema;
+
+use crate::{
+    authentication::{Authenticated, session},
+    error::{AppError, AppResult, ErrorCode, Problem},
+    proxy::ClientContext,
+    state::ApiState,
+};
+
+/// The shortest password this instance will store.
+///
+/// The same floor the first-run account is held to; stated once and used from
+/// both places rather than drifting apart (P7).
+pub(crate) const MINIMUM_PASSWORD_LENGTH: usize = 12;
+
+/// What a password change sends.
+#[derive(Debug, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct PasswordChange {
+    /// The password in force now, re-entered.
+    pub current_password: String,
+    /// The password to store instead.
+    pub new_password: String,
+}
+
+/// What a password change produced.
+#[derive(Debug, Serialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct PasswordChanged {
+    /// How many other sessions were revoked.
+    ///
+    /// Reported rather than silent: the point of revoking them is that the
+    /// operator knows the other devices are signed out.
+    pub sessions_revoked: u64,
+}
+
+/// One session, as the settings page lists it.
+#[derive(Debug, Serialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct SessionView {
+    /// The digest, which is what revocation names.
+    ///
+    /// Safe to show: it is the SHA-256 of a cookie value, and knowing it does
+    /// not let anyone present the value it came from.
+    pub id: String,
+    /// Whether this is the session making the request.
+    pub is_current: bool,
+    /// The user agent recorded when it was created.
+    pub user_agent: Option<String>,
+    /// The address it was created from.
+    pub ip: Option<String>,
+    /// When it was created, in epoch milliseconds.
+    pub created_at: i64,
+    /// When it was last used, in epoch milliseconds.
+    pub last_seen_at: i64,
+    /// When it was revoked, in epoch milliseconds.
+    pub revoked_at: Option<i64>,
+}
+
+/// Changes the signed-in account's password.
+///
+/// Everything PRD §21.4.2 asks for happens here and happens together: the
+/// current password is re-verified, the new hash is written, every other
+/// session for the account is revoked, and this session's identifier is
+/// rotated. Rotation is not decoration — a session identifier that survives a
+/// password change survives the theft the change was made to end.
+#[utoipa::path(
+    post,
+    path = "/api/settings/password",
+    tag = "settings",
+    request_body = PasswordChange,
+    responses(
+        (status = 200, description = "The password is changed", body = PasswordChanged),
+        (status = 400, description = "The new password was refused", body = Problem),
+        (status = 401, description = "The current password was not accepted", body = Problem),
+    ),
+)]
+pub async fn change_password(
+    State(state): State<ApiState>,
+    client: ClientContext,
+    caller: Authenticated,
+    jar: CookieJar,
+    headers: axum::http::HeaderMap,
+    Json(request): Json<PasswordChange>,
+) -> AppResult<(CookieJar, Json<PasswordChanged>)> {
+    if request.new_password.chars().count() < MINIMUM_PASSWORD_LENGTH {
+        return Err(AppError::new(
+            Problem::new(ErrorCode::Invalid, "That password is too short.")
+                .at("/newPassword")
+                .expecting(
+                    format!("at least {MINIMUM_PASSWORD_LENGTH} characters"),
+                    format!("{} characters", request.new_password.chars().count()),
+                ),
+        ));
+    }
+
+    let user = accounts::find_by_id(state.database().readers(), &caller.user_id)
+        .await
+        .map_err(AppError::internal)?
+        .ok_or_else(|| AppError::of(ErrorCode::Unauthenticated, "Sign in to continue."))?;
+
+    let Some(stored) = user.password_hash.clone() else {
+        return Err(AppError::of(
+            ErrorCode::Conflict,
+            "This account signs in through Plex and has no password to change.",
+        ));
+    };
+    if !accounts::verify(request.current_password, stored)
+        .await
+        .map_err(AppError::internal)?
+    {
+        return Err(AppError::new(
+            Problem::new(
+                ErrorCode::Unauthenticated,
+                "That current password was not accepted.",
+            )
+            .at("/currentPassword"),
+        ));
+    }
+
+    let hashed = accounts::hash(request.new_password)
+        .await
+        .map_err(AppError::internal)?;
+    state
+        .database()
+        .writer()
+        .submit(SetPassword {
+            user_id: user.id.clone(),
+            password_hash: hashed,
+            at: state.clock().now(),
+        })
+        .await
+        .map_err(AppError::internal)?;
+
+    // Every session for the account, including the one making this request:
+    // the replacement is minted below, so the identifier the operator's browser
+    // held before the change is worthless afterwards.
+    let sessions_revoked = session::revoke_others(&state, &user.id, None).await?;
+
+    let issued = session::issue(
+        &state,
+        &user.id,
+        client,
+        headers
+            .get(USER_AGENT)
+            .and_then(|value| value.to_str().ok())
+            .map(str::to_owned),
+    )
+    .await?;
+
+    let mut jar = jar;
+    for cookie in issued.cookies {
+        jar = jar.add(cookie);
+    }
+    Ok((
+        jar,
+        Json(PasswordChanged {
+            // The rotated-away session is this one, and reporting it as
+            // "revoked elsewhere" would overstate what happened on other
+            // devices by exactly one.
+            sessions_revoked: sessions_revoked.saturating_sub(1),
+        }),
+    ))
+}
+
+/// Lists the signed-in account's sessions.
+#[utoipa::path(
+    get,
+    path = "/api/settings/sessions",
+    tag = "settings",
+    responses(
+        (status = 200, description = "Every session, newest first", body = Vec<SessionView>),
+        (status = 401, description = "No accepted credential was presented", body = Problem),
+    ),
+)]
+pub async fn list_sessions(
+    State(state): State<ApiState>,
+    caller: Authenticated,
+) -> AppResult<Json<Vec<SessionView>>> {
+    let current = caller.session_digest().map(str::to_owned);
+    let sessions = sessions::list_for_user(state.database().readers(), &caller.user_id)
+        .await
+        .map_err(AppError::internal)?;
+    Ok(Json(
+        sessions
+            .into_iter()
+            .map(|session| view(session, current.as_deref()))
+            .collect(),
+    ))
+}
+
+/// Revokes one of the signed-in account's sessions.
+#[utoipa::path(
+    delete,
+    path = "/api/settings/sessions/{id}",
+    tag = "settings",
+    params(("id" = String, Path, description = "The session to revoke")),
+    responses(
+        (status = 204, description = "The session is revoked"),
+        (status = 401, description = "No accepted credential was presented", body = Problem),
+        (status = 404, description = "No such session on this account", body = Problem),
+    ),
+)]
+pub async fn revoke_session(
+    State(state): State<ApiState>,
+    caller: Authenticated,
+    Path(id): Path<String>,
+) -> AppResult<StatusCode> {
+    // Scoped to the caller's own sessions: an admin-only surface is still not
+    // a surface where one account's identifier revokes another's.
+    let owned = sessions::find_by_digest(state.database().readers(), &id)
+        .await
+        .map_err(AppError::internal)?
+        .is_some_and(|session| session.user_id == caller.user_id);
+    if !owned {
+        return Err(AppError::of(
+            ErrorCode::NotFound,
+            "That session does not exist on this account.",
+        ));
+    }
+
+    state
+        .database()
+        .writer()
+        .submit(afisharr_core::sessions::RevokeSession {
+            digest: id,
+            at: state.clock().now(),
+        })
+        .await
+        .map_err(AppError::internal)?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+fn view(session: Session, current: Option<&str>) -> SessionView {
+    SessionView {
+        is_current: current.is_some_and(|digest| digest == session.digest),
+        id: session.digest,
+        user_agent: session.user_agent,
+        ip: session.ip,
+        created_at: session.created_at.as_millis(),
+        last_seen_at: session.last_seen_at.as_millis(),
+        revoked_at: session
+            .revoked_at
+            .map(afisharr_core::time::Timestamp::as_millis),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use afisharr_core::time::Timestamp;
+
+    use super::*;
+
+    fn session(digest: &str) -> Session {
+        Session {
+            digest: digest.to_owned(),
+            user_id: "U".to_owned(),
+            created_at: Timestamp::from_millis(1),
+            expires_at: Timestamp::from_millis(2),
+            last_seen_at: Timestamp::from_millis(3),
+            user_agent: Some("Firefox".to_owned()),
+            ip: Some("10.0.0.1".to_owned()),
+            revoked_at: None,
+        }
+    }
+
+    #[test]
+    fn the_session_making_the_request_is_marked_as_current() {
+        assert!(view(session("a"), Some("a")).is_current);
+        assert!(!view(session("b"), Some("a")).is_current);
+    }
+
+    #[test]
+    fn an_api_key_caller_marks_no_session_as_current() {
+        assert!(!view(session("a"), None).is_current);
+    }
+
+    #[test]
+    fn the_password_change_body_rejects_a_field_it_does_not_know() {
+        assert!(
+            serde_json::from_str::<PasswordChange>(
+                r#"{"currentPassword":"a","newPassword":"b","userId":"U"}"#
+            )
+            .is_err(),
+            "a caller must not be able to name whose password to change"
+        );
+    }
+}

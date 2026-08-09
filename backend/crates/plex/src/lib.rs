@@ -21,5 +21,6 @@
 /// rather than one number that only describes the binary.
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 
+pub mod account;
 pub mod identity;
 pub mod pin;

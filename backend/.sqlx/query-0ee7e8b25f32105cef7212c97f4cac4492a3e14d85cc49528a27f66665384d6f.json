@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT INTO job_run_events (id, run_id, at, level, scope, message)\n             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 6
+    },
+    "nullable": []
+  },
+  "hash": "0ee7e8b25f32105cef7212c97f4cac4492a3e14d85cc49528a27f66665384d6f"
+}

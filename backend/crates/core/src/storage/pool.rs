@@ -6,6 +6,7 @@
 use std::{
     num::NonZeroUsize,
     path::{Path, PathBuf},
+    sync::Mutex,
     thread,
 };
 
@@ -31,7 +32,10 @@ pub struct Database {
     path: PathBuf,
     readers: SqlitePool,
     writer: WriteHandle,
-    writer_task: JoinHandle<()>,
+    // Taken once by `close`. Behind a `Mutex<Option<_>>` because the database
+    // is shared through an `Arc` — the HTTP surface holds one and so does the
+    // boot sequence — and awaiting a `JoinHandle` needs to own it.
+    writer_task: Mutex<Option<JoinHandle<()>>>,
 }
 
 impl Database {
@@ -81,7 +85,7 @@ impl Database {
             path,
             readers,
             writer,
-            writer_task,
+            writer_task: Mutex::new(Some(writer_task)),
         })
     }
 
@@ -104,10 +108,19 @@ impl Database {
     }
 
     /// Closes both halves, waiting for the write actor to finish its queue.
-    pub async fn close(self) {
+    ///
+    /// Idempotent: a second call finds the task already taken and returns.
+    pub async fn close(&self) {
         self.readers.close().await;
         self.writer.shutdown().await;
-        drop(self.writer_task.await);
+        let task = self
+            .writer_task
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .take();
+        if let Some(task) = task {
+            drop(task.await);
+        }
     }
 }
 

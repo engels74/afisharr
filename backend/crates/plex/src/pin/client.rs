@@ -3,16 +3,17 @@
 
 //! Creating a pin, and polling it.
 
-use afisharr_sources::outbound::{Method, OutboundClient, OutboundError};
+use afisharr_sources::outbound::{HeaderValue, Method, OutboundClient, OutboundError};
 use url::Url;
 
 use crate::{
-    identity::ClientIdentity,
+    account::{AccountBody, PlexAccount},
+    identity::{ClientIdentity, PLEX_TOKEN},
     pin::{PinError, PinPoll, PinResource, resource::PinBody},
 };
 
-/// plex.tv's pin endpoint.
-const PINS_BASE: &str = "https://plex.tv/api/v2/pins";
+/// plex.tv's API root.
+const PLEX_TV_BASE: &str = "https://plex.tv/api/v2";
 
 /// The plex.tv side of the login flow.
 ///
@@ -22,13 +23,29 @@ const PINS_BASE: &str = "https://plex.tv/api/v2/pins";
 pub struct PlexTvClient {
     outbound: OutboundClient,
     identity: ClientIdentity,
+    base: String,
 }
 
 impl PlexTvClient {
     /// A client that identifies as `identity` and sends through `outbound`.
     #[must_use]
-    pub const fn new(outbound: OutboundClient, identity: ClientIdentity) -> Self {
-        Self { outbound, identity }
+    pub fn new(outbound: OutboundClient, identity: ClientIdentity) -> Self {
+        Self::against(outbound, identity, PLEX_TV_BASE)
+    }
+
+    /// The same client pointed at another API root.
+    ///
+    /// plex.tv is the only value this takes in production. It is a parameter
+    /// because the flow is otherwise untestable without the real service, and
+    /// because the adversarial fake (D-036) is the thing every later phase
+    /// tests against.
+    #[must_use]
+    pub fn against(outbound: OutboundClient, identity: ClientIdentity, base: &str) -> Self {
+        Self {
+            outbound,
+            identity,
+            base: base.trim_end_matches('/').to_owned(),
+        }
     }
 
     /// The identity every request from this client carries.
@@ -50,7 +67,7 @@ impl PlexTvClient {
     /// different client identifier than this instance sent.
     #[tracing::instrument(skip(self))]
     pub async fn create_pin(&self, strong: bool) -> Result<PinResource, PinError> {
-        let mut url = Url::parse(PINS_BASE).map_err(|source| {
+        let mut url = Url::parse(&format!("{}/pins", self.base)).map_err(|source| {
             PinError::Transport(OutboundError::Address {
                 host: "plex.tv".to_owned(),
                 source,
@@ -102,7 +119,7 @@ impl PlexTvClient {
     /// Returns [`PinError::Transport`] when plex.tv did not answer.
     #[tracing::instrument(skip(self))]
     pub async fn poll_pin(&self, plex_pin_id: &str) -> Result<PinPoll, PinError> {
-        let url = Url::parse(&format!("{PINS_BASE}/{plex_pin_id}")).map_err(|source| {
+        let url = Url::parse(&format!("{}/pins/{plex_pin_id}", self.base)).map_err(|source| {
             PinError::Transport(OutboundError::Address {
                 host: "plex.tv".to_owned(),
                 source,
@@ -130,6 +147,38 @@ impl PlexTvClient {
             Some(auth_token) if !auth_token.is_empty() => PinPoll::Authorized { auth_token },
             _ => PinPoll::Pending,
         })
+    }
+
+    /// Reads the account a token authenticates.
+    ///
+    /// The step between "a token arrived" and "this is who signed in". Without
+    /// it a completed pin proves only that somebody, somewhere, has a plex.tv
+    /// account — which is not a fact any instance should act on.
+    ///
+    /// # Errors
+    /// Returns [`PinError::Transport`] when plex.tv did not answer, or answered
+    /// a refusal, which for this call means the token is not accepted.
+    #[tracing::instrument(skip(self, auth_token))]
+    pub async fn account(&self, auth_token: &str) -> Result<PlexAccount, PinError> {
+        let url = Url::parse(&format!("{}/user", self.base)).map_err(|source| {
+            PinError::Transport(OutboundError::Address {
+                host: "plex.tv".to_owned(),
+                source,
+            })
+        })?;
+
+        let mut headers = self.identity.headers();
+        headers.push((
+            PLEX_TOKEN,
+            HeaderValue::from_str(auth_token).map_err(|_| PinError::NoIdentifier)?,
+        ));
+
+        let response = self
+            .outbound
+            .send(Method::GET, &url, &headers, None, self.outbound.deadline())
+            .await?;
+        let body: AccountBody = response.json("plex.tv")?;
+        Ok(PlexAccount::from(body))
     }
 }
 

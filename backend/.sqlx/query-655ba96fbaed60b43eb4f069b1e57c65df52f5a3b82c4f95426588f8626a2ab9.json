@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT INTO job_runs (id, job_id, trigger, actor, started_at, status)\n             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 6
+    },
+    "nullable": []
+  },
+  "hash": "655ba96fbaed60b43eb4f069b1e57c65df52f5a3b82c4f95426588f8626a2ab9"
+}

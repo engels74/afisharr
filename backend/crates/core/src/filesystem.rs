@@ -13,7 +13,9 @@
 mod containment;
 mod error;
 mod listing;
+mod roots;
 
 pub use containment::{Contained, Root, contain, contain_new};
 pub use error::ContainmentError;
 pub use listing::{Entry, EntryKind, list};
+pub use roots::enabled as enabled_roots;

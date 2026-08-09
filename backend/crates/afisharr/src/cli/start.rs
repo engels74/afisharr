@@ -3,29 +3,81 @@
 
 //! `afisharr start`.
 
-use afisharr_core::settings::SettingsBody;
-use anyhow::{Context, Result};
-use tracing::info;
+use std::sync::Arc;
 
-use crate::{configuration::DataPaths, startup};
+use afisharr_core::{settings::SettingsBody, setup::TokenStore, time::SystemClock};
+use anyhow::Result;
+use tracing::{info, warn};
 
-/// Boots the instance and holds it open until it is asked to stop.
-///
-/// There is no HTTP surface yet — it arrives with the API crate — so the
-/// process boots, reports that it is up, and waits. That is the honest shape of
-/// the skeleton: everything before the listener already runs on every start.
+use crate::{bootstrap::print_setup_banner, configuration::DataPaths, interface, server, startup};
+
+/// Boots the instance, serves it, and holds it open until it is asked to stop.
 ///
 /// # Errors
-/// Returns whatever the boot sequence refused to start on.
+/// Returns whatever the boot sequence refused to start on, or the failure that
+/// stopped the server.
 pub async fn run(paths: &DataPaths, configured: SettingsBody) -> Result<()> {
     let booted = startup::boot(paths, configured).await?;
 
-    info!("waiting for shutdown");
-    tokio::signal::ctrl_c()
-        .await
-        .context("waiting for the shutdown signal")?;
+    // The token exists only while setup is incomplete, and minting it here —
+    // once, on the start that prints it — is what makes a restart invalidate
+    // the previous one (PRD §19.6.1).
+    let bootstrap = Arc::new(TokenStore::empty());
+    if booted.instance.setup_completed_at.is_none() {
+        let token = bootstrap.mint(&SystemClock);
+        print_setup_banner(&token, &booted.settings.body.http);
+    }
+
+    if !interface::EmbeddedInterface::is_present() {
+        warn!(
+            "this build carries no interface: the API is serving, but every page \
+             answers that the SPA was not built into it"
+        );
+    }
+
+    let state = server::build_state(&booted, Arc::clone(&bootstrap)).await?;
+    let http = &booted.settings.body.http;
+    let serving = server::serve(&http.bind_address, http.port).await?;
+    info!(address = %serving.address, "afisharr is listening");
+
+    serving.run(state, shutdown_signal()).await?;
 
     info!("shutting down");
     booted.database.close().await;
     Ok(())
+}
+
+/// Completes when the process is asked to stop.
+///
+/// Both signals, not just Ctrl-C: `SIGTERM` is what `docker stop` sends, and a
+/// container that only listens for `SIGINT` is a container that is killed after
+/// its grace period every single time.
+async fn shutdown_signal() {
+    let interrupt = async {
+        let _ = tokio::signal::ctrl_c().await;
+    };
+
+    #[cfg(unix)]
+    let terminate = async {
+        match tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate()) {
+            Ok(mut stream) => {
+                stream.recv().await;
+            }
+            // A process that cannot install the handler still stops on Ctrl-C,
+            // and refusing to serve over it would be worse than the lost
+            // graceful shutdown.
+            Err(error) => {
+                warn!(%error, "could not listen for SIGTERM");
+                std::future::pending::<()>().await;
+            }
+        }
+    };
+
+    #[cfg(not(unix))]
+    let terminate = std::future::pending::<()>();
+
+    tokio::select! {
+        () = interrupt => info!("interrupted"),
+        () = terminate => info!("terminated"),
+    }
 }

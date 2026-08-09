@@ -1,0 +1,107 @@
+// SPDX-FileCopyrightText: 2026 Afisharr contributors
+// SPDX-License-Identifier: AGPL-3.0-or-later
+
+//! `GET /api/stream` — the one connection.
+
+use std::{convert::Infallible, time::Duration};
+
+use axum::{
+    extract::State,
+    response::sse::{Event, KeepAlive, Sse},
+};
+use tokio_stream::{
+    Stream, StreamExt,
+    wrappers::{BroadcastStream, errors::BroadcastStreamRecvError},
+};
+
+use crate::{
+    authentication::Authenticated,
+    state::ApiState,
+    stream::{HEARTBEAT_SECONDS, Topic},
+};
+
+/// What the connection says first.
+#[derive(Debug, serde::Serialize, utoipa::ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct StreamOpened {
+    /// How often a heartbeat arrives, in seconds.
+    ///
+    /// The client derives its disconnection watchdog from this rather than
+    /// carrying a copy of the interval, so the two cannot drift apart.
+    pub heartbeat_seconds: u64,
+    /// Every topic this connection carries.
+    pub topics: Vec<Topic>,
+}
+
+/// Opens the multiplexed event stream.
+///
+/// Requires authentication, like every other route on this surface — the
+/// stream carries job progress and source health, which name the operator's
+/// libraries and integrations.
+///
+/// The stream never replays. A client that reconnects has missed events and
+/// knows it; the answer is to refetch the surfaces it feeds, which is what a
+/// fresh page load does anyway (PRD §9). Building a replay buffer would make
+/// two paths to the same state, and the one that is exercised less would be
+/// the one that is wrong (P7).
+#[utoipa::path(
+    get,
+    path = "/api/stream",
+    tag = "stream",
+    responses(
+        (status = 200, description = "The event stream, multiplexed by topic", content_type = "text/event-stream"),
+        (status = 401, description = "No accepted credential was presented", body = crate::error::Problem),
+    ),
+)]
+pub async fn stream(
+    State(state): State<ApiState>,
+    _caller: Authenticated,
+) -> Sse<impl Stream<Item = Result<Event, Infallible>>> {
+    let opened = Event::default().event(Topic::Stream.as_event_name()).data(
+        serde_json::to_string(&StreamOpened {
+            heartbeat_seconds: HEARTBEAT_SECONDS,
+            topics: vec![Topic::Stream, Topic::Jobs, Topic::Sources],
+        })
+        .unwrap_or_else(|_| String::from("{}")),
+    );
+
+    let published = BroadcastStream::new(state.stream().subscribe()).filter_map(|received| {
+        match received {
+            Ok(event) => Some(Ok(Event::default()
+                .event(event.topic.as_event_name())
+                .data(event.payload))),
+            // A lagged subscriber is told, on the stream's own topic, so the
+            // client refetches instead of quietly carrying stale numbers.
+            Err(BroadcastStreamRecvError::Lagged(_)) => Some(Ok(Event::default()
+                .event(Topic::Stream.as_event_name())
+                .data(r#"{"lagged":true}"#))),
+        }
+    });
+
+    let body = tokio_stream::once(Ok(opened)).chain(published);
+
+    Sse::new(body).keep_alive(
+        KeepAlive::new()
+            .interval(Duration::from_secs(HEARTBEAT_SECONDS))
+            .text("heartbeat"),
+    )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_opening_event_names_every_topic_and_the_heartbeat() {
+        let opened = StreamOpened {
+            heartbeat_seconds: HEARTBEAT_SECONDS,
+            topics: vec![Topic::Stream, Topic::Jobs, Topic::Sources],
+        };
+        let encoded = serde_json::to_value(&opened).expect("serialises");
+        assert_eq!(encoded["heartbeatSeconds"], 15);
+        assert_eq!(
+            encoded["topics"],
+            serde_json::json!(["stream", "jobs", "sources"])
+        );
+    }
+}

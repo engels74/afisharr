@@ -3,6 +3,8 @@
 
 //! The boot sequence itself.
 
+use std::sync::Arc;
+
 use afisharr_core::{
     backup,
     identifier::Id,
@@ -27,13 +29,20 @@ use crate::{
 /// Everything a started instance holds.
 pub struct Booted {
     /// The open database.
-    pub database: Database,
+    ///
+    /// Behind an `Arc` because the HTTP surface holds one too, and the write
+    /// actor inside it must be the same actor (D-024) rather than a second one
+    /// opened alongside.
+    pub database: Arc<Database>,
     /// This installation's identity.
     pub instance: Instance,
     /// The effective settings document.
     pub settings: Settings,
     /// The key that seals every credential.
-    pub secret_key: SecretKey,
+    ///
+    /// Behind an `Arc` because `SecretKey` is deliberately not `Clone` and the
+    /// HTTP surface needs the same key, not a copy of it.
+    pub secret_key: Arc<SecretKey>,
 }
 
 impl std::fmt::Debug for Booted {
@@ -94,10 +103,10 @@ pub async fn boot(paths: &DataPaths, configured: SettingsBody) -> Result<Booted>
     );
 
     Ok(Booted {
-        database,
+        database: Arc::new(database),
         instance,
         settings,
-        secret_key,
+        secret_key: Arc::new(secret_key),
     })
 }
 

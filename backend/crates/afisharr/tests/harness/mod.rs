@@ -13,9 +13,11 @@
 )]
 
 mod fixtures;
+mod running_instance;
 mod temp_instance;
 
 pub use fixtures::{
     InsertIdMapping, InsertLifecycleSubject, InsertPlexPrincipal, InsertVisibility, seed_library,
 };
+pub use running_instance::RunningInstance;
 pub use temp_instance::TempInstance;

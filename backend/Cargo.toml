@@ -25,8 +25,15 @@ anyhow = "1.0"
 argon2 = "0.5.3"
 axum = "0.8.9"
 axum-extra = { version = "0.12.6", features = ["cookie"] }
+base64 = "0.23.1"
 chacha20poly1305 = "0.11"
+# The cookie crate axum-extra 0.12 builds on, named directly so `Max-Age` can be
+# expressed in the `time::Duration` its API takes. Pinned to the same minor
+# version: two copies in the graph would be two `Cookie` types that do not
+# convert.
+cookie = "0.18.2"
 clap = { version = "4.6", features = ["derive"] }
+futures-util = "0.3.33"
 getrandom = "0.4"
 hex = "0.4"
 ipnet = "2.12.1"
@@ -47,6 +54,7 @@ rusqlite = { version = "0.37", features = ["backup"] }
 rust-embed = { version = "8.12.0", features = ["interpolate-folder-path"] }
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.151"
+serde_urlencoded = "0.7.1"
 sha2 = "0.11"
 sqlx = { version = "0.9", default-features = false, features = [
   "macros",
@@ -58,6 +66,7 @@ subtle = "2.6.1"
 thiserror = "2.0"
 tokio = { version = "1.52", features = ["macros", "rt-multi-thread", "sync"] }
 tokio-stream = { version = "0.1.19", features = ["sync"] }
+tokio-util = { version = "0.7.19", features = ["io"] }
 toml = "1.1"
 tower = "0.5.3"
 tracing = "0.1"
