@@ -27,6 +27,13 @@ axum = "0.8.9"
 axum-extra = { version = "0.12.6", features = ["cookie"] }
 base64 = "0.23.1"
 chacha20poly1305 = "0.11"
+# The filesystem jail. `I-SEC-3` is a boundary a path string cannot hold: a
+# directory checked by path and reopened by path is two resolutions with a gap
+# between them, and anything that can write inside an enabled root can swap a
+# component in that gap. cap-std resolves every component against an open
+# directory handle instead — `openat2(RESOLVE_BENEATH)` on Linux, the same rule
+# hand-rolled on macOS and Windows — so the check and the open are one act.
+cap-std = "4.0.2"
 # The cookie crate axum-extra 0.12 builds on, named directly so `Max-Age` can be
 # expressed in the `time::Duration` its API takes. Pinned to the same minor
 # version: two copies in the graph would be two `Cookie` types that do not

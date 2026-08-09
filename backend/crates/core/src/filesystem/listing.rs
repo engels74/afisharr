@@ -3,7 +3,11 @@
 
 //! Reading one contained directory.
 
-use crate::filesystem::{Contained, ContainmentError, Root, contain};
+use std::path::{Path, PathBuf};
+
+use cap_std::fs::Metadata;
+
+use crate::filesystem::{ContainmentError, Root, contain};
 
 /// What one entry in a browsed directory is.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -31,47 +35,66 @@ pub struct Entry {
 
 /// Lists the directory `requested` names inside `root`, sorted.
 ///
-/// Every entry is re-checked through [`contain`], so a link that appeared
-/// between the directory read and this listing cannot smuggle an outside path
-/// into the result. Entries that fail the check are omitted rather than
-/// reported: the browser's job is to show what the operator may reach, and a
-/// refused entry named in the listing would disclose the link's target.
+/// The directory is opened once, through [`contain`], and every entry is then
+/// read from *that handle* — not from a path built out of its name. The
+/// difference is the whole of `I-SEC-3` under a hostile tree: a path is a
+/// question the filesystem answers again on every call, so a directory checked
+/// by path and reopened by path can be replaced in between by anything that can
+/// write inside the root, and the reopen follows the replacement out. A handle
+/// names the directory that was checked and keeps naming it.
+///
+/// An entry whose metadata cannot be read through the handle — a link out of
+/// the root is exactly this — is omitted rather than reported: the browser's
+/// job is to show what the operator may reach, and a refused entry named in the
+/// listing would disclose the link's target.
 ///
 /// # Errors
 /// Returns [`ContainmentError::Outside`] when the requested path escapes the
 /// root, and [`ContainmentError::Unreadable`] when the resolved directory
 /// cannot be read.
 pub async fn list(root: &Root, requested: &str) -> Result<Vec<Entry>, ContainmentError> {
-    let directory = contain(root, std::path::Path::new(requested)).await?;
+    let root_label = root.label.clone();
+    let root = root.clone();
+    let requested = PathBuf::from(requested);
 
-    let mut reader = tokio::fs::read_dir(directory.absolute())
+    // Off the runtime's workers: cap-std is synchronous, and a directory read
+    // on a network mount can block for a long time on a thread that has other
+    // requests waiting on it.
+    tokio::task::spawn_blocking(move || read(&root, &requested))
         .await
         .map_err(|source| ContainmentError::Unreadable {
-            root_label: root.label.clone(),
-            source,
-        })?;
+            root_label,
+            source: std::io::Error::other(source),
+        })?
+}
+
+fn read(root: &Root, requested: &Path) -> Result<Vec<Entry>, ContainmentError> {
+    let contained = contain(root, requested)?;
+    let directory = contained.open_directory()?;
+    let base = contained.relative().to_path_buf();
+
+    let unreadable = |source: std::io::Error| ContainmentError::Unreadable {
+        root_label: root.label.clone(),
+        source,
+    };
 
     let mut entries = Vec::new();
-    while let Some(entry) =
-        reader
-            .next_entry()
-            .await
-            .map_err(|source| ContainmentError::Unreadable {
-                root_label: root.label.clone(),
-                source,
-            })?
-    {
+    for entry in directory.entries().map_err(unreadable)? {
+        let entry = entry.map_err(unreadable)?;
         let Some(name) = entry.file_name().to_str().map(str::to_owned) else {
             // A name that is not UTF-8 cannot be round-tripped through the
             // JSON the interface reads, and offering one the caller cannot
             // send back is worse than omitting it.
             continue;
         };
-        let child = directory.relative().join(&name);
-        let Ok(contained) = contain(root, &child).await else {
+        let Ok(metadata) = directory.metadata(&name) else {
+            // A link out of the root cannot be followed from this handle at
+            // all. Omitted rather than reported: the browser's job is to show
+            // what the operator may reach, and an entry named beside a refusal
+            // would disclose that its target is outside.
             continue;
         };
-        entries.push(describe(&name, &contained).await);
+        entries.push(describe(&base, name, &metadata));
     }
 
     entries.sort_by(|left, right| {
@@ -82,18 +105,21 @@ pub async fn list(root: &Root, requested: &str) -> Result<Vec<Entry>, Containmen
     Ok(entries)
 }
 
-async fn describe(name: &str, contained: &Contained) -> Entry {
-    let metadata = tokio::fs::metadata(contained.absolute()).await.ok();
-    let kind = match metadata.as_ref().map(std::fs::Metadata::file_type) {
-        Some(file_type) if file_type.is_dir() => EntryKind::Directory,
-        Some(file_type) if file_type.is_file() => EntryKind::File,
-        _ => EntryKind::Other,
+/// Describes one entry from metadata already read through the directory's own
+/// handle.
+fn describe(base: &Path, name: String, metadata: &Metadata) -> Entry {
+    let kind = if metadata.is_dir() {
+        EntryKind::Directory
+    } else if metadata.is_file() {
+        EntryKind::File
+    } else {
+        EntryKind::Other
     };
     Entry {
-        name: name.to_owned(),
-        relative_path: contained.relative().to_string_lossy().into_owned(),
+        relative_path: base.join(&name).to_string_lossy().into_owned(),
+        name,
         size_bytes: match kind {
-            EntryKind::File => metadata.map(|metadata| metadata.len()),
+            EntryKind::File => Some(metadata.len()),
             EntryKind::Directory | EntryKind::Other => None,
         },
         kind,
@@ -116,16 +142,24 @@ mod tests {
 
     use super::*;
 
+    fn root(dir: &TempDir) -> Root {
+        Root::new(
+            "01JROOT0000000000000000000",
+            "assets",
+            dir.path().join("assets"),
+        )
+    }
+
     #[tokio::test]
     async fn directories_sort_before_files_and_names_sort_within_each() {
         let dir = TempDir::new().unwrap();
-        let root = dir.path().join("assets");
-        tokio::fs::create_dir_all(root.join("zed")).await.unwrap();
-        tokio::fs::create_dir_all(root.join("alpha")).await.unwrap();
-        tokio::fs::write(root.join("b.png"), b"xx").await.unwrap();
-        tokio::fs::write(root.join("a.png"), b"x").await.unwrap();
+        let assets = dir.path().join("assets");
+        std::fs::create_dir_all(assets.join("zed")).unwrap();
+        std::fs::create_dir_all(assets.join("alpha")).unwrap();
+        std::fs::write(assets.join("b.png"), b"xx").unwrap();
+        std::fs::write(assets.join("a.png"), b"x").unwrap();
 
-        let entries = list(&Root::new("assets", root), "").await.unwrap();
+        let entries = list(&root(&dir), "").await.unwrap();
         let names: Vec<&str> = entries.iter().map(|entry| entry.name.as_str()).collect();
         assert_eq!(names, ["alpha", "zed", "a.png", "b.png"]);
         assert_eq!(entries[2].size_bytes, Some(1));
@@ -133,32 +167,83 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn an_entry_reports_the_path_a_caller_asks_for_next() {
+        let dir = TempDir::new().unwrap();
+        let assets = dir.path().join("assets");
+        std::fs::create_dir_all(assets.join("posters")).unwrap();
+        std::fs::write(assets.join("posters").join("a.png"), b"x").unwrap();
+
+        let entries = list(&root(&dir), "posters").await.unwrap();
+        assert_eq!(entries[0].relative_path, "posters/a.png");
+    }
+
+    #[tokio::test]
     async fn a_link_out_of_the_root_is_omitted_rather_than_named() {
         let dir = TempDir::new().unwrap();
-        let root = dir.path().join("assets");
-        tokio::fs::create_dir_all(&root).await.unwrap();
-        tokio::fs::write(dir.path().join("secret.txt"), b"x")
-            .await
-            .unwrap();
+        let assets = dir.path().join("assets");
+        std::fs::create_dir_all(&assets).unwrap();
+        std::fs::write(dir.path().join("secret.txt"), b"x").unwrap();
         #[cfg(unix)]
-        std::os::unix::fs::symlink(dir.path().join("secret.txt"), root.join("escape")).unwrap();
+        std::os::unix::fs::symlink(dir.path().join("secret.txt"), assets.join("escape")).unwrap();
         #[cfg(windows)]
-        std::os::windows::fs::symlink_file(dir.path().join("secret.txt"), root.join("escape"))
+        std::os::windows::fs::symlink_file(dir.path().join("secret.txt"), assets.join("escape"))
             .unwrap();
 
-        let entries = list(&Root::new("assets", root), "").await.unwrap();
+        let entries = list(&root(&dir), "").await.unwrap();
         assert!(entries.is_empty(), "{entries:?}");
     }
 
     #[tokio::test]
     async fn listing_a_path_outside_the_root_is_refused() {
         let dir = TempDir::new().unwrap();
-        let root = dir.path().join("assets");
-        tokio::fs::create_dir_all(&root).await.unwrap();
+        std::fs::create_dir_all(dir.path().join("assets")).unwrap();
 
-        let error = list(&Root::new("assets", root), "..")
+        let error = list(&root(&dir), "..")
             .await
             .expect_err("traversal must be refused");
         assert_eq!(error.root_label(), Some("assets"));
+    }
+
+    #[tokio::test]
+    async fn a_directory_replaced_after_the_check_is_not_followed_out_of_the_root() {
+        // The race the handle closes. `swap` is checked as a directory inside
+        // the root, and then becomes a link to somewhere outside it before the
+        // listing reads anything. A path-based reopen follows the link; a
+        // handle keeps naming the directory that was checked.
+        let dir = TempDir::new().unwrap();
+        let assets = dir.path().join("assets");
+        std::fs::create_dir_all(assets.join("swap")).unwrap();
+        std::fs::write(assets.join("swap").join("inside.png"), b"x").unwrap();
+        std::fs::create_dir_all(dir.path().join("elsewhere")).unwrap();
+        std::fs::write(dir.path().join("elsewhere").join("secret.txt"), b"x").unwrap();
+
+        let root = root(&dir);
+        let contained = contain(&root, Path::new("swap")).unwrap();
+        let directory = contained.open_directory().unwrap();
+
+        // Moved aside rather than deleted, so the directory that was checked
+        // still holds what it held: the question is which of the two the
+        // listing reads, not whether either still exists.
+        std::fs::rename(assets.join("swap"), dir.path().join("moved")).unwrap();
+        #[cfg(unix)]
+        std::os::unix::fs::symlink(dir.path().join("elsewhere"), assets.join("swap")).unwrap();
+        #[cfg(windows)]
+        std::os::windows::fs::symlink_dir(dir.path().join("elsewhere"), assets.join("swap"))
+            .unwrap();
+
+        let names: Vec<String> = directory
+            .entries()
+            .unwrap()
+            .filter_map(|entry| Some(entry.ok()?.file_name().to_string_lossy().into_owned()))
+            .collect();
+        assert_eq!(
+            names,
+            vec!["inside.png".to_owned()],
+            "the handle must still name the directory that was checked"
+        );
+        assert!(
+            !names.contains(&"secret.txt".to_owned()),
+            "the replacement must not have been followed out of the root"
+        );
     }
 }

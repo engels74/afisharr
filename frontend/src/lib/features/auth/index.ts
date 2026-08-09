@@ -14,6 +14,6 @@ export {
 	signOut,
 	startPlexPin,
 } from './auth-client';
-export type { SessionState } from './session.svelte';
-export { Session } from './session.svelte';
+export type { Session, SessionState } from './session.svelte';
+export { createSession } from './session.svelte';
 export { LoginForm, PlexPinPanel };

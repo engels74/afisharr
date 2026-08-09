@@ -13,13 +13,16 @@
 use afisharr_core::{identifier::Id, plex_pin};
 use afisharr_plex::pin::{AuthorizationUrl, Mode, PinError};
 use axum::{Json, extract::State};
+use axum_extra::extract::CookieJar;
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 
 use crate::{
+    authentication::session,
     error::{AppError, AppResult, ErrorCode, JsonBody, Problem},
     proxy::ClientContext,
     ratelimit::{Bucket, Decision},
+    security::{PLEX_PIN_COOKIE, PLEX_PIN_COOKIE_PATH, set},
     state::ApiState,
 };
 
@@ -64,8 +67,9 @@ pub struct PinStarted {
 pub async fn start_plex_pin(
     State(state): State<ApiState>,
     client: ClientContext,
+    jar: CookieJar,
     JsonBody(request): JsonBody<StartPin>,
-) -> AppResult<Json<PinStarted>> {
+) -> AppResult<(CookieJar, Json<PinStarted>)> {
     // A pin creation reaches plex.tv on the caller's behalf, so it counts
     // against the provider bucket rather than the general API one (§21.4.3).
     if let Decision::Refused {
@@ -121,12 +125,31 @@ pub async fn start_plex_pin(
         _ => None,
     };
 
-    Ok(Json(PinStarted {
-        id: stored.id,
-        code: stored.code,
-        authorization_url,
-        expires_at: stored.expires_at.as_millis(),
-    }))
+    // Two cookies, and neither of them signs anybody in. The first binds this
+    // attempt to this browser, so completing it is something only the browser
+    // that started it can do; the second is the token that completion has to
+    // echo, because an attempt cookie is an ambient credential and every
+    // ambient credential is judged (PRD §21.4.2).
+    let jar = jar
+        .add(set(
+            PLEX_PIN_COOKIE,
+            stored.id.clone(),
+            PLEX_PIN_COOKIE_PATH,
+            now.millis_until(stored.expires_at) / 1000,
+            client.scheme,
+            true,
+        ))
+        .add(session::csrf_cookie(client.scheme));
+
+    Ok((
+        jar,
+        Json(PinStarted {
+            id: stored.id,
+            code: stored.code,
+            authorization_url,
+            expires_at: stored.expires_at.as_millis(),
+        }),
+    ))
 }
 
 /// Renders a plex.tv failure in the operator's terms.

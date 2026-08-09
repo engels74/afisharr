@@ -15,6 +15,7 @@
 //! HTTPS (which decides `Strict-Transport-Security` and the `Secure` cookie
 //! flag).
 
+mod edge;
 mod peer;
 mod trusted;
 

@@ -11,6 +11,23 @@ use crate::proxy::Scheme;
 /// The session cookie.
 pub const SESSION_COOKIE: &str = "afisharr_session";
 
+/// The cookie that binds a Plex sign-in attempt to the browser that started it.
+///
+/// A pin identifier is a public string: it carries no credential, it is handed
+/// to the operator to read out, and the account that started the exchange knows
+/// it. Completing the exchange, however, mints a session — so without something
+/// that only the starting browser holds, anybody who has seen an identifier can
+/// have a *different* browser complete it and be handed the resulting cookie.
+/// This is that something, and it is what makes the completing request one the
+/// CSRF layer judges rather than one it waves through as uncredentialled.
+pub const PLEX_PIN_COOKIE: &str = "afisharr_plex_pin";
+
+/// The path the Plex sign-in cookie is scoped to.
+///
+/// Narrow on purpose: it authorises exactly one exchange, and no other route
+/// has any use for it.
+pub const PLEX_PIN_COOKIE_PATH: &str = "/api/auth/plex/pin";
+
 /// The CSRF token cookie.
 ///
 /// Readable by script, unlike the other two: the double-submit check needs the

@@ -110,10 +110,15 @@
 			}
 			if (result.value.state === 'authorized') {
 				clearInterval(timer);
+				// The privilege the session actually carries, and never an
+				// assumed one: a linked Plex account that administers nothing
+				// gets `is_admin = false`, and recording it as an
+				// administrator routes the operator into admin-only pages
+				// that then answer 403 (`I-UX-2`).
 				onsignedin({
 					userId: result.value.userId,
 					username: result.value.username,
-					isAdmin: true,
+					isAdmin: result.value.isAdmin,
 				});
 			}
 			if (result.value.state === 'expired') {

@@ -98,9 +98,11 @@ pub async fn log_in(
     // bucket, so five failures is five failures however many source addresses
     // they arrive from. Counting it per address would hand an attacker who can
     // rotate their address the whole allowance again, every time (PRD §21.4.3).
-    let account_bucket = Bucket::LoginAccount {
-        username: credentials.username.clone(),
-    };
+    //
+    // Built through the constructor rather than the variant, because the name
+    // is the caller's to choose and the constructor is where its length stops
+    // being the caller's to choose.
+    let account_bucket = Bucket::login_account(&credentials.username);
     refuse_if_limited(&state, &account_bucket, client)?;
     refuse_if_limited(&state, &Bucket::LoginAddress, client)?;
 

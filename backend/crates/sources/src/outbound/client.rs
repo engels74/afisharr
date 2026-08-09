@@ -125,6 +125,7 @@ impl OutboundClient {
             request = request.body(body);
         }
 
+        let timeout_millis = u64::try_from(effective.as_duration().as_millis()).unwrap_or(u64::MAX);
         let started = Instant::now();
         let outcome = request.send().await;
         let elapsed = started.elapsed();
@@ -132,8 +133,6 @@ impl OutboundClient {
         let response = match outcome {
             Ok(response) => response,
             Err(source) => {
-                let timeout_millis =
-                    u64::try_from(effective.as_duration().as_millis()).unwrap_or(u64::MAX);
                 warn!(
                     %host,
                     %method,
@@ -150,7 +149,30 @@ impl OutboundClient {
         };
 
         let status = response.status();
-        let body = response.text().await.unwrap_or_default();
+        // Headers are not an answer. A connection that drops or times out
+        // while the body streams has told us nothing, and turning that into an
+        // empty body would hand the adapter a "malformed response" it cannot
+        // act on while discarding the transport failure that actually
+        // happened — the answered-versus-unreachable distinction `I-SRC-1` is
+        // built on, collapsed exactly where it matters (P1).
+        let body = match response.text().await {
+            Ok(body) => body,
+            Err(source) => {
+                warn!(
+                    %host,
+                    %method,
+                    status = status.as_u16(),
+                    elapsed_ms = started.elapsed().as_millis(),
+                    timeout_ms = timeout_millis,
+                    "outbound response body did not arrive"
+                );
+                return Err(OutboundError::Unreachable {
+                    host,
+                    timeout_millis,
+                    source,
+                });
+            }
+        };
         info!(
             %host,
             %method,
@@ -229,5 +251,66 @@ mod tests {
             .json::<serde_json::Value>("plex.tv")
             .expect_err("a malformed body must not parse");
         assert_eq!(error.host(), "plex.tv");
+    }
+
+    /// A server that promises a body in its headers and then goes away.
+    ///
+    /// Not a hypothetical shape: an upstream restarted mid-response, or a
+    /// proxy that gives up on a slow origin, produces exactly this — a status
+    /// line, a `Content-Length`, and a connection that stops.
+    async fn a_server_that_stops_mid_body() -> (String, tokio::task::JoinHandle<()>) {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("a port must be bindable");
+        let address = listener.local_addr().expect("the port must be readable");
+        let serving = tokio::spawn(async move {
+            let Ok((mut socket, _)) = listener.accept().await else {
+                return;
+            };
+            let mut request = [0_u8; 1024];
+            let _ = socket.read(&mut request).await;
+            let _ = socket
+                .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 64\r\n\r\nhalf")
+                .await;
+            // Dropped owing sixty more bytes.
+        });
+        (format!("http://{address}/"), serving)
+    }
+
+    #[tokio::test]
+    async fn a_body_that_stops_mid_stream_is_unreachable_and_not_an_empty_success() {
+        let (url, serving) = a_server_that_stops_mid_body().await;
+        let client = OutboundClient::new("afisharr/test").expect("the transport must build");
+
+        let error = client
+            .send(
+                Method::GET,
+                &Url::parse(&url).expect("a valid URL"),
+                &[],
+                None,
+                Deadline::DEFAULT,
+            )
+            .await
+            .expect_err("a body that never arrived must not read as a successful empty one");
+
+        // The distinction the whole error type exists for: this host did not
+        // answer, and an adapter that treated it as an empty answer would
+        // report "nothing there" about a service it never heard from.
+        assert!(
+            !error.service_answered(),
+            "a dropped body is not an answer: {error}"
+        );
+        assert!(
+            matches!(error, OutboundError::Unreachable { .. }),
+            "expected an unreachable host, got {error}"
+        );
+        assert!(
+            std::error::Error::source(&error).is_some(),
+            "the transport failure must survive as the source: {error}"
+        );
+
+        serving.abort();
     }
 }

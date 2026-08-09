@@ -7,13 +7,13 @@ use std::net::{IpAddr, SocketAddr};
 
 use axum::http::HeaderMap;
 
-use crate::proxy::TrustedProxies;
+use crate::proxy::{TrustedProxies, edge::Edge};
 
 /// `X-Forwarded-For`, honoured only from a trusted peer.
-const FORWARDED_FOR: &str = "x-forwarded-for";
+pub(super) const FORWARDED_FOR: &str = "x-forwarded-for";
 
 /// `X-Forwarded-Proto`, honoured only from a trusted peer.
-const FORWARDED_PROTO: &str = "x-forwarded-proto";
+pub(super) const FORWARDED_PROTO: &str = "x-forwarded-proto";
 
 /// How a request reached this instance.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -62,66 +62,15 @@ impl ClientContext {
             };
         }
 
+        // One walk, two facts. The chain says who the client is *and* how much
+        // of every forwarded header the trusted edge wrote; deriving the
+        // scheme from a second, independent rule would be two chances to
+        // disagree about one chain (P7).
+        let edge = Edge::resolve(headers, trusted);
         Self {
-            address: forwarded_for(headers, trusted).unwrap_or(peer_address),
-            scheme: forwarded_scheme(headers),
+            address: edge.address.unwrap_or(peer_address),
+            scheme: edge.scheme(headers),
         }
-    }
-}
-
-/// The client address in `X-Forwarded-For`, read from the trusted edge.
-///
-/// Read right to left, never left to right. The leftmost entry is whatever the
-/// client wrote, and a trusted proxy that *appends* — which is what every
-/// mainstream proxy does by default, including nginx's `proxy_add_x_forwarded_for`
-/// — leaves the forged entry sitting in front of the real one. Trusting the
-/// leftmost therefore hands the caller the address every limit is counted
-/// against and every audit line records, which is `I-SEC-1` failing while
-/// reporting that it works.
-///
-/// So: walk from the right, discarding entries that are themselves configured
-/// proxies, and stop at the first one that is not. That entry is the address
-/// the last trustworthy hop actually saw. An entry that is not an address at
-/// all ends the walk with nothing — the chain cannot be shown to be trusted
-/// past a value that cannot be compared, and the peer's own address is the safe
-/// answer (P2).
-fn forwarded_for(headers: &HeaderMap, trusted: &TrustedProxies) -> Option<IpAddr> {
-    // Every value, in order: a chain can arrive as one comma-joined header or
-    // as several, and a proxy that appends a second header line is appending to
-    // the same list.
-    let chain: Vec<&str> = headers
-        .get_all(FORWARDED_FOR)
-        .iter()
-        .filter_map(|value| value.to_str().ok())
-        .flat_map(|value| value.split(','))
-        .map(str::trim)
-        .filter(|entry| !entry.is_empty())
-        .collect();
-
-    let mut leftmost = None;
-    for entry in chain.iter().rev() {
-        let address = entry.parse::<IpAddr>().ok()?;
-        if !trusted.trusts(address) {
-            return Some(address);
-        }
-        leftmost = Some(address);
-    }
-    // Every hop in the chain is a proxy this instance trusts, so the leftmost
-    // of them is as close to the client as the header goes.
-    leftmost
-}
-
-fn forwarded_scheme(headers: &HeaderMap) -> Scheme {
-    let claimed = headers
-        .get(FORWARDED_PROTO)
-        .and_then(|value| value.to_str().ok())
-        .and_then(|value| value.split(',').next())
-        .map(str::trim)
-        .unwrap_or_default();
-    if claimed.eq_ignore_ascii_case("https") {
-        Scheme::Https
-    } else {
-        Scheme::Http
     }
 }
 

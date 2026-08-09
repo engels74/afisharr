@@ -16,6 +16,7 @@ authors.workspace = true
 [dependencies]
 argon2.workspace = true
 base64.workspace = true
+cap-std.workspace = true
 chacha20poly1305 = { workspace = true }
 getrandom.workspace = true
 hex.workspace = true
@@ -26,10 +27,13 @@ sha2.workspace = true
 sqlx = { workspace = true }
 subtle.workspace = true
 thiserror = { workspace = true }
-# `fs` is used directly by `backup` and `storage`. Declared rather than taken
-# from sqlx's `runtime-tokio`, which enables it today: a crate that compiles on
-# a feature it never asked for breaks when the dependency that supplied it moves.
-tokio = { workspace = true, features = ["fs"] }
+# `fs` is used directly by `backup` and `storage`, and `rt` by the filesystem
+# browser: cap-std is synchronous, so a directory read — which on a network
+# mount can block for a long time — belongs on the blocking pool rather than on
+# a runtime worker. Declared rather than taken from sqlx's `runtime-tokio`,
+# which enables both today: a crate that compiles on a feature it never asked
+# for breaks when the dependency that supplied it moves.
+tokio = { workspace = true, features = ["fs", "rt"] }
 tracing = { workspace = true }
 ulid = { workspace = true }
 

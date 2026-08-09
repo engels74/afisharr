@@ -59,18 +59,46 @@ export function isActive(destination: Destination, pathname: string): boolean {
 	);
 }
 
+/** Where the sign-in journey lives. */
+export const LOGIN = '/login';
+
+/** Where the first-run wizard lives. */
+export const SETUP = '/setup';
+
+/**
+ * Whether `pathname` is one of the journeys that renders without the shell.
+ *
+ * Setup and sign-in are outside it: neither has a navigation bar to offer,
+ * because nothing behind it is reachable yet. Stated once, because the layout
+ * that decides what to render and the guard that decides what to demand have
+ * to agree — a guard that thought `/login` needed a session would bounce an
+ * operator off the page they were signing in on (P7).
+ */
+export function isBareRoute(pathname: string): boolean {
+	return (
+		pathname === SETUP || pathname.startsWith(`${SETUP}/`) || pathname === LOGIN
+	);
+}
+
 /**
  * Where a bare visit to `/` lands.
  *
- * An unclaimed instance boots to the claim page and nowhere else (D-045): the
- * six destinations behind it are refused anyway, and sending an operator to a
- * dashboard that answers `setupRequired` teaches them the product is broken
- * rather than unconfigured.
+ * Three answers, not two. An unclaimed instance boots to the claim page and
+ * nowhere else (D-045): the six destinations behind it are refused anyway, and
+ * sending an operator to a dashboard that answers `setupRequired` teaches them
+ * the product is broken rather than unconfigured. A *claimed* instance says
+ * nothing about who is asking — `setupCompleted` is true for every visitor,
+ * signed in or not — so landing on the dashboard on the strength of it puts a
+ * signed-out operator inside a shell whose every request is refused, watching
+ * a stream that reconnects and fails, with no sign-in page in sight.
  *
- * A function rather than a branch inside the route, because "where does a
- * fresh instance land" is the question Task 1.11 is answerable on, and a
- * branch inside a component is a question nothing can ask.
+ * A function rather than a branch inside the route, because "where does this
+ * visit land" is a question that has to be answerable on its own, and a branch
+ * inside a component is a question nothing can ask.
  */
-export function landingFor(setupCompleted: boolean): string {
-	return setupCompleted ? '/dashboard' : '/setup';
+export function landingFor(setupCompleted: boolean, signedIn: boolean): string {
+	if (!setupCompleted) {
+		return SETUP;
+	}
+	return signedIn ? '/dashboard' : LOGIN;
 }

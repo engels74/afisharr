@@ -25,7 +25,32 @@ pub enum Bucket {
     Provider,
 }
 
+/// The longest account name a limiter key keeps.
+///
+/// The bucket is keyed on the name the caller sent, and a caller chooses both
+/// its content and its length. Without a bound, every sign-in attempt parks a
+/// string of the caller's choosing in a map that lives as long as the process.
+/// The bound is far longer than any name this instance will ever store, so two
+/// real accounts cannot collide here; a name past it cannot match an account at
+/// all, and counting several of those together only makes the limit stricter.
+const KEYED_USERNAME_BYTES: usize = 128;
+
 impl Bucket {
+    /// The failed-sign-in bucket for `username`.
+    ///
+    /// The one way this bucket is built, so the bound above is not something a
+    /// call site has to remember (P7).
+    #[must_use]
+    pub fn login_account(username: &str) -> Self {
+        let mut end = username.len().min(KEYED_USERNAME_BYTES);
+        while end > 0 && !username.is_char_boundary(end) {
+            end -= 1;
+        }
+        Self::LoginAccount {
+            username: username[..end].to_owned(),
+        }
+    }
+
     /// The limit this bucket is counted against.
     #[must_use]
     pub const fn policy(&self) -> Policy {
@@ -134,6 +159,44 @@ impl Lockout {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The name a login bucket ended up keyed on.
+    fn keyed_name(bucket: &Bucket) -> String {
+        match bucket {
+            Bucket::LoginAccount { username } => username.clone(),
+            _ => panic!("the constructor must build its own variant"),
+        }
+    }
+
+    #[test]
+    fn a_name_within_the_bound_is_kept_whole() {
+        assert_eq!(keyed_name(&Bucket::login_account("operator")), "operator");
+    }
+
+    #[test]
+    fn an_oversized_name_is_bounded_rather_than_kept() {
+        let keyed = keyed_name(&Bucket::login_account(&"a".repeat(100_000)));
+        assert_eq!(keyed.len(), KEYED_USERNAME_BYTES);
+    }
+
+    #[test]
+    fn a_bounded_name_is_cut_on_a_character_boundary() {
+        // Cutting mid-codepoint would panic on the slice, which is the sign-in
+        // route falling over on a name somebody can actually type.
+        let keyed = keyed_name(&Bucket::login_account(&"é".repeat(1_000)));
+        assert!(keyed.len() <= KEYED_USERNAME_BYTES);
+        assert!(keyed.chars().all(|character| character == 'é'));
+    }
+
+    #[test]
+    fn two_names_that_differ_within_the_bound_stay_separate_buckets() {
+        // The bound must not merge accounts a person could really hold: two
+        // failures against different names are two counts, not one.
+        assert_ne!(
+            Bucket::login_account("operator"),
+            Bucket::login_account("operator2")
+        );
+    }
 
     #[test]
     fn the_limit_table_matches_the_one_in_the_requirements() {

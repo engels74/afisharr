@@ -54,7 +54,12 @@ export interface PinStarted {
 /** What one poll of a Plex sign-in found. */
 export type PinState =
 	| { state: 'pending' }
-	| { state: 'authorized'; userId: string; username: string }
+	| {
+			state: 'authorized';
+			userId: string;
+			username: string;
+			isAdmin: boolean;
+	  }
 	| { state: 'expired' };
 
 /** Starts a Plex sign-in, by code or by hosted sign-in. */
@@ -70,10 +75,19 @@ export async function startPlexPin(
 		: { outcome: 'refused', problem: error as Problem };
 }
 
-/** Polls one Plex sign-in. */
+/**
+ * Asks whether one Plex sign-in has finished.
+ *
+ * A `POST`, because of what the answer can do: the call that finds the
+ * exchange complete consumes it, stores a token, and is handed a session
+ * cookie. A `GET` is what a cross-site navigation and a prefetch can reach, and
+ * the API's cross-site check exempts every safe method, so the completion has
+ * to be a write for the check to apply to it at all.
+ */
 export async function pollPlexPin(id: string): Promise<AuthResult<PinState>> {
-	const { data, error } = await api.GET('/api/auth/plex/pin/{id}', {
+	const { data, error } = await api.POST('/api/auth/plex/pin/{id}', {
 		params: { path: { id } },
+		headers: csrfHeaders(),
 	});
 	return data
 		? { outcome: 'ok', value: data as PinState }

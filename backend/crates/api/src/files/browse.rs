@@ -25,7 +25,7 @@ use crate::{
 #[derive(Debug, Deserialize, IntoParams)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct BrowseQuery {
-    /// The operator's label for the root to walk.
+    /// The identifier of the root to walk.
     pub root: String,
     /// The path inside the root. Empty means the root itself.
     #[serde(default)]
@@ -36,7 +36,13 @@ pub struct BrowseQuery {
 #[derive(Debug, Serialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct RootView {
-    /// The label the browser addresses it by.
+    /// The identifier the browser addresses it by.
+    ///
+    /// The row's own key rather than the label: two roots of one purpose can
+    /// share a final directory name, so a label is allowed to collide and
+    /// addressing by it would make the second of them unreachable.
+    pub id: String,
+    /// The operator's name for it, which is what a refusal reads out.
     pub label: String,
 }
 
@@ -98,6 +104,7 @@ pub async fn roots(State(state): State<ApiState>, _caller: Administrator) -> Jso
             .asset_roots()
             .iter()
             .map(|root| RootView {
+                id: root.id.clone(),
                 label: root.label.clone(),
             })
             .collect(),
@@ -128,7 +135,7 @@ pub async fn browse(
     let root = state
         .asset_roots()
         .iter()
-        .find(|root| root.label == query.root)
+        .find(|root| root.id == query.root)
         .ok_or_else(|| {
             AppError::new(
                 Problem::new(

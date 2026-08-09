@@ -11,18 +11,10 @@
 mod harness;
 
 use afisharr_core::{accounts, storage::WriteOperation};
-use harness::{PlexTvStub, RunningInstance, TempInstance, Wizard};
-use reqwest::{Client, StatusCode};
+use harness::{Attempt, CSRF_HEADER, PlexTvStub, RunningInstance, TempInstance, Wizard, browser};
+use reqwest::StatusCode;
 
 const PASSWORD: &str = "correct horse battery staple";
-
-fn browser() -> Client {
-    Client::builder()
-        .cookie_store(true)
-        .redirect(reqwest::redirect::Policy::none())
-        .build()
-        .expect("the test client must build")
-}
 
 /// A configured instance whose Plex client points at `stub`.
 async fn configured(instance: &TempInstance, stub: &PlexTvStub) -> RunningInstance {
@@ -67,46 +59,25 @@ async fn a_completed_pin_flow_produces_a_working_session() {
     let running = configured(&instance, &stub).await;
     link_plex_account(&running, 4242).await;
 
-    let client = browser();
-    let started: serde_json::Value = client
-        .post(format!("{}/api/auth/plex/pin", running.base_url))
-        .json(&serde_json::json!({ "oauth": false }))
-        .send()
-        .await
-        .expect("the start route must answer")
-        .json()
-        .await
-        .expect("a JSON body");
-    let attempt = started["id"].as_str().expect("an attempt id").to_owned();
-    assert_eq!(started["code"], "wxyz");
+    let attempt = Attempt::start(&running, false).await;
+    assert_eq!(attempt.started["code"], "wxyz");
 
     // Not authorised yet: the answer is pending, not expired. Folding the two
     // would abandon a flow the operator is halfway through (P1).
-    let pending: serde_json::Value = client
-        .get(format!("{}/api/auth/plex/pin/{attempt}", running.base_url))
-        .send()
-        .await
-        .expect("the poll route must answer")
-        .json()
-        .await
-        .expect("a JSON body");
+    let pending = attempt.poll_body(&running).await;
     assert_eq!(pending["state"], "pending");
 
     stub.authorize();
 
-    let authorized: serde_json::Value = client
-        .get(format!("{}/api/auth/plex/pin/{attempt}", running.base_url))
-        .send()
-        .await
-        .expect("the poll route must answer")
-        .json()
-        .await
-        .expect("a JSON body");
+    let authorized = attempt.poll_body(&running).await;
     assert_eq!(authorized["state"], "authorized");
     assert_eq!(authorized["username"], "operator-on-plex");
+    // The privilege the session actually carries, not an assumed one.
+    assert_eq!(authorized["isAdmin"], true);
 
     // The session works: this is the whole claim.
-    let session = client
+    let session = attempt
+        .client
         .get(format!("{}/api/auth/session", running.base_url))
         .send()
         .await
@@ -137,21 +108,9 @@ async fn the_oauth_variant_shares_the_flow_and_adds_a_sign_in_url() {
     let running = configured(&instance, &stub).await;
     link_plex_account(&running, 4242).await;
 
-    let client = browser();
-    let started: serde_json::Value = client
-        .post(format!("{}/api/auth/plex/pin", running.base_url))
-        .json(&serde_json::json!({
-            "oauth": true,
-            "forwardUrl": "https://afisharr.example/login",
-        }))
-        .send()
-        .await
-        .expect("the start route must answer")
-        .json()
-        .await
-        .expect("a JSON body");
+    let attempt = Attempt::start(&running, true).await;
 
-    let url = started["authorizationUrl"]
+    let url = attempt.started["authorizationUrl"]
         .as_str()
         .expect("the OAuth variant carries a sign-in URL");
     assert!(url.starts_with("https://app.plex.tv/auth#"), "{url}");
@@ -160,15 +119,7 @@ async fn the_oauth_variant_shares_the_flow_and_adds_a_sign_in_url() {
     // Same polling machinery: the only thing the variant changed is what the
     // operator is shown.
     stub.authorize();
-    let attempt = started["id"].as_str().expect("an attempt id");
-    let authorized: serde_json::Value = client
-        .get(format!("{}/api/auth/plex/pin/{attempt}", running.base_url))
-        .send()
-        .await
-        .expect("the poll route must answer")
-        .json()
-        .await
-        .expect("a JSON body");
+    let authorized = attempt.poll_body(&running).await;
     assert_eq!(authorized["state"], "authorized");
 
     running.stop().await;
@@ -220,29 +171,16 @@ async fn an_unlinked_plex_account_signs_nobody_in_and_stores_nothing() {
     let running = configured(&instance, &stub).await;
     // Deliberately not linked.
 
-    let client = browser();
-    let started: serde_json::Value = client
-        .post(format!("{}/api/auth/plex/pin", running.base_url))
-        .json(&serde_json::json!({ "oauth": false }))
-        .send()
-        .await
-        .expect("the start route must answer")
-        .json()
-        .await
-        .expect("a JSON body");
-    let attempt = started["id"].as_str().expect("an attempt id").to_owned();
+    let attempt = Attempt::start(&running, false).await;
 
     stub.authorize();
-    let refused = client
-        .get(format!("{}/api/auth/plex/pin/{attempt}", running.base_url))
-        .send()
-        .await
-        .expect("the poll route must answer");
+    let refused = attempt.poll(&running).await;
     assert_eq!(refused.status(), StatusCode::FORBIDDEN);
 
     // No session.
     assert_eq!(
-        client
+        attempt
+            .client
             .get(format!("{}/api/auth/session", running.base_url))
             .send()
             .await
@@ -306,27 +244,26 @@ async fn two_overlapping_polls_produce_one_session_and_not_two() {
     let running = configured(&instance, &stub).await;
     link_plex_account(&running, 4242).await;
 
-    let client = browser();
-    let started: serde_json::Value = client
-        .post(format!("{}/api/auth/plex/pin", running.base_url))
-        .json(&serde_json::json!({ "oauth": false }))
-        .send()
-        .await
-        .expect("the start route must answer")
-        .json()
-        .await
-        .expect("a JSON body");
-    let attempt = started["id"].as_str().expect("an attempt id").to_owned();
+    let attempt = Attempt::start(&running, false).await;
 
     stub.authorize();
 
     let poll = || {
-        let url = format!("{}/api/auth/plex/pin/{attempt}", running.base_url);
+        let url = format!("{}/api/auth/plex/pin/{}", running.base_url, attempt.id());
         // A jar of its own per request, so a session cookie set by one does not
-        // make the other look like the same browser.
+        // make the other look like the same browser. Both still present the
+        // attempt's own cookie and token: this is one browser polling twice,
+        // which is exactly the race the atomic claim exists for.
+        let cookie = format!("afisharr_plex_pin={}", attempt.id());
+        let csrf = attempt.csrf.clone();
         async move {
             reqwest::Client::new()
-                .get(url)
+                .post(url)
+                .header(
+                    reqwest::header::COOKIE,
+                    format!("{cookie}; afisharr_csrf={csrf}"),
+                )
+                .header(CSRF_HEADER, csrf.clone())
                 .send()
                 .await
                 .expect("the poll route must answer")
@@ -365,33 +302,15 @@ async fn polling_is_counted_against_the_provider_budget() {
     let instance = TempInstance::new();
     let running = configured(&instance, &stub).await;
 
-    let client = browser();
-    let started: serde_json::Value = client
-        .post(format!("{}/api/auth/plex/pin", running.base_url))
-        .json(&serde_json::json!({ "oauth": false }))
-        .send()
-        .await
-        .expect("the start route must answer")
-        .json()
-        .await
-        .expect("a JSON body");
-    let attempt = started["id"].as_str().expect("an attempt id").to_owned();
+    let attempt = Attempt::start(&running, false).await;
 
     // Creating the pin spent one, so the rest of the allowance is polls.
     for n in 1..PROVIDER_ALLOWANCE {
-        let response = client
-            .get(format!("{}/api/auth/plex/pin/{attempt}", running.base_url))
-            .send()
-            .await
-            .expect("the poll route must answer");
+        let response = attempt.poll(&running).await;
         assert_eq!(response.status(), StatusCode::OK, "poll {n}");
     }
 
-    let refused = client
-        .get(format!("{}/api/auth/plex/pin/{attempt}", running.base_url))
-        .send()
-        .await
-        .expect("the poll route must answer");
+    let refused = attempt.poll(&running).await;
     assert_eq!(refused.status(), StatusCode::TOO_MANY_REQUESTS);
     let body: serde_json::Value = refused.json().await.expect("a JSON body");
     assert_eq!(body["code"], "rateLimited");
@@ -421,4 +340,189 @@ async fn an_unreachable_plex_answers_the_status_the_route_documents() {
     assert_eq!(body["code"], "upstream");
 
     running.stop().await;
+}
+
+#[tokio::test]
+async fn an_attempt_cannot_be_completed_by_a_browser_that_did_not_start_it() {
+    // The login forgery this closes. An attempt identifier is a public string
+    // — the account that started the exchange knows it, and it is read out
+    // loud on the pin screen. Completing an attempt mints a session, so a
+    // second browser that can complete somebody else's attempt is handed a
+    // session for somebody else's account.
+    let stub = PlexTvStub::start().await;
+    let instance = TempInstance::new();
+    let running = configured(&instance, &stub).await;
+    link_plex_account(&running, 4242).await;
+
+    let attempt = Attempt::start(&running, false).await;
+    stub.authorize();
+
+    // A different browser, knowing the identifier and nothing else.
+    let bystander = browser();
+    let refused = bystander
+        .post(format!(
+            "{}/api/auth/plex/pin/{}",
+            running.base_url,
+            attempt.id()
+        ))
+        .send()
+        .await
+        .expect("the poll route must answer");
+    assert_eq!(refused.status(), StatusCode::FORBIDDEN);
+
+    assert_eq!(
+        bystander
+            .get(format!("{}/api/auth/session", running.base_url))
+            .send()
+            .await
+            .expect("the session route must answer")
+            .status(),
+        StatusCode::UNAUTHORIZED,
+        "a refused completion must not have signed anybody in"
+    );
+
+    // And the attempt is still there for the browser that owns it.
+    let authorized = attempt.poll_body(&running).await;
+    assert_eq!(authorized["state"], "authorized");
+
+    drop(bystander);
+    running.stop().await;
+    stub.stop().await;
+}
+
+#[tokio::test]
+async fn completing_an_attempt_is_judged_by_the_cross_site_check() {
+    // The attempt cookie is an ambient credential, so the request that turns a
+    // finished exchange into a session is one a browser can be made to send.
+    // It is judged like every other credentialled write.
+    let stub = PlexTvStub::start().await;
+    let instance = TempInstance::new();
+    let running = configured(&instance, &stub).await;
+    link_plex_account(&running, 4242).await;
+
+    let attempt = Attempt::start(&running, false).await;
+    stub.authorize();
+
+    let forged = attempt
+        .client
+        .post(format!(
+            "{}/api/auth/plex/pin/{}",
+            running.base_url,
+            attempt.id()
+        ))
+        .header(reqwest::header::ORIGIN, "https://evil.example")
+        .header(CSRF_HEADER, &attempt.csrf)
+        .send()
+        .await
+        .expect("the poll route must answer");
+    assert_eq!(forged.status(), StatusCode::FORBIDDEN);
+
+    let without_token = attempt
+        .client
+        .post(format!(
+            "{}/api/auth/plex/pin/{}",
+            running.base_url,
+            attempt.id()
+        ))
+        .send()
+        .await
+        .expect("the poll route must answer");
+    assert_eq!(without_token.status(), StatusCode::FORBIDDEN);
+
+    running.stop().await;
+    stub.stop().await;
+}
+
+#[tokio::test]
+async fn a_viewer_signing_in_keeps_the_integration_token_and_its_own_privilege() {
+    // `plex.token` is one credential for the whole instance and it is what
+    // every server operation runs under. A linked account that administers
+    // nothing signing in must not replace it with their own lower-privilege
+    // token — that breaks Plex for everybody at the moment a viewer signs in.
+    let stub = PlexTvStub::start().await;
+    let instance = TempInstance::new();
+    let running = configured(&instance, &stub).await;
+
+    // The administrator signs in first, so the integration credential exists.
+    link_plex_account(&running, 4242).await;
+    let admin_attempt = Attempt::start(&running, false).await;
+    stub.authorize();
+    let as_admin = admin_attempt.poll_body(&running).await;
+    assert_eq!(as_admin["isAdmin"], true);
+
+    let owner_token: String =
+        sqlx::query_scalar("SELECT hex(ciphertext) FROM secrets WHERE name = ?1")
+            .bind("plex.token")
+            .fetch_one(running.booted.database.readers())
+            .await
+            .expect("the integration credential must have been stored");
+
+    // Now a viewer: a second linked account, active, and not an administrator.
+    add_viewer(&running, 777).await;
+    stub.account_is(777);
+    stub.username_is("viewer-on-plex");
+    stub.authorize();
+
+    let viewer_attempt = Attempt::start(&running, false).await;
+    let as_viewer = viewer_attempt.poll_body(&running).await;
+    assert_eq!(as_viewer["state"], "authorized");
+    assert_eq!(
+        as_viewer["isAdmin"], false,
+        "the poll must report the privilege the session carries"
+    );
+
+    // The session is real.
+    assert_eq!(
+        viewer_attempt
+            .client
+            .get(format!("{}/api/auth/session", running.base_url))
+            .send()
+            .await
+            .expect("the session route must answer")
+            .status(),
+        StatusCode::OK
+    );
+
+    let after: String = sqlx::query_scalar("SELECT hex(ciphertext) FROM secrets WHERE name = ?1")
+        .bind("plex.token")
+        .fetch_one(running.booted.database.readers())
+        .await
+        .expect("the integration credential must still be there");
+    assert_eq!(
+        after, owner_token,
+        "a viewer's sign-in must not overwrite the integration credential"
+    );
+
+    running.stop().await;
+    stub.stop().await;
+}
+
+/// Adds a linked, active, non-administering Plex account.
+async fn add_viewer(running: &RunningInstance, plex_account_id: i64) {
+    struct AddViewer(i64);
+
+    impl WriteOperation for AddViewer {
+        type Output = ();
+
+        async fn execute(self, conn: &mut sqlx::SqliteConnection) -> Result<(), sqlx::Error> {
+            sqlx::query(
+                "INSERT INTO users
+                   (id, kind, username, password_hash, plex_account_id, is_admin,
+                    created_at, updated_at)
+                 VALUES ('01JVIEWER000000000000000000', 'Plex', 'viewer', NULL, ?1, 0, 0, 0)",
+            )
+            .bind(self.0)
+            .execute(&mut *conn)
+            .await?;
+            Ok(())
+        }
+    }
+
+    running
+        .booted
+        .database
+        .writer()
+        .submit(AddViewer(plex_account_id))
+        .await
+        .expect("the viewer must be writable");
 }

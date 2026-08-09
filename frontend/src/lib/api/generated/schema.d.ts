@@ -67,10 +67,10 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** Polls a Plex sign-in, and signs the operator in when the token arrives. */
-        get: operations["poll_plex_pin"];
+        get?: never;
         put?: never;
-        post?: never;
+        /** Polls a Plex sign-in, and signs the operator in when the token arrives. */
+        post: operations["poll_plex_pin"];
         delete?: never;
         options?: never;
         head?: never;
@@ -617,10 +617,19 @@ export interface components {
             /** @enum {string} */
             state: "pending";
         } | {
+            /**
+             * @description Whether that account administers this instance.
+             *
+             *     Reported rather than assumed. A linked Plex account that is not an
+             *     administrator gets a session with `is_admin = false`, and a client
+             *     that recorded it as an administrator would route the operator into
+             *     admin-only pages that answer 403 (`I-UX-2`).
+             */
+            isAdmin: boolean;
             /** @enum {string} */
             state: "authorized";
             /** @description The account now signed in. */
-            user_id: string;
+            userId: string;
             /** @description The account name. */
             username: string;
         } | {
@@ -659,7 +668,15 @@ export interface components {
         };
         /** @description One root the operator has allowed. */
         RootView: {
-            /** @description The label the browser addresses it by. */
+            /**
+             * @description The identifier the browser addresses it by.
+             *
+             *     The row's own key rather than the label: two roots of one purpose can
+             *     share a final directory name, so a label is allowed to collide and
+             *     addressing by it would make the second of them unreachable.
+             */
+            id: string;
+            /** @description The operator's name for it, which is what a refusal reads out. */
             label: string;
         };
         /** @description One session, as the settings page lists it. */
@@ -909,7 +926,7 @@ export interface operations {
                     "application/json": components["schemas"]["PinState"];
                 };
             };
-            /** @description The Plex account is not linked to an Afisharr account */
+            /** @description The attempt belongs to another browser, or the Plex account is not linked to an Afisharr account */
             403: {
                 headers: {
                     [name: string]: unknown;
@@ -990,7 +1007,7 @@ export interface operations {
             query?: never;
             header?: never;
             path: {
-                /** @description The operator's label for the root to walk. */
+                /** @description The identifier of the root to walk. */
                 root: string;
                 /** @description The path inside the root. Empty means the root itself. */
                 path: string;

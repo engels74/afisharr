@@ -17,25 +17,47 @@ export type SessionState =
  * moment would flash it in front of an operator who is already signed in
  * (P1 — absence of evidence is not evidence of absence).
  */
-export class Session {
-	state = $state<SessionState>({ kind: 'unknown' });
-
+export interface Session {
+	/** What is known right now. */
+	readonly state: SessionState;
 	/** Asks the API who is signed in. */
-	async refresh(): Promise<void> {
-		const result = await readSession();
-		this.state =
-			result.outcome === 'ok'
-				? { kind: 'signedIn', account: result.value }
-				: { kind: 'signedOut' };
-	}
-
+	refresh(): Promise<void>;
 	/** Records a sign-in that just happened, without a second round trip. */
-	adopt(account: SignedIn): void {
-		this.state = { kind: 'signedIn', account };
-	}
-
+	adopt(account: SignedIn): void;
 	/** Records a sign-out. */
-	forget(): void {
-		this.state = { kind: 'signedOut' };
-	}
+	forget(): void;
+}
+
+/**
+ * A session that knows nothing yet.
+ *
+ * The state is closed over rather than exposed as a settable field,
+ * deliberately: the three transitions are the only ways in, and each of them
+ * names the evidence it acted on. A settable field would let any component
+ * declare somebody signed in.
+ */
+export function createSession(): Session {
+	let state = $state<SessionState>({ kind: 'unknown' });
+
+	return {
+		get state() {
+			return state;
+		},
+
+		async refresh(): Promise<void> {
+			const result = await readSession();
+			state =
+				result.outcome === 'ok'
+					? { kind: 'signedIn', account: result.value }
+					: { kind: 'signedOut' };
+		},
+
+		adopt(account: SignedIn): void {
+			state = { kind: 'signedIn', account };
+		},
+
+		forget(): void {
+			state = { kind: 'signedOut' };
+		},
+	};
 }

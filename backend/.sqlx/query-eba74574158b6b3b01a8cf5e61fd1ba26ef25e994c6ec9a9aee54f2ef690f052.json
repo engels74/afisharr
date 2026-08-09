@@ -1,11 +1,22 @@
 {
   "db_name": "SQLite",
-  "query": "SELECT path, purpose FROM asset_roots WHERE is_enabled = 1 ORDER BY purpose, path",
+  "query": "SELECT id, path, purpose FROM asset_roots WHERE is_enabled = 1 ORDER BY purpose, path",
   "describe": {
     "columns": [
       {
-        "name": "path",
+        "name": "id",
         "ordinal": 0,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "asset_roots",
+            "name": "id"
+          }
+        }
+      },
+      {
+        "name": "path",
+        "ordinal": 1,
         "type_info": "Text",
         "origin": {
           "Table": {
@@ -16,7 +27,7 @@
       },
       {
         "name": "purpose",
-        "ordinal": 1,
+        "ordinal": 2,
         "type_info": "Text",
         "origin": {
           "Table": {
@@ -31,8 +42,9 @@
     },
     "nullable": [
       false,
+      false,
       false
     ]
   },
-  "hash": "5ef5fd4d648320961667e84f4f226d1cb34481b81f9a0c08fa52475077acff2a"
+  "hash": "eba74574158b6b3b01a8cf5e61fd1ba26ef25e994c6ec9a9aee54f2ef690f052"
 }

@@ -69,9 +69,17 @@ async fn instance_with_a_root() -> (TempInstance, tempfile::TempDir, RunningInst
 
 /// Writes the root row through the one write path there is.
 async fn insert_root(instance: &TempInstance, root: &std::path::Path) {
+    insert_root_as(instance, "01JROOT0000000000000000000", root).await;
+}
+
+/// Writes one root row under an identifier of the caller's choosing.
+async fn insert_root_as(instance: &TempInstance, id: &str, root: &std::path::Path) {
     use afisharr_core::storage::WriteOperation;
 
-    struct InsertRoot(String);
+    struct InsertRoot {
+        id: String,
+        path: String,
+    }
 
     impl WriteOperation for InsertRoot {
         type Output = ();
@@ -79,9 +87,10 @@ async fn insert_root(instance: &TempInstance, root: &std::path::Path) {
         async fn execute(self, conn: &mut sqlx::SqliteConnection) -> Result<(), sqlx::Error> {
             sqlx::query(
                 "INSERT INTO asset_roots (id, path, purpose, is_enabled, created_at)
-                 VALUES ('01JROOT0000000000000000000', ?1, 'Browse', 1, 0)",
+                 VALUES (?1, ?2, 'Browse', 1, 0)",
             )
-            .bind(self.0)
+            .bind(self.id)
+            .bind(self.path)
             .execute(&mut *conn)
             .await?;
             Ok(())
@@ -92,7 +101,10 @@ async fn insert_root(instance: &TempInstance, root: &std::path::Path) {
     booted
         .database
         .writer()
-        .submit(InsertRoot(root.to_string_lossy().into_owned()))
+        .submit(InsertRoot {
+            id: id.to_owned(),
+            path: root.to_string_lossy().into_owned(),
+        })
         .await
         .expect("the root must be insertable");
     booted.database.close().await;
@@ -110,11 +122,12 @@ async fn the_root_is_browsable_and_reports_relative_paths() {
         .json()
         .await
         .expect("a JSON body");
-    let label = roots[0]["label"].as_str().expect("one root").to_owned();
+    let id = roots[0]["id"].as_str().expect("one root").to_owned();
+    assert_eq!(roots[0]["label"], "Browse/assets");
 
     let listing: serde_json::Value = client
         .get(format!("{}/api/files", running.base_url))
-        .query(&[("root", label.as_str()), ("path", "posters")])
+        .query(&[("root", id.as_str()), ("path", "posters")])
         .send()
         .await
         .expect("the browse route must answer")
@@ -140,6 +153,7 @@ async fn every_traversal_in_the_corpus_is_refused_with_the_root_named() {
         .json()
         .await
         .expect("a JSON body");
+    let id = roots[0]["id"].as_str().expect("one root").to_owned();
     let label = roots[0]["label"].as_str().expect("one root").to_owned();
 
     let outside = media
@@ -161,7 +175,7 @@ async fn every_traversal_in_the_corpus_is_refused_with_the_root_named() {
     for path in corpus {
         let response = client
             .get(format!("{}/api/files", running.base_url))
-            .query(&[("root", label.as_str()), ("path", path)])
+            .query(&[("root", id.as_str()), ("path", path)])
             .send()
             .await
             .unwrap_or_else(|error| panic!("{path} must answer: {error}"));
@@ -206,11 +220,11 @@ async fn a_symlink_out_of_the_root_is_refused() {
         .json()
         .await
         .expect("a JSON body");
-    let label = roots[0]["label"].as_str().expect("one root").to_owned();
+    let id = roots[0]["id"].as_str().expect("one root").to_owned();
 
     let response = client
         .get(format!("{}/api/files", running.base_url))
-        .query(&[("root", label.as_str()), ("path", "escape")])
+        .query(&[("root", id.as_str()), ("path", "escape")])
         .send()
         .await
         .expect("the browse route must answer");
@@ -230,6 +244,83 @@ async fn browsing_requires_a_credential() {
         .await
         .expect("the roots route must answer");
     assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+
+    running.stop().await;
+}
+
+#[tokio::test]
+async fn two_roots_that_read_the_same_are_still_two_places() {
+    // `/…/a/posters` and `/…/b/posters` under one purpose produce one label
+    // between them. Addressing by that label resolves both to whichever row
+    // came back first: the second root is unreachable, and every request for
+    // it lists the first — a browser pointed somewhere nobody asked for.
+    let media = tempfile::TempDir::new().expect("a scratch directory");
+    for (branch, file) in [("a", "from-a.png"), ("b", "from-b.png")] {
+        let root = media.path().join(branch).join("posters");
+        std::fs::create_dir_all(&root).expect("the root must be creatable");
+        std::fs::write(root.join(file), b"x").expect("a file inside the root");
+    }
+
+    let instance = TempInstance::new();
+    insert_root_as(
+        &instance,
+        "01JROOTA0000000000000000000",
+        &media.path().join("a").join("posters"),
+    )
+    .await;
+    insert_root_as(
+        &instance,
+        "01JROOTB0000000000000000000",
+        &media.path().join("b").join("posters"),
+    )
+    .await;
+
+    let running = RunningInstance::start(&instance).await;
+    let _wizard = Wizard::set_up(&running, "operator", PASSWORD).await;
+    let client = browser();
+    client
+        .post(format!("{}/api/auth/login", running.base_url))
+        .json(&serde_json::json!({ "username": "operator", "password": PASSWORD }))
+        .send()
+        .await
+        .expect("the login route must answer");
+
+    let roots: serde_json::Value = client
+        .get(format!("{}/api/files/roots", running.base_url))
+        .send()
+        .await
+        .expect("the roots route must answer")
+        .json()
+        .await
+        .expect("a JSON body");
+
+    assert_eq!(
+        roots[0]["label"], roots[1]["label"],
+        "the two roots read the same, which is what makes the identifier matter"
+    );
+    assert_ne!(roots[0]["id"], roots[1]["id"]);
+
+    let mut seen = Vec::new();
+    for index in 0..2 {
+        let id = roots[index]["id"].as_str().expect("an identifier");
+        let listing: serde_json::Value = client
+            .get(format!("{}/api/files", running.base_url))
+            .query(&[("root", id)])
+            .send()
+            .await
+            .expect("the browse route must answer")
+            .json()
+            .await
+            .expect("a JSON body");
+        seen.push(
+            listing["entries"][0]["name"]
+                .as_str()
+                .unwrap_or_default()
+                .to_owned(),
+        );
+    }
+    seen.sort();
+    assert_eq!(seen, vec!["from-a.png".to_owned(), "from-b.png".to_owned()]);
 
     running.stop().await;
 }

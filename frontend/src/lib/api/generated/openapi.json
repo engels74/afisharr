@@ -161,7 +161,7 @@
       }
     },
     "/api/auth/plex/pin/{id}": {
-      "get": {
+      "post": {
         "tags": [
           "authentication"
         ],
@@ -190,7 +190,7 @@
             }
           },
           "403": {
-            "description": "The Plex account is not linked to an Afisharr account",
+            "description": "The attempt belongs to another browser, or the Plex account is not linked to an Afisharr account",
             "content": {
               "application/json": {
                 "schema": {
@@ -285,7 +285,7 @@
           {
             "name": "root",
             "in": "path",
-            "description": "The operator's label for the root to walk.",
+            "description": "The identifier of the root to walk.",
             "required": true,
             "schema": {
               "type": "string"
@@ -1426,18 +1426,23 @@
             "type": "object",
             "description": "A token arrived and a session was created.",
             "required": [
-              "user_id",
+              "userId",
               "username",
+              "isAdmin",
               "state"
             ],
             "properties": {
+              "isAdmin": {
+                "type": "boolean",
+                "description": "Whether that account administers this instance.\n\nReported rather than assumed. A linked Plex account that is not an\nadministrator gets a session with `is_admin = false`, and a client\nthat recorded it as an administrator would route the operator into\nadmin-only pages that answer 403 (`I-UX-2`)."
+              },
               "state": {
                 "type": "string",
                 "enum": [
                   "authorized"
                 ]
               },
-              "user_id": {
+              "userId": {
                 "type": "string",
                 "description": "The account now signed in."
               },
@@ -1533,12 +1538,17 @@
         "type": "object",
         "description": "One root the operator has allowed.",
         "required": [
+          "id",
           "label"
         ],
         "properties": {
+          "id": {
+            "type": "string",
+            "description": "The identifier the browser addresses it by.\n\nThe row's own key rather than the label: two roots of one purpose can\nshare a final directory name, so a label is allowed to collide and\naddressing by it would make the second of them unreachable."
+          },
           "label": {
             "type": "string",
-            "description": "The label the browser addresses it by."
+            "description": "The operator's name for it, which is what a refusal reads out."
           }
         }
       },

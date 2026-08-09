@@ -1,38 +1,20 @@
 // SPDX-FileCopyrightText: 2026 Afisharr contributors
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-//! The counters themselves.
+//! The limiter itself: one lock, three questions.
 
 use std::{
-    collections::HashMap,
     net::IpAddr,
     sync::{Arc, RwLock},
 };
 
-use afisharr_core::time::{Clock, Timestamp};
+use afisharr_core::time::Clock;
 
-use crate::ratelimit::{Bucket, Policy};
-
-/// What the limiter decided about one request.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Decision {
-    /// Inside the allowance. Proceed.
-    Allowed,
-    /// Over the allowance, or locked out.
-    Refused {
-        /// How long the caller must wait, in seconds, rounded up.
-        retry_after_seconds: u64,
-    },
-}
-
-/// One counted window, plus how many consecutive lockouts it has earned.
-#[derive(Debug, Clone, Copy)]
-struct Counter {
-    window_started_at: Timestamp,
-    hits: u32,
-    locked_until: Option<Timestamp>,
-    consecutive_lockouts: u32,
-}
+use crate::ratelimit::{
+    Bucket, Decision,
+    counter::{Counter, engage_lockout, judge, seconds_until},
+    counters::{Counters, Key},
+};
 
 /// The in-memory limiter.
 ///
@@ -49,43 +31,17 @@ struct Counter {
 /// concurrent operators (PRD §21.1).
 #[derive(Debug, Clone)]
 pub struct RateLimiter {
-    counters: Arc<RwLock<HashMap<Key, Counter>>>,
+    counters: Arc<RwLock<Counters>>,
     clock: Arc<dyn Clock>,
-}
-
-/// What a counter is filed under: the bucket, and who is being counted.
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-struct Key {
-    bucket: Bucket,
-    address: Option<IpAddr>,
-}
-
-impl Key {
-    /// The key one request is counted under.
-    ///
-    /// The address is dropped for the buckets that do not count per address,
-    /// and it is dropped *here* rather than at the call sites. A caller that
-    /// remembered to pass `None` and a caller that forgot would be two counters
-    /// for one account, which is the failure this normalisation exists to make
-    /// unreachable (P7).
-    fn of(bucket: &Bucket, address: Option<IpAddr>) -> Self {
-        Self {
-            bucket: bucket.clone(),
-            address: if bucket.counts_per_address() {
-                address
-            } else {
-                None
-            },
-        }
-    }
 }
 
 impl RateLimiter {
     /// An empty limiter reading `clock`.
     #[must_use]
     pub fn new(clock: Arc<dyn Clock>) -> Self {
+        let swept_at = clock.now();
         Self {
-            counters: Arc::new(RwLock::new(HashMap::new())),
+            counters: Arc::new(RwLock::new(Counters::new(swept_at))),
             clock,
         }
     }
@@ -105,6 +61,7 @@ impl RateLimiter {
             .read()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
         counters
+            .entries
             .get(&key)
             .map_or(Decision::Allowed, |counter| judge(counter, policy, now))
     }
@@ -120,12 +77,15 @@ impl RateLimiter {
             .counters
             .write()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
-        let counter = counters.entry(key).or_insert(Counter {
-            window_started_at: now,
-            hits: 0,
-            locked_until: None,
-            consecutive_lockouts: 0,
-        });
+        // Before the insert, not after: the entry about to be added is live by
+        // definition, and sweeping first is what keeps the map's size a
+        // function of what is currently being limited rather than of
+        // everything that ever was.
+        counters.sweep(now);
+        let counter = counters
+            .entries
+            .entry(key)
+            .or_insert_with(|| Counter::started(now));
 
         // A live lockout refuses without counting: an attempt made during a
         // lockout must not extend it, or a client that retries in a loop locks
@@ -168,6 +128,20 @@ impl RateLimiter {
         Decision::Allowed
     }
 
+    /// How many counters are held.
+    ///
+    /// The failure this exists to catch is a size and not a behaviour: a map
+    /// that keeps every account name it has ever been asked about answers every
+    /// question correctly right up until the process runs out of memory.
+    #[cfg(test)]
+    fn held(&self) -> usize {
+        self.counters
+            .read()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .entries
+            .len()
+    }
+
     /// Clears the counter for one bucket.
     ///
     /// A successful sign-in runs this: the failure count exists to slow a
@@ -178,52 +152,13 @@ impl RateLimiter {
             .counters
             .write()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
-        counters.remove(&key);
+        counters.entries.remove(&key);
     }
-}
-
-/// Reads a counter without changing it.
-fn judge(counter: &Counter, policy: Policy, now: Timestamp) -> Decision {
-    if let Some(locked_until) = counter.locked_until
-        && now < locked_until
-    {
-        return Decision::Refused {
-            retry_after_seconds: seconds_until(now, locked_until),
-        };
-    }
-    if counter.window_started_at.millis_until(now) >= policy.window_millis {
-        return Decision::Allowed;
-    }
-    if counter.hits >= policy.allowance {
-        let window_ends = counter.window_started_at.plus_millis(policy.window_millis);
-        return Decision::Refused {
-            retry_after_seconds: seconds_until(now, window_ends),
-        };
-    }
-    Decision::Allowed
-}
-
-/// Starts or escalates the lockout, returning how long the caller must wait.
-fn engage_lockout(counter: &mut Counter, policy: Policy, now: Timestamp) -> u64 {
-    let Some(lockout) = policy.lockout else {
-        let window_ends = counter.window_started_at.plus_millis(policy.window_millis);
-        return seconds_until(now, window_ends);
-    };
-    counter.consecutive_lockouts = counter.consecutive_lockouts.saturating_add(1);
-    let until = now.plus_millis(lockout.duration_millis(counter.consecutive_lockouts));
-    counter.locked_until = Some(until);
-    seconds_until(now, until)
-}
-
-/// Whole seconds from `now` to `until`, rounded up, and never zero.
-fn seconds_until(now: Timestamp, until: Timestamp) -> u64 {
-    let millis = now.millis_until(until).max(1);
-    u64::try_from((millis + 999) / 1000).unwrap_or(1).max(1)
 }
 
 #[cfg(test)]
 mod tests {
-    use afisharr_core::time::FixedClock;
+    use afisharr_core::time::{FixedClock, Timestamp};
 
     use super::*;
 
@@ -388,5 +323,66 @@ mod tests {
             } => retry_after_seconds,
             Decision::Allowed => panic!("spending the allowance must lock the account out"),
         }
+    }
+
+    #[test]
+    fn a_counter_whose_window_has_closed_is_dropped_rather_than_reset() {
+        // The leak this closes: every distinct account name a sign-in is tried
+        // against creates an entry, `record` resets the expired window in
+        // place, and nothing ever removes it. A caller who varies the name
+        // grows the process for as long as it runs, without exceeding a single
+        // limit while doing it.
+        let (clock, limiter) = limiter();
+        for n in 0..64 {
+            let _ = limiter.record(&Bucket::login_account(&format!("account-{n}")), None);
+        }
+        assert_eq!(limiter.held(), 64);
+
+        clock.advance(15 * 60 * 1000 + 1);
+        let _ = limiter.record(&Bucket::login_account("account-fresh"), None);
+
+        assert_eq!(
+            limiter.held(),
+            1,
+            "a window nobody can be refused by must not survive"
+        );
+    }
+
+    #[test]
+    fn a_counter_that_can_still_refuse_survives_the_sweep() {
+        let (clock, limiter) = limiter();
+        for _ in 0..5 {
+            let _ = limiter.record(&Bucket::SetupAttempt, address("1.2.3.4"));
+        }
+
+        // Past the sweep interval, and nowhere near the fifteen-minute window.
+        clock.advance(61_000);
+        let _ = limiter.record(&Bucket::SetupAttempt, address("9.9.9.9"));
+
+        assert!(
+            matches!(
+                limiter.check(&Bucket::SetupAttempt, address("1.2.3.4")),
+                Decision::Refused { .. }
+            ),
+            "the sweep must not hand a spent allowance back"
+        );
+    }
+
+    #[test]
+    fn a_lockout_that_has_lifted_still_remembers_the_rung_it_reached() {
+        let (clock, limiter) = limiter();
+        let bucket = Bucket::login_account("operator");
+        assert_eq!(spend_to_lockout(&limiter, &bucket), 15 * 60);
+
+        clock.advance(15 * 60 * 1000 + 1);
+        for n in 0..8 {
+            let _ = limiter.record(&Bucket::login_account(&format!("noise-{n}")), None);
+        }
+
+        assert_eq!(
+            spend_to_lockout(&limiter, &bucket),
+            30 * 60,
+            "the escalation must survive the sweep"
+        );
     }
 }

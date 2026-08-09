@@ -16,6 +16,7 @@
 pub(crate) mod account_routes;
 mod guard;
 pub(crate) mod password_login;
+mod plex_pin_authorize;
 pub(crate) mod plex_pin_poll;
 pub(crate) mod plex_pin_start;
 pub(crate) mod session;

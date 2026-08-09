@@ -8,6 +8,7 @@ import { describe, expect, test } from 'bun:test';
 import { en } from '../../shared/i18n/catalogue.en';
 import {
 	isActive,
+	isBareRoute,
 	landingFor,
 	PRIMARY,
 	SETTINGS,
@@ -65,16 +66,59 @@ describe('active marking', () => {
 
 describe('where a bare visit lands', () => {
 	test('an unclaimed instance boots directly to the claim page', () => {
-		expect(landingFor(false)).toBe('/setup');
+		expect(landingFor(false, false)).toBe('/setup');
+		expect(landingFor(false, true)).toBe('/setup');
 	});
 
-	test('a configured instance boots to the dashboard', () => {
-		expect(landingFor(true)).toBe('/dashboard');
+	test('a configured instance boots a signed-in operator to the dashboard', () => {
+		expect(landingFor(true, true)).toBe('/dashboard');
+	});
+
+	test('a configured instance sends a signed-out visitor to sign in', () => {
+		// `setupCompleted` is true for every visitor to a finished instance.
+		// Landing on the dashboard on the strength of it puts a signed-out
+		// operator inside a shell that refuses every request it makes.
+		expect(landingFor(true, false)).toBe('/login');
 	});
 
 	test('the landing is one of the routes the shell actually serves', () => {
-		const routed = [...PRIMARY.map((entry) => entry.href), '/setup'];
-		expect(routed).toContain(landingFor(true));
-		expect(routed).toContain(landingFor(false));
+		const routed = [...PRIMARY.map((entry) => entry.href), '/setup', '/login'];
+		for (const setupCompleted of [true, false]) {
+			for (const signedIn of [true, false]) {
+				expect(routed).toContain(landingFor(setupCompleted, signedIn));
+			}
+		}
+	});
+});
+
+describe('which routes render without the shell', () => {
+	test('the sign-in page is bare', () => {
+		expect(isBareRoute('/login')).toBe(true);
+	});
+
+	test('the wizard and its steps are bare', () => {
+		expect(isBareRoute('/setup')).toBe(true);
+		expect(isBareRoute('/setup/admin')).toBe(true);
+	});
+
+	test('every primary destination is inside the shell', () => {
+		for (const destination of PRIMARY) {
+			expect(isBareRoute(destination.href)).toBe(false);
+		}
+		expect(isBareRoute('/settings/plex')).toBe(false);
+	});
+
+	test('a path that merely starts with the same characters is not bare', () => {
+		// Otherwise a route added later at `/setup-guide` would be exempt from
+		// the session guard by accident.
+		expect(isBareRoute('/setup-guide')).toBe(false);
+		expect(isBareRoute('/login-help')).toBe(false);
+	});
+
+	test('the landing a signed-out visitor is sent to is itself bare', () => {
+		// The guard and the landing have to agree, or an operator bounces
+		// between the two forever.
+		expect(isBareRoute(landingFor(true, false))).toBe(true);
+		expect(isBareRoute(landingFor(false, false))).toBe(true);
 	});
 });

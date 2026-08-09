@@ -97,7 +97,12 @@ fn protected_routes(state: &ApiState) -> Router<ApiState> {
         .route("/auth/logout", post(authentication::log_out))
         .route("/auth/session", get(authentication::whoami))
         .route("/auth/plex/pin", post(authentication::start_plex_pin))
-        .route("/auth/plex/pin/{id}", get(authentication::poll_plex_pin))
+        // `post`, not `get`: completing a pin consumes the attempt, stores a
+        // token, and sets a session cookie. A `GET` is what a cross-site
+        // navigation and a prefetch can reach, and the CSRF layer exempts
+        // every safe method — so a read-shaped route here is a login state
+        // change with no protection over it.
+        .route("/auth/plex/pin/{id}", post(authentication::poll_plex_pin))
         .route("/files", get(files::browse))
         .route("/files/roots", get(files::roots))
         .route("/settings/password", post(authentication::change_password))
@@ -181,9 +186,11 @@ async fn envelope(
 ///
 /// Enumerating the ambient credentials is this layer's job, not the judge's:
 /// the judge decides, and the perimeter says what a browser could have been
-/// made to attach. There are two. The session cookie is the obvious one; the
+/// made to attach. There are three. The session cookie is the obvious one; the
 /// setup claim is the one that is easy to miss, and behind it sit the routes
-/// that create the administrator and finish setup.
+/// that create the administrator and finish setup; the Plex attempt cookie is
+/// the third, and behind it sits the request that turns a finished plex.tv
+/// exchange into a session.
 async fn csrf(
     State(_state): State<ApiState>,
     request: Request<Body>,
@@ -193,7 +200,8 @@ async fn csrf(
 
     let jar = CookieJar::from_headers(request.headers());
     let carries_ambient_credential = jar.get(security::SESSION_COOKIE).is_some()
-        || jar.get(afisharr_core::setup::CLAIM_COOKIE).is_some();
+        || jar.get(afisharr_core::setup::CLAIM_COOKIE).is_some()
+        || jar.get(security::PLEX_PIN_COOKIE).is_some();
     let token = jar
         .get(security::CSRF_COOKIE)
         .map(|cookie| cookie.value().to_owned());

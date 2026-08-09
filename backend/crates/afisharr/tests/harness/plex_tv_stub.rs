@@ -101,6 +101,17 @@ impl PlexTvStub {
             .expect("the stub's lock is not poisoned") = Some(identifier.to_owned());
     }
 
+    /// Says the account holder goes by this name on plex.tv.
+    pub fn username_is(&self, username: &str) {
+        username.clone_into(
+            &mut self
+                .script
+                .username
+                .lock()
+                .expect("the stub's lock is not poisoned"),
+        );
+    }
+
     /// Says the token belongs to this plex.tv account.
     pub fn account_is(&self, id: i64) {
         *self

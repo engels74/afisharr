@@ -12,6 +12,8 @@ mod cookies;
 mod csrf;
 mod headers;
 
-pub use cookies::{CSRF_COOKIE, SESSION_COOKIE, expire, set};
+pub use cookies::{
+    CSRF_COOKIE, PLEX_PIN_COOKIE, PLEX_PIN_COOKIE_PATH, SESSION_COOKIE, expire, set,
+};
 pub use csrf::{CSRF_HEADER, CsrfDecision, judge_csrf};
 pub use headers::{ContentSecurityPolicy, apply_security_headers};

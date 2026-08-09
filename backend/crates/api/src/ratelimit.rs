@@ -7,8 +7,11 @@
 //! caller can set. That is what makes the limits real rather than decorative
 //! (`I-SEC-1`, D-029).
 
+mod counter;
+mod counters;
 mod limiter;
 mod policy;
 
-pub use limiter::{Decision, RateLimiter};
+pub use counter::Decision;
+pub use limiter::RateLimiter;
 pub use policy::{Bucket, Policy};

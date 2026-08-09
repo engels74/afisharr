@@ -1,7 +1,17 @@
 // SPDX-FileCopyrightText: 2026 Afisharr contributors
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-//! Polling a plex.tv sign-in, and signing the operator in when it lands.
+//! Completing a plex.tv sign-in.
+//!
+//! A `POST`, and not a `GET`, because of what the authorised branch does: it
+//! consumes the attempt, stores a token, and sets a session cookie. A `GET` is
+//! reachable by cross-site navigation and by a prefetch, and the CSRF layer
+//! exempts every safe method — so with a `GET` here, anybody who has seen an
+//! attempt identifier (the account that started it, for one) could have another
+//! person's browser complete the exchange and be handed the session it minted.
+//! The attempt cookie set at the start closes the other half: the request is
+//! now credentialled, so the CSRF layer judges it, and the credential is one
+//! only the browser that started the exchange holds.
 
 // Route handlers in this file document their failures in their
 // `#[utoipa::path(responses(...))]` block: that block is the contract the
@@ -10,27 +20,24 @@
 // free to drift, with nothing checking it (§24.5).
 #![allow(clippy::missing_errors_doc)]
 
-use afisharr_core::{accounts, identifier::Id, plex_pin, secrets, time::Timestamp};
-use afisharr_plex::{account::PlexAccount, pin::PinPoll};
+use afisharr_core::{plex_pin, time::Timestamp};
+use afisharr_plex::pin::PinPoll;
 use axum::{
     Json,
     extract::{Path, State},
-    http::header::USER_AGENT,
 };
 use axum_extra::extract::CookieJar;
 use serde::Serialize;
 use utoipa::ToSchema;
 
 use crate::{
-    authentication::{plex_pin_start::plex_failure, session},
+    authentication::{plex_pin_authorize::authorize, plex_pin_start::plex_failure},
     error::{AppError, AppResult, ErrorCode, Problem},
     proxy::ClientContext,
     ratelimit::{Bucket, Decision},
+    security::{PLEX_PIN_COOKIE, PLEX_PIN_COOKIE_PATH, expire},
     state::ApiState,
 };
-
-/// The secret the Plex server token is stored under.
-const PLEX_TOKEN_SECRET: &str = "plex.token";
 
 /// What one poll found.
 ///
@@ -43,11 +50,25 @@ pub enum PinState {
     /// plex.tv has not seen the operator finish. Poll again.
     Pending,
     /// A token arrived and a session was created.
+    //
+    // `rename_all` again, on the variant. The enum-level attribute renames the
+    // *variants* of an internally-tagged enum and not their fields, so without
+    // this the body carries `user_id` while every other body on this surface
+    // carries `userId` — and the generated client reads a field that is not
+    // there.
+    #[serde(rename_all = "camelCase")]
     Authorized {
         /// The account now signed in.
         user_id: String,
         /// The account name.
         username: String,
+        /// Whether that account administers this instance.
+        ///
+        /// Reported rather than assumed. A linked Plex account that is not an
+        /// administrator gets a session with `is_admin = false`, and a client
+        /// that recorded it as an administrator would route the operator into
+        /// admin-only pages that answer 403 (`I-UX-2`).
+        is_admin: bool,
     },
     /// The pin's window closed without a token.
     Expired,
@@ -55,13 +76,13 @@ pub enum PinState {
 
 /// Polls a Plex sign-in, and signs the operator in when the token arrives.
 #[utoipa::path(
-    get,
+    post,
     path = "/api/auth/plex/pin/{id}",
     tag = "authentication",
     params(("id" = String, Path, description = "The attempt returned by the start call")),
     responses(
         (status = 200, description = "The attempt's current state", body = PinState),
-        (status = 403, description = "The Plex account is not linked to an Afisharr account", body = Problem),
+        (status = 403, description = "The attempt belongs to another browser, or the Plex account is not linked to an Afisharr account", body = Problem),
         (status = 404, description = "No such attempt", body = Problem),
         (status = 409, description = "The client identifier changed, or the attempt was already completed", body = Problem),
         (status = 429, description = "Too many calls to plex.tv", body = Problem),
@@ -75,6 +96,15 @@ pub async fn poll_plex_pin(
     headers: axum::http::HeaderMap,
     Path(id): Path<String>,
 ) -> AppResult<(CookieJar, Json<PinState>)> {
+    // Before the attempt is even looked up. The identifier alone proves
+    // nothing about who is asking, and this route mints a session.
+    if !holds_attempt(&jar, &id) {
+        return Err(AppError::of(
+            ErrorCode::Forbidden,
+            "That sign-in was started somewhere else. Start it again here.",
+        ));
+    }
+
     let now = state.clock().now();
     let attempt = plex_pin::find_pin_login(state.database().readers(), &id)
         .await
@@ -83,7 +113,7 @@ pub async fn poll_plex_pin(
 
     if !attempt.is_open(now) {
         close(&state, &attempt.id, plex_pin::PinLoginResult::Expired, now).await;
-        return Ok((jar, Json(PinState::Expired)));
+        return Ok((forget_attempt(jar, client), Json(PinState::Expired)));
     }
 
     // The identifier the pin was created under has to still be this instance's.
@@ -114,7 +144,7 @@ pub async fn poll_plex_pin(
         PinPoll::Pending => Ok((jar, Json(PinState::Pending))),
         PinPoll::Expired => {
             close(&state, &attempt.id, plex_pin::PinLoginResult::Expired, now).await;
-            Ok((jar, Json(PinState::Expired)))
+            Ok((forget_attempt(jar, client), Json(PinState::Expired)))
         }
         PinPoll::Authorized { auth_token } => {
             // Claimed before anything is stored and before a session exists.
@@ -143,6 +173,23 @@ pub async fn poll_plex_pin(
     }
 }
 
+/// Whether this browser is the one that started attempt `id`.
+///
+/// A constant-time comparison would be beside the point — the identifier is in
+/// the URL either way. What matters is that the value came back in a cookie
+/// this instance set on the browser that started the exchange, which a
+/// cross-site request cannot produce and `SameSite=Lax` withholds from a
+/// cross-site `POST` even if it could.
+fn holds_attempt(jar: &CookieJar, id: &str) -> bool {
+    jar.get(PLEX_PIN_COOKIE)
+        .is_some_and(|cookie| cookie.value() == id)
+}
+
+/// Clears the attempt cookie once the exchange is over, however it ended.
+pub(super) fn forget_attempt(jar: CookieJar, client: ClientContext) -> CookieJar {
+    jar.add(expire(PLEX_PIN_COOKIE, PLEX_PIN_COOKIE_PATH, client.scheme))
+}
+
 /// Spends one provider attempt, or refuses.
 fn spend_provider_budget(state: &ApiState, client: ClientContext) -> AppResult<()> {
     match state
@@ -162,125 +209,12 @@ fn spend_provider_budget(state: &ApiState, client: ClientContext) -> AppResult<(
     }
 }
 
-/// Verifies whose token arrived, then stores it and mints the session.
-///
-/// The order is the whole security of this route. A completed pin exchange
-/// proves that *somebody* holds a plex.tv account; it says nothing about who.
-/// Signing in first and asking later would let anyone with a plex.tv account
-/// walk into an instance that offers Plex sign-in — so the account is resolved,
-/// matched against a linked row, and only then is the token worth storing.
-///
-/// Reached only by the request that claimed the attempt, so everything below
-/// happens once. The `close` calls record how it ended on a row that is already
-/// consumed.
-async fn authorize(
+pub(super) async fn close(
     state: &ApiState,
-    attempt_id: &str,
-    auth_token: String,
-    client: ClientContext,
-    headers: &axum::http::HeaderMap,
-    jar: CookieJar,
+    id: &str,
+    result: plex_pin::PinLoginResult,
     now: Timestamp,
-) -> AppResult<(CookieJar, Json<PinState>)> {
-    let account = state
-        .plex()
-        .account(&auth_token)
-        .await
-        .map_err(plex_failure)?;
-
-    let Some(user) = linked_account(state, &account).await? else {
-        // Nothing is stored and no session is minted. The attempt is already
-        // claimed, so recording the outcome is all that is left, and the same
-        // pin cannot be replayed against a link created afterwards.
-        close(state, attempt_id, plex_pin::PinLoginResult::Aborted, now).await;
-        return Err(AppError::of(
-            ErrorCode::Forbidden,
-            "That Plex account is not linked to an Afisharr account.",
-        ));
-    };
-
-    // The token goes to `secrets`, sealed, and never to `plex_pin_logins`
-    // (PRD §19.6). It is the crown jewel: it authorises deletion.
-    let sealed = state
-        .secret_key()
-        .seal(auth_token.as_bytes())
-        .map_err(AppError::internal)?;
-    state
-        .database()
-        .writer()
-        .submit(secrets::PutSecret {
-            name: PLEX_TOKEN_SECRET.to_owned(),
-            sealed,
-            at: now,
-        })
-        .await
-        .map_err(AppError::internal)?;
-
-    // The row is refreshed from plex.tv rather than left as it was: a renamed
-    // account is the same account, matched on the numeric id, which is the
-    // binding and not the key (P4).
-    let refreshed = state
-        .database()
-        .writer()
-        .submit(accounts::UpsertPlexUser {
-            id: Id::generate(state.clock()),
-            plex_account_id: account.id,
-            plex_uuid: account.uuid.clone(),
-            username: account.username.clone(),
-            email: account.email.clone(),
-            avatar_url: account.thumb.clone(),
-            is_admin: user.is_admin,
-            at: now,
-        })
-        .await
-        .map_err(AppError::internal)?
-        .map_err(AppError::internal)?;
-
-    close(state, attempt_id, plex_pin::PinLoginResult::Success, now).await;
-
-    let issued = session::issue(
-        state,
-        &refreshed.id,
-        client,
-        headers
-            .get(USER_AGENT)
-            .and_then(|value| value.to_str().ok())
-            .map(str::to_owned),
-    )
-    .await?;
-
-    let mut jar = jar;
-    for cookie in issued.cookies {
-        jar = jar.add(cookie);
-    }
-    Ok((
-        jar,
-        Json(PinState::Authorized {
-            user_id: refreshed.id.clone(),
-            username: refreshed.username.clone(),
-        }),
-    ))
-}
-
-/// The `users` row this plex.tv account is bound to, if any.
-///
-/// Matched on `plex_account_id` — the binding plex.tv assigns — rather than on
-/// the username, which the account holder can change at will. Tier 0 is an
-/// admin-only surface (D-007), so there is no self-registration path here: an
-/// account nobody has linked signs in as nobody.
-async fn linked_account(
-    state: &ApiState,
-    account: &PlexAccount,
-) -> AppResult<Option<accounts::User>> {
-    Ok(
-        accounts::find_by_plex_account(state.database().readers(), account.id)
-            .await
-            .map_err(AppError::internal)?
-            .filter(accounts::User::is_active),
-    )
-}
-
-async fn close(state: &ApiState, id: &str, result: plex_pin::PinLoginResult, now: Timestamp) {
+) {
     let _ = state
         .database()
         .writer()
@@ -303,6 +237,7 @@ mod tests {
         let authorized = serde_json::to_value(PinState::Authorized {
             user_id: "U".to_owned(),
             username: "operator".to_owned(),
+            is_admin: false,
         })
         .expect("serialises");
 
@@ -310,5 +245,41 @@ mod tests {
         assert_eq!(expired["state"], "expired");
         assert_eq!(authorized["state"], "authorized");
         assert_eq!(authorized["username"], "operator");
+        // Every other body on this surface is camelCase, and the generated
+        // client is built from the annotation rather than from a hand-written
+        // guess at it (§24.5).
+        assert_eq!(authorized["userId"], "U");
+    }
+
+    #[test]
+    fn an_authorized_state_reports_the_privilege_rather_than_implying_one() {
+        // The client routes on this. A linked account that administers nothing
+        // reported as an administrator lands on pages that answer 403.
+        let viewer = serde_json::to_value(PinState::Authorized {
+            user_id: "U".to_owned(),
+            username: "viewer".to_owned(),
+            is_admin: false,
+        })
+        .expect("serialises");
+        let administrator = serde_json::to_value(PinState::Authorized {
+            user_id: "A".to_owned(),
+            username: "operator".to_owned(),
+            is_admin: true,
+        })
+        .expect("serialises");
+
+        assert_eq!(viewer["isAdmin"], false);
+        assert_eq!(administrator["isAdmin"], true);
+    }
+
+    #[test]
+    fn an_attempt_is_only_completable_by_the_browser_holding_its_cookie() {
+        use axum_extra::extract::cookie::Cookie;
+
+        let started = CookieJar::new().add(Cookie::new(PLEX_PIN_COOKIE, "attempt-a"));
+        assert!(holds_attempt(&started, "attempt-a"));
+        // The identifier is public. Knowing it is not holding it.
+        assert!(!holds_attempt(&started, "attempt-b"));
+        assert!(!holds_attempt(&CookieJar::new(), "attempt-a"));
     }
 }

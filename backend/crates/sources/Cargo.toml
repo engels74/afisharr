@@ -23,3 +23,9 @@ url.workspace = true
 
 [lints]
 workspace = true
+
+[dev-dependencies]
+# A socket, so the transport's failure modes can be provoked rather than
+# described: a server that sends headers and then goes away is the one shape a
+# mocked client cannot produce honestly.
+tokio = { workspace = true, features = ["io-util", "macros", "net", "rt-multi-thread"] }
