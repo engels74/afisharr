@@ -1,0 +1,81 @@
+// SPDX-FileCopyrightText: 2026 Afisharr contributors
+// SPDX-License-Identifier: AGPL-3.0-or-later
+
+import { api, csrfHeaders, type Problem } from '$lib/api/client';
+
+/** The signed-in account. */
+export interface SignedIn {
+	userId: string;
+	username: string;
+	displayName?: string | null;
+	isAdmin: boolean;
+}
+
+/** What an auth call produced. A refusal is a value, never an exception. */
+export type AuthResult<T> =
+	| { readonly outcome: 'ok'; readonly value: T }
+	| { readonly outcome: 'refused'; readonly problem: Problem };
+
+/** Signs in with a username and a password. */
+export async function signIn(
+	username: string,
+	password: string,
+): Promise<AuthResult<SignedIn>> {
+	const { data, error } = await api.POST('/api/auth/login', {
+		body: { username, password },
+		headers: csrfHeaders(),
+	});
+	return data
+		? { outcome: 'ok', value: data as SignedIn }
+		: { outcome: 'refused', problem: error as Problem };
+}
+
+/** Signs out, revoking the session that made the request. */
+export async function signOut(): Promise<void> {
+	await api.POST('/api/auth/logout', { headers: csrfHeaders() });
+}
+
+/** Reads the signed-in account, if there is one. */
+export async function readSession(): Promise<AuthResult<SignedIn>> {
+	const { data, error } = await api.GET('/api/auth/session');
+	return data
+		? { outcome: 'ok', value: data as SignedIn }
+		: { outcome: 'refused', problem: error as Problem };
+}
+
+/** A started Plex sign-in. */
+export interface PinStarted {
+	id: string;
+	code: string;
+	authorizationUrl?: string | null;
+	expiresAt: number;
+}
+
+/** What one poll of a Plex sign-in found. */
+export type PinState =
+	| { state: 'pending' }
+	| { state: 'authorized'; userId: string; username: string }
+	| { state: 'expired' };
+
+/** Starts a Plex sign-in, by code or by hosted sign-in. */
+export async function startPlexPin(
+	oauth: boolean,
+): Promise<AuthResult<PinStarted>> {
+	const { data, error } = await api.POST('/api/auth/plex/pin', {
+		body: { oauth, forwardUrl: oauth ? window.location.href : null },
+		headers: csrfHeaders(),
+	});
+	return data
+		? { outcome: 'ok', value: data as PinStarted }
+		: { outcome: 'refused', problem: error as Problem };
+}
+
+/** Polls one Plex sign-in. */
+export async function pollPlexPin(id: string): Promise<AuthResult<PinState>> {
+	const { data, error } = await api.GET('/api/auth/plex/pin/{id}', {
+		params: { path: { id } },
+	});
+	return data
+		? { outcome: 'ok', value: data as PinState }
+		: { outcome: 'refused', problem: error as Problem };
+}

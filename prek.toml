@@ -101,6 +101,18 @@ hooks = [
   { id = "web-biome", name = "biome ci", entry = "bun run --cwd frontend lint", language = "system", files = "^frontend/", pass_filenames = false },
   { id = "svelte-check", name = "svelte-check", entry = "bun run --cwd frontend check", language = "system", files = "^frontend/", pass_filenames = false, stages = ["pre-push"] },
 
+  # The two interface rules Biome cannot see (I-UX-7, I-UX-2). Commit stage,
+  # for the same reason the size limits are: a hard-coded string caught five
+  # commits later is a sweep, and a sweep is the expensive order.
+  #
+  # `bun`, never `npm` or `npx`, in any lane or hook.
+  { id = "interface-rules", name = "interface rules (I-UX-7, I-UX-2)", entry = "bun run --cwd frontend lint:interface", language = "system", files = "^frontend/src/", pass_filenames = false },
+
+  # The generated client is the sole contract (24.5). Push stage: it compiles
+  # the backend to print the document, which is too slow for every commit and
+  # too important to leave to CI alone.
+  { id = "openapi-contract", name = "OpenAPI contract", entry = "scripts/check-openapi-contract.sh", language = "system", files = "^(backend/crates/api/|frontend/src/lib/api/)", pass_filenames = false, stages = ["pre-push"] },
+
   # Structure gate — the script-checkable half of PRD §24.6 (D-047).
   #
   # Commit stage, not push stage, and deliberately: the point of a size limit is

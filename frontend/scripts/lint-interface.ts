@@ -1,0 +1,177 @@
+// SPDX-FileCopyrightText: 2026 Afisharr contributors
+// SPDX-License-Identifier: AGPL-3.0-or-later
+
+/**
+ * The two interface rules no general linter can see.
+ *
+ * Biome checks the language; these check the product. Both are build-failing
+ * because both describe a failure that compiles, type-checks, and looks right
+ * in review:
+ *
+ * 1. **No hard-coded user-facing string** (`I-UX-7`). Every user-visible string
+ *    resolves through the catalogue, from the first commit. Retrofitting i18n
+ *    across every component later is the expensive order.
+ * 2. **No state inferred from an HTTP status** (`I-UX-2`). The engine reports
+ *    frozen, degraded, stale, pending, blocked, and non-convergent explicitly;
+ *    a page that re-derives one from `response.status` or from an array's
+ *    length reintroduces in the client exactly the flattening the engine was
+ *    built to avoid.
+ */
+
+import { Glob } from 'bun';
+
+/** Where product code lives. Generated output and tests are not product code. */
+const ROOTS = ['src/routes', 'src/lib/features', 'src/lib/components'];
+
+/** One rule violation, as the report prints it. */
+interface Finding {
+	readonly file: string;
+	readonly line: number;
+	readonly rule: string;
+	readonly detail: string;
+	readonly source: string;
+}
+
+/**
+ * Text inside a Svelte template that a person would read.
+ *
+ * Matches the run of text between `>` and `<` on one line. Deliberately
+ * line-based: a template scanner that tried to parse Svelte would be a second
+ * Svelte parser, and the failure this catches — somebody typing a sentence
+ * into markup — is on one line every time.
+ */
+const TEMPLATE_TEXT = />([^<>{}\n]+)</g;
+
+/** Attributes whose value is read by a person or by a screen reader. */
+const USER_FACING_ATTRIBUTES =
+	/\s(?:title|placeholder|alt|aria-label|aria-description|aria-placeholder)=["']([^"'{]+)["']/g;
+
+/** Reading a status code to decide what to render. */
+const STATUS_BRANCH =
+	/(?:response|res|result|error|problem)\s*(?:\?)?\.status\s*(?:===|!==|==|!=|>=|<=|>|<)/;
+
+/** Comparing a status code against a literal in a switch. */
+const STATUS_SWITCH = /switch\s*\(\s*[A-Za-z_$][\w$]*\.status\s*\)/;
+
+/** Deciding a display state from how many things came back. */
+const LENGTH_BRANCH =
+	/\b(?:if|\?|&&|\|\|)\s*\(?\s*[A-Za-z_$][\w$.]*\.length\s*(?:===|!==|==|!=|>|<|>=|<=)\s*0/;
+
+/** A line the author has explicitly exempted, with a reason. */
+const ALLOW = /afisharr-lint-ignore:\s*(\S+)\s+(.+)/;
+
+/** Text that is not a sentence: symbols, numbers, and single words of markup. */
+function isUserFacing(text: string): boolean {
+	const trimmed = text.trim();
+	if (trimmed.length < 2) {
+		return false;
+	}
+	// Needs at least two letters in a row somewhere, and at least one space or
+	// a capital followed by a lower-case run — otherwise it is punctuation, an
+	// entity, or a bare token like `px-4`.
+	if (!/[A-Za-z]{2}/.test(trimmed)) {
+		return false;
+	}
+	// A lone lower-case identifier-ish token is markup, not a sentence.
+	return /\s/.test(trimmed) || /^[A-Z]/.test(trimmed);
+}
+
+/** Every source file under the product roots. */
+async function sources(): Promise<string[]> {
+	const found: string[] = [];
+	for (const root of ROOTS) {
+		const glob = new Glob('**/*.{svelte,ts}');
+		for await (const relative of glob.scan({ cwd: root })) {
+			if (relative.endsWith('.test.ts') || relative.includes('generated/')) {
+				continue;
+			}
+			found.push(`${root}/${relative}`);
+		}
+	}
+	return found.sort();
+}
+
+/** Checks one file and returns what it found. */
+function check(file: string, contents: string): Finding[] {
+	const findings: Finding[] = [];
+	const lines = contents.split('\n');
+
+	lines.forEach((source, index) => {
+		const exemption = ALLOW.exec(source) ?? ALLOW.exec(lines[index - 1] ?? '');
+		const exempted = exemption?.[1];
+
+		const record = (rule: string, detail: string) => {
+			if (exempted === rule || exempted === 'all') {
+				return;
+			}
+			findings.push({
+				file,
+				line: index + 1,
+				rule,
+				detail,
+				source: source.trim(),
+			});
+		};
+
+		if (file.endsWith('.svelte')) {
+			for (const match of source.matchAll(TEMPLATE_TEXT)) {
+				if (isUserFacing(match[1])) {
+					record('no-hardcoded-string', `template text "${match[1].trim()}"`);
+				}
+			}
+			for (const match of source.matchAll(USER_FACING_ATTRIBUTES)) {
+				if (isUserFacing(match[1])) {
+					record('no-hardcoded-string', `attribute value "${match[1].trim()}"`);
+				}
+			}
+		}
+
+		if (STATUS_BRANCH.test(source) || STATUS_SWITCH.test(source)) {
+			record('no-status-branch', 'a display decision read from an HTTP status');
+		}
+		if (LENGTH_BRANCH.test(source)) {
+			record(
+				'no-status-branch',
+				'a display decision read from an array length',
+			);
+		}
+	});
+
+	return findings;
+}
+
+/** Runs both rules over the product tree and reports. */
+async function main(): Promise<number> {
+	const files = await sources();
+	const findings: Finding[] = [];
+	for (const file of files) {
+		findings.push(...check(file, await Bun.file(file).text()));
+	}
+
+	if (findings.length === 0) {
+		console.log(`interface rules: ${files.length} files, nothing to report`);
+		return 0;
+	}
+
+	for (const finding of findings) {
+		console.error(
+			`${finding.file}:${finding.line}  ${finding.rule}: ${finding.detail}\n    ${finding.source}`,
+		);
+	}
+	console.error(
+		`\n${findings.length} interface-rule violation(s).\n` +
+			'Route user-facing text through the catalogue (t/tn), and read the state ' +
+			'the API returned instead of inferring one.\n' +
+			'A line that genuinely must be exempt carries ' +
+			'`afisharr-lint-ignore: <rule> <reason>`.',
+	);
+	return 1;
+}
+
+// Exported for the rule's own tests, which is the only way to be sure a lint
+// rule catches what it claims to.
+export { check, isUserFacing };
+
+if (import.meta.main) {
+	process.exit(await main());
+}

@@ -15,4 +15,13 @@ preload = ["./test-setup.ts"]
 pathIgnorePatterns = ["**/*.svelte.test.ts"]
 coverage = true
 coverageReporter = ["text", "lcov"]
+# Generated output is exempt from every structural rule (§24.6.4), and the
+# coverage threshold is one of them: the OpenAPI client is a description of the
+# backend's annotations, and testing it would be testing the generator.
+#
+# `scripts/` holds the build-gate tools. Their rules are unit-tested — a lint
+# rule nobody tested is a lint rule that catches nothing — but their `main`
+# shells are argument parsing and printing, and driving those to a line count
+# would measure the wrong thing.
+coveragePathIgnorePatterns = ["src/lib/api/generated/**", "scripts/**"]
 coverageThreshold = { lines = 0.85, functions = 0.90, statements = 0.80 }
