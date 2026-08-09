@@ -160,3 +160,65 @@ impl WriteOperation for InsertLifecycleSubject {
         Ok(())
     }
 }
+
+/// Inserts one cross-provider identifier mapping.
+pub struct InsertIdMapping {
+    /// The identifier space the mapping is from.
+    pub from_space: String,
+    /// The identifier value the mapping is from.
+    pub from_value: String,
+    /// The identifier space the mapping is to.
+    pub to_space: String,
+    /// The identifier value the mapping is to.
+    pub to_value: String,
+    /// The season it applies to, or `None` for the whole title.
+    pub season: Option<i64>,
+}
+
+impl WriteOperation for InsertIdMapping {
+    type Output = ();
+
+    async fn execute(self, conn: &mut SqliteConnection) -> Result<(), sqlx::Error> {
+        let Self {
+            from_space,
+            from_value,
+            to_space,
+            to_value,
+            season,
+        } = self;
+
+        // A whole-title mapping leaves the column out and takes the schema's
+        // `-1`, which is how a bulk import writes "not season-scoped". Naming
+        // it and binding NULL is what the primary key refuses.
+        match season {
+            None => {
+                sqlx::query!(
+                    "INSERT INTO id_mappings
+                         (from_space, from_value, to_space, to_value, dataset, imported_at)
+                     VALUES (?1, ?2, ?3, ?4, 'anime-lists', 0)",
+                    from_space,
+                    from_value,
+                    to_space,
+                    to_value
+                )
+                .execute(&mut *conn)
+                .await?;
+            }
+            Some(season) => {
+                sqlx::query!(
+                    "INSERT INTO id_mappings
+                         (from_space, from_value, to_space, to_value, season, dataset, imported_at)
+                     VALUES (?1, ?2, ?3, ?4, ?5, 'anime-lists', 0)",
+                    from_space,
+                    from_value,
+                    to_space,
+                    to_value,
+                    season
+                )
+                .execute(&mut *conn)
+                .await?;
+            }
+        }
+        Ok(())
+    }
+}

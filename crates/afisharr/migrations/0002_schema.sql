@@ -249,7 +249,12 @@ CREATE TABLE id_mappings (
     from_value   TEXT NOT NULL,
     to_space     TEXT NOT NULL,
     to_value     TEXT NOT NULL,
-    season       INTEGER,
+    -- `-1` is the whole title, matching the sentinel
+    -- `ux_lifecycle_subjects__identity` uses. Declared rather than nullable:
+    -- every PRIMARY KEY column of a STRICT, WITHOUT ROWID table is implicitly
+    -- NOT NULL, so a nullable `season` advertised a NULL the table refuses and
+    -- left "not season-scoped" with no value it would accept.
+    season       INTEGER NOT NULL DEFAULT -1,
     dataset      TEXT NOT NULL,                    -- which mapping dataset supplied this
     imported_at  INTEGER NOT NULL,
     PRIMARY KEY (from_space, from_value, to_space, season)

@@ -9,7 +9,9 @@
 mod harness;
 
 use afisharr_core::identifier::{EVERYONE, OWNER, SHARED_ALL};
-use harness::{InsertLifecycleSubject, InsertPlexPrincipal, InsertVisibility, TempInstance};
+use harness::{
+    InsertIdMapping, InsertLifecycleSubject, InsertPlexPrincipal, InsertVisibility, TempInstance,
+};
 
 /// PRD §19 defines 68 tables; `_sqlx_migrations` is sqlx's bookkeeping, not ours.
 const DEFINED_TABLES: i64 = 68;
@@ -204,5 +206,43 @@ async fn a_season_subject_coexists_with_the_whole_title_subject() {
         .await
         .expect("counting subjects");
     assert_eq!(subjects, 2);
+    booted.database.close().await;
+}
+
+/// A mapping that is not season-scoped is still insertable.
+///
+/// `id_mappings` is `WITHOUT ROWID` and `season` is part of its primary key, so
+/// `SQLite` makes the column NOT NULL whatever it is declared as. The whole title
+/// is therefore the schema's `-1` default, taken by an insert that leaves the
+/// column out — which is the statement a nullable declaration refused.
+#[tokio::test]
+async fn a_whole_title_id_mapping_coexists_with_its_seasons() {
+    let instance = TempInstance::new();
+    let booted = instance.boot().await;
+    let writer = booted.database.writer();
+
+    for season in [None, Some(1), Some(2)] {
+        writer
+            .submit(InsertIdMapping {
+                from_space: "mal".to_owned(),
+                from_value: "9253".to_owned(),
+                to_space: "tvdb".to_owned(),
+                to_value: "81797".to_owned(),
+                season,
+            })
+            .await
+            .expect("a whole title and its seasons are different mappings");
+    }
+
+    let seasons: Vec<i64> =
+        sqlx::query_scalar("SELECT season FROM id_mappings ORDER BY season ASC")
+            .fetch_all(booted.database.readers())
+            .await
+            .expect("reading the mappings");
+    assert_eq!(
+        seasons,
+        vec![-1, 1, 2],
+        "-1 is the whole title, and it is a row like any other"
+    );
     booted.database.close().await;
 }

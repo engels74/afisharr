@@ -15,5 +15,7 @@
 mod fixtures;
 mod temp_instance;
 
-pub use fixtures::{InsertLifecycleSubject, InsertPlexPrincipal, InsertVisibility, seed_library};
+pub use fixtures::{
+    InsertIdMapping, InsertLifecycleSubject, InsertPlexPrincipal, InsertVisibility, seed_library,
+};
 pub use temp_instance::TempInstance;
