@@ -5,8 +5,12 @@
 
 use std::path::Path;
 
-use anyhow::{Context, Result};
-use tracing_appender::{non_blocking::WorkerGuard, rolling};
+use afisharr_core::settings::LoggingSettings;
+use anyhow::{Context, Result, bail};
+use tracing_appender::{
+    non_blocking::WorkerGuard,
+    rolling::{Builder, Rotation},
+};
 use tracing_subscriber::{EnvFilter, fmt, layer::SubscriberExt, util::SubscriberInitExt};
 
 /// Keeps the log writer's worker thread alive for the process's lifetime.
@@ -31,15 +35,30 @@ pub struct LogGuard {
 /// with the jobs surface. Two different readers, two different stores.
 ///
 /// # Errors
-/// Returns an error when the log directory cannot be created, or when the
-/// configured filter is not a tracing directive.
-pub fn init(directory: &Path, filter: &str) -> Result<LogGuard> {
+/// Returns an error when the log directory cannot be created, when the
+/// configured retention is zero, when the configured filter is not a tracing
+/// directive, or when the rotating appender cannot be built.
+pub fn init(directory: &Path, settings: &LoggingSettings) -> Result<LogGuard> {
     std::fs::create_dir_all(directory)
         .with_context(|| format!("creating the log directory {}", directory.display()))?;
 
-    let (writer, guard) = tracing_appender::non_blocking(rolling::daily(directory, "afisharr.log"));
+    // Refused rather than reinterpreted: `Builder::max_log_files` reads `0` as
+    // "keep everything", which is the opposite of what a field called
+    // `retainedFiles` set to zero asks for. Substituting a number the operator
+    // did not choose is the failure `parse_filter` below exists to refuse.
+    let retained = usize::from(settings.retained_files);
+    if retained == 0 {
+        bail!("logging.retainedFiles is 0; a log the instance keeps none of is not a log");
+    }
+    let appender = Builder::new()
+        .rotation(Rotation::DAILY)
+        .filename_prefix("afisharr.log")
+        .max_log_files(retained)
+        .build(directory)
+        .with_context(|| format!("opening the rotating log in {}", directory.display()))?;
+    let (writer, guard) = tracing_appender::non_blocking(appender);
 
-    let filter = parse_filter(filter)?;
+    let filter = parse_filter(&settings.level)?;
 
     tracing_subscriber::registry()
         .with(filter)
@@ -69,6 +88,23 @@ mod tests {
     #[test]
     fn a_directive_the_filter_understands_is_accepted() {
         assert!(parse_filter("afisharr_core=debug,info").is_ok());
+    }
+
+    #[test]
+    fn a_retention_of_zero_is_refused_rather_than_read_as_unlimited() {
+        let directory = tempfile::TempDir::new().expect("a scratch directory");
+        let settings = LoggingSettings {
+            retained_files: 0,
+            ..LoggingSettings::default()
+        };
+
+        // The refusal returns before the global subscriber is installed, so
+        // this is safe to run alongside every other test in the binary.
+        let error = format!(
+            "{:#}",
+            init(directory.path(), &settings).expect_err("zero kept files is not a log")
+        );
+        assert!(error.contains("logging.retainedFiles"), "{error}");
     }
 
     #[test]

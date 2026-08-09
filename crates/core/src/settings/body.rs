@@ -99,7 +99,7 @@ impl Default for RenderSettings {
 pub struct LoggingSettings {
     /// Tracing filter directive, e.g. `info` or `afisharr_core=debug,info`.
     pub level: String,
-    /// How many rotated files to keep.
+    /// How many log files to keep, counting the one being written.
     pub retained_files: u16,
 }
 

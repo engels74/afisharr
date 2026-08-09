@@ -43,7 +43,7 @@ impl Cli {
         // Logging is initialised from the configured level before anything can
         // fail interestingly, so a failed start is a log line rather than a
         // bare process exit.
-        let _log_guard = observability::init(&paths.logs(), &configured.logging.level)?;
+        let _log_guard = observability::init(&paths.logs(), &configured.logging)?;
 
         match self.command.unwrap_or(Command::Start) {
             Command::Start => start::run(&paths, configured).await,
