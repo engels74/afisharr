@@ -2589,8 +2589,8 @@ cargo +nightly miri test
 bun install --frozen-lockfile   # fail if bun.lock would change
 biome ci .                      # format + lint + assist, writes nothing
 bun run check                   # svelte-kit sync && svelte-check --tsconfig ./tsconfig.json
-bun test                        # pure .ts / .svelte.ts unit tests
-bun run test:browser            # vitest run — .svelte component tests
+bun test                        # unit tests — every *.test.ts except *.svelte.test.ts
+bun run test:browser            # vitest run — *.svelte.test.ts in chromium
 bun run build                   # vite build via adapter-static; must complete with no server-only code reachable
 ```
 
