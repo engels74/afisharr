@@ -28,7 +28,12 @@ impl TempInstance {
 
     /// Runs the full boot sequence against this directory.
     pub async fn boot(&self) -> startup::Booted {
-        startup::boot(&self.paths, SettingsBody::default())
+        self.boot_with(SettingsBody::default()).await
+    }
+
+    /// Runs the full boot sequence with a settings document of the test's own.
+    pub async fn boot_with(&self, configured: SettingsBody) -> startup::Booted {
+        startup::boot(&self.paths, configured)
             .await
             .expect("a fresh instance must boot")
     }

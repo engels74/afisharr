@@ -327,3 +327,31 @@ async fn no_secret_value_reaches_settings_or_its_history() {
     }
     booted.database.close().await;
 }
+
+/// Retention says how much history to keep, never whether *this* migration is
+/// protected: the copy taken moments earlier is not a prune candidate.
+#[tokio::test]
+async fn a_retention_of_zero_still_leaves_this_migration_its_backup() {
+    let instance = TempInstance::new();
+    let mut configured = SettingsBody::default();
+    configured.backup.retained_pre_migration = 0;
+
+    let booted = instance.boot_with(configured).await;
+    booted.database.close().await;
+
+    let copies = std::fs::read_dir(instance.paths().backups())
+        .expect("the backup directory must exist after a migration")
+        .filter_map(Result::ok)
+        .filter(|entry| {
+            entry
+                .file_name()
+                .to_string_lossy()
+                .starts_with(PRE_MIGRATION_PREFIX)
+        })
+        .count();
+
+    assert_eq!(
+        copies, 1,
+        "a forward-only migration may never run with nothing behind it (I-DATA-8)"
+    );
+}

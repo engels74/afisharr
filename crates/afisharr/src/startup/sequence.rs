@@ -120,8 +120,14 @@ async fn migrate(
         .context("taking the pre-migration backup; the migration has not run")?;
     info!(backup = %written.display(), from_version, "pre-migration backup written");
 
+    // The copy written above is named as protected rather than trusted to rank
+    // first: `retained_pre_migration` is an operator's number, and a `0` — or a
+    // leftover copy of a newer schema outranking this one — would otherwise
+    // delete the very backup this forward-only migration stands behind
+    // (`I-DATA-8`). Retention says how much history to hold, never whether this
+    // migration is protected.
     let keep = usize::from(configured.backup.retained_pre_migration);
-    match backup::prune(paths.backups(), keep).await {
+    match backup::prune(paths.backups(), keep, &written).await {
         Ok(removed) if !removed.is_empty() => {
             info!(
                 removed = removed.len(),

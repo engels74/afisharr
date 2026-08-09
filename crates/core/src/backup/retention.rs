@@ -24,6 +24,11 @@ pub fn pre_migration_path(directory: impl AsRef<Path>, version: i64, at: Timesta
 
 /// Deletes all but the newest `keep` pre-migration copies, and reports what went.
 ///
+/// `protected` is never deleted, whatever `keep` says and wherever it ranks. The
+/// caller has just written it to stand behind a forward-only migration, so
+/// whether that migration is protected is not a retention question (`I-DATA-8`):
+/// `keep` says how much *history* to hold on to.
+///
 /// Ordering is by filename, which sorts by version and then by the millisecond
 /// timestamp — both zero-padded by construction only in the sense that they are
 /// monotonic integers, so the comparison is numeric on the parsed parts rather
@@ -32,7 +37,11 @@ pub fn pre_migration_path(directory: impl AsRef<Path>, version: i64, at: Timesta
 /// # Errors
 /// Returns [`BackupError::Directory`] when the directory cannot be listed or a
 /// file cannot be removed.
-pub async fn prune(directory: impl AsRef<Path>, keep: usize) -> Result<Vec<PathBuf>, BackupError> {
+pub async fn prune(
+    directory: impl AsRef<Path>,
+    keep: usize,
+    protected: &Path,
+) -> Result<Vec<PathBuf>, BackupError> {
     let directory = directory.as_ref().to_path_buf();
     let mut copies = match tokio::fs::read_dir(&directory).await {
         Ok(entries) => collect(entries).await?,
@@ -49,7 +58,11 @@ pub async fn prune(directory: impl AsRef<Path>, keep: usize) -> Result<Vec<PathB
     copies.sort_unstable_by_key(|(key, _)| std::cmp::Reverse(*key));
 
     let mut removed = Vec::new();
-    for (_, path) in copies.into_iter().skip(keep) {
+    for (_, path) in copies
+        .into_iter()
+        .skip(keep)
+        .filter(|(_, path)| path != protected)
+    {
         tokio::fs::remove_file(&path)
             .await
             .map_err(|source| BackupError::Directory {
@@ -127,7 +140,8 @@ mod tests {
         let unrelated = dir.path().join("nightly-2026.db");
         tokio::fs::write(&unrelated, []).await.unwrap();
 
-        let removed = prune(dir.path(), 3).await.unwrap();
+        let protected = pre_migration_path(dir.path(), 1, Timestamp::from_millis(5));
+        let removed = prune(dir.path(), 3, &protected).await.unwrap();
 
         assert_eq!(removed.len(), 2, "five copies minus the three kept");
         for taken_at in 3..=5 {
@@ -143,7 +157,7 @@ mod tests {
     async fn pruning_a_directory_that_does_not_exist_is_not_an_error() {
         let dir = TempDir::new().unwrap();
         assert!(
-            prune(dir.path().join("never-used"), 3)
+            prune(dir.path().join("never-used"), 3, Path::new("unwritten.db"))
                 .await
                 .unwrap()
                 .is_empty()
@@ -158,9 +172,26 @@ mod tests {
         tokio::fs::write(&old_schema, []).await.unwrap();
         tokio::fs::write(&new_schema, []).await.unwrap();
 
-        prune(dir.path(), 1).await.unwrap();
+        prune(dir.path(), 1, &new_schema).await.unwrap();
 
         assert!(new_schema.exists());
         assert!(!old_schema.exists());
+    }
+
+    /// The copy standing behind *this* migration outlives any retention number.
+    #[tokio::test]
+    async fn the_protected_copy_survives_a_retention_that_would_delete_it() {
+        let dir = TempDir::new().unwrap();
+        // A leftover from a newer schema outranks the fresh copy, so ranking
+        // alone would delete exactly the one the migration needs.
+        let stale = pre_migration_path(dir.path(), 9, Timestamp::from_millis(1));
+        let fresh = pre_migration_path(dir.path(), 2, Timestamp::from_millis(9_999));
+        tokio::fs::write(&stale, []).await.unwrap();
+        tokio::fs::write(&fresh, []).await.unwrap();
+
+        let removed = prune(dir.path(), 0, &fresh).await.unwrap();
+
+        assert!(fresh.exists(), "the migration's own backup is not history");
+        assert_eq!(removed, vec![stale], "everything else is");
     }
 }
