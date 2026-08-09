@@ -187,7 +187,7 @@ a unique index. Both are cheap now and are table rebuilds later.
      (generated client, `target/`, `.svelte-kit/`, migrations, registry constant tables) excluded in
      the script rather than by raising a threshold. It exists from the first commit because a limit
      introduced in Phase 6 is a limit that first fires as a backlog (§24.6.4, D-047).
-- [ ] **Done when:** `prek install` leaves hooks active in a fresh clone, and a trivial commit runs the
+- [x] **Done when:** `prek install` leaves hooks active in a fresh clone, and a trivial commit runs the
   merge lane to a pass inside the 10-minute budget, with the nightly and release lane jobs present and
   schedulable. The structure gate runs in that lane and passes on the empty tree.
 
