@@ -7982,6 +7982,41 @@ unread. Rejected: leaving them as an unnamed convention that agents happen to pi
 convention nothing states is a convention no reviewer can enforce. Requirement in §24.1; authority
 in §0.2; gate and checklist lines in the implementation plan's §A.1–§A.4.
 
+**D-049 — The implementation plan carries progress checkboxes, and a checked box records a check
+that passed.** *Raised while recording the plan's tracking convention, 2026-08-09.* Every subtask and
+every **Done when** clause in the implementation plan carries a `- [ ]` marker, ticked in place as
+work lands. The marker records that the clause was checked and held. It is never the thing that makes
+a task done, and a ticked box beside a failing gate is a documentation bug in which the gate wins.
+
+*Why this is not the fabrication D-039 refuses:* D-039 keeps dates and capacity figures out of both
+documents because each is a prediction about work that has not started, and a prediction stated as
+fact is a fabrication. A checkbox is the opposite kind of claim. It says a named command exited zero
+or a named invariant's test passed — a past event, re-runnable by anyone who doubts it. The two rules
+do not collide, and saying so here stops the next reader reopening D-039 by accident on the grounds
+that the plan now appears to track something.
+
+*Why the boxes live in the plan rather than in a tracker:* this document and the implementation plan
+are the complete normative set (§0.1). A second artefact holding the same fact is a second thing to
+keep true, and the one that goes stale is always the one nobody has to read in order to do the work.
+
+*Why the subtask level and not the task level alone:* a task here runs to seven subtasks of
+independent work, several of them days apart. One box per task reports nothing until the whole task
+lands, which is exactly when a reader no longer needs the report.
+
+*Why a phase carries no box:* a phase is finished when its exit invariants pass, which is a property
+of a build rather than of this document set. A phase box could only be a summary of the task boxes
+beneath it, kept in step by hand — and a summary is believed over the thing it summarises the first
+time the two disagree.
+
+*Rejected:* checkboxes on the numbered subtask markers themselves (`1. [ ]`), because a task-list
+marker inside an ordered list is an undocumented extension of an extension: it renders on github.com
+and inconsistently elsewhere, and this plan is read in editors as well as on the web. The subtasks
+keep their numbers as text on an unordered box instead. Rejected: no tracking at all, with the git
+history as the record, because "what is built" is not a question a log answers without reading every
+commit against a plan of 121 tasks. Convention and the two-kinds-of-checkbox rule in the
+implementation plan's *How to read this*; the appendix's own boxes are a reusable template and say so
+where they live.
+
 ### 22.4 Change requests against the frozen scope
 
 The scope ledger froze on 2026-08-08. Every entry below is a recorded, dated reopening — never a

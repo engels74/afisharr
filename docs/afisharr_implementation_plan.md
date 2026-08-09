@@ -48,6 +48,24 @@ against the shell built in Phase 1.
 invariant, a command that exits zero, or a specific observable behaviour. "Looks correct" is not a
 completion criterion anywhere in this plan.
 
+**The boxes record that check. They never replace it.** Every subtask carries a `- [ ]`, and so does
+every **Done when** clause. Tick a subtask when it is built. Tick the **Done when** box only when the
+clause is independently true — the command was run and exited zero, or the named invariant's test
+passes. Nothing is ticked on the strength of having done the steps, and a ticked box beside a failing
+gate is a documentation bug rather than a finished task: the gate wins, and the box is wrong.
+Recorded as D-049.
+
+**A phase carries no box.** A phase is finished when every task box inside it is ticked *and* its exit
+invariants pass. The box on its last task is not a claim about the phase, and no summary of the boxes
+below is kept anywhere — a hand-maintained summary is believed over the thing it summarises the first
+time the two disagree.
+
+**Two kinds of checkbox live in this document, and only one of them is ever ticked here.** The boxes
+in the phase bodies are the progress ledger: they are marked in place as work lands. The boxes in
+Appendix A (§A.2–§A.4) are a template — one master copy, worked through fresh by every author and
+every reviewer on every task, and never marked in this file. A `- [x]` in Appendix A means somebody
+ticked the template instead of their own copy.
+
 **Modular structure is a constraint on every task, from Task 0.1 onward.** The source tree divides
 into subfolders by domain; every file states one thing; no module collects unrelated
 responsibilities; every file carries a soft and a hard size limit; every module exposes a narrow
@@ -156,20 +174,20 @@ a unique index. Both are cheap now and are table rebuilds later.
 - **Where:** repository root; `crates/core`, `crates/sources`, `crates/plex`, `crates/render`,
   `crates/packs`, `crates/api`, `crates/afisharr`; `web/`.
 - **Subtasks:**
-  1. Scaffold the seven workspace crates with `crates/afisharr` as the binary depending on the rest.
-  2. Scaffold `web/` as a SvelteKit 2 / Svelte 5 project with UnoCSS (`presetWind4`), shadcn-svelte,
+  - [ ] 1. Scaffold the seven workspace crates with `crates/afisharr` as the binary depending on the rest.
+  - [ ] 2. Scaffold `web/` as a SvelteKit 2 / Svelte 5 project with UnoCSS (`presetWind4`), shadcn-svelte,
      `adapter-static`, and Bun tooling.
-  3. Install prek and commit its hook configuration.
-  4. Wire the merge lane: every table-driven and unit-level invariant, budgeted at 10 minutes.
-  5. Wire the nightly-lane and release-lane job shapes now, even though they have nothing but
+  - [ ] 3. Install prek and commit its hook configuration.
+  - [ ] 4. Wire the merge lane: every table-driven and unit-level invariant, budgeted at 10 minutes.
+  - [ ] 5. Wire the nightly-lane and release-lane job shapes now, even though they have nothing but
      placeholder checks to run — later phases add jobs to an existing lane rather than build one.
-  6. Wire the rule that a nightly failure blocks the next merge until fixed or explicitly waived with
+  - [ ] 6. Wire the rule that a nightly failure blocks the next merge until fixed or explicitly waived with
      a named reason.
-  7. Add the structure gate from §A.1 as a prek hook and a merge-lane step, with the exempt paths
+  - [ ] 7. Add the structure gate from §A.1 as a prek hook and a merge-lane step, with the exempt paths
      (generated client, `target/`, `.svelte-kit/`, migrations, registry constant tables) excluded in
      the script rather than by raising a threshold. It exists from the first commit because a limit
      introduced in Phase 6 is a limit that first fires as a backlog (§24.6.4, D-047).
-- **Done when:** `prek install` leaves hooks active in a fresh clone, and a trivial commit runs the
+- [ ] **Done when:** `prek install` leaves hooks active in a fresh clone, and a trivial commit runs the
   merge lane to a pass inside the 10-minute budget, with the nightly and release lane jobs present and
   schedulable. The structure gate runs in that lane and passes on the empty tree.
 
@@ -177,18 +195,18 @@ a unique index. Both are cheap now and are table rebuilds later.
 - **Build:** all 68 tables and their indexes, exactly as specified, as SQLx migrations.
 - **Where:** `crates/afisharr/migrations/`; `crates/core` (row types, projection functions).
 - **Subtasks:**
-  1. Write migration `0001`, setting `auto_vacuum = INCREMENTAL`, `journal_mode = WAL`, and
+  - [ ] 1. Write migration `0001`, setting `auto_vacuum = INCREMENTAL`, `journal_mode = WAL`, and
      `page_size = 8192` before the first `CREATE TABLE` — these are one-way doors that cannot be set
      after the first write.
-  2. Create every `STRICT` table and every index in the schema, including the four tables that store
+  - [ ] 2. Create every `STRICT` table and every index in the schema, including the four tables that store
      the volatile-parameter feed and bulk-dataset machinery Phase 5 will use.
-  3. Seed the three fixed-ULID principal rows: `Everyone`, `Owner`, `SharedAll`.
-  4. Implement the SQLx migration runner in the binary's startup path.
-  5. Implement the per-table derived-column projection functions (one function per table, per the
+  - [ ] 3. Seed the three fixed-ULID principal rows: `Everyone`, `Owner`, `SharedAll`.
+  - [ ] 4. Implement the SQLx migration runner in the binary's startup path.
+  - [ ] 5. Implement the per-table derived-column projection functions (one function per table, per the
      derived-column rule) and the `afisharr db reproject` command.
-  6. Write the reprojection test: for every row in the database, `project(body_json)` equals the
+  - [ ] 6. Write the reprojection test: for every row in the database, `project(body_json)` equals the
      stored derived columns.
-- **Done when:** `sqlx migrate run` against a fresh database creates all 68 tables with zero errors;
+- [ ] **Done when:** `sqlx migrate run` against a fresh database creates all 68 tables with zero errors;
   `I-DATA-5` passes — inserting a `PlexUser` or `LocalUser` principal row and a `placement_visibility`
   row referencing it requires no `ALTER TABLE`; `I-DATA-10` passes — a second whole-title lifecycle
   subject for the same identity is rejected by its unique index; and `I-DATA-6` passes —
@@ -199,14 +217,14 @@ a unique index. Both are cheap now and are table rebuilds later.
   and post-migration integrity verification.
 - **Where:** `crates/afisharr` (startup path); `crates/core` (backup and integrity checks).
 - **Subtasks:**
-  1. On open, read the applied-migration table; if it names a version this binary does not know,
+  - [ ] 1. On open, read the applied-migration table; if it names a version this binary does not know,
      refuse to start with a message naming both the found version and the binary's newest known one.
-  2. Before running a pending migration, copy the database using SQLite's online backup API — never a
+  - [ ] 2. Before running a pending migration, copy the database using SQLite's online backup API — never a
      file copy — to `backups/pre-migration-<version>-<timestamp>.db`, retaining the last three.
-  3. Run pending migrations, then run `PRAGMA foreign_key_check` and `PRAGMA integrity_check`.
-  4. Reconcile unconfirmed lifecycle intents and expired leases as the final startup step.
-  5. Clear leases whose owner names this process instance on startup, before touching anything else.
-- **Done when:** `I-DATA-7` and `I-DATA-8` pass — a binary pointed at a database with a newer applied
+  - [ ] 3. Run pending migrations, then run `PRAGMA foreign_key_check` and `PRAGMA integrity_check`.
+  - [ ] 4. Reconcile unconfirmed lifecycle intents and expired leases as the final startup step.
+  - [ ] 5. Clear leases whose owner names this process instance on startup, before touching anything else.
+- [ ] **Done when:** `I-DATA-7` and `I-DATA-8` pass — a binary pointed at a database with a newer applied
   migration than it knows refuses to start rather than proceeding; a pending migration produces a
   backup file via the online backup API before it runs; and `foreign_key_check` plus `integrity_check`
   both return clean on first start after a migration.
@@ -216,17 +234,17 @@ a unique index. Both are cheap now and are table rebuilds later.
   network or filesystem I/O.
 - **Where:** `crates/core` (connection pool, write actor, lease acquisition).
 - **Subtasks:**
-  1. Set the connection pragmas on every pooled connection: `foreign_keys = ON`,
+  - [ ] 1. Set the connection pragmas on every pooled connection: `foreign_keys = ON`,
      `busy_timeout = 5000`, `synchronous = NORMAL`, `cache_size = -32000`, `temp_store = MEMORY`.
-  2. Build a read pool of `min(4, cores)` connections and exactly one writer connection owned by a
+  - [ ] 2. Build a read pool of `min(4, cores)` connections and exactly one writer connection owned by a
      write actor; route every mutation through it as a message, never a second write path.
-  3. Implement the `leases` table and its conditional insert-or-update acquisition (steal only an
+  - [ ] 3. Implement the `leases` table and its conditional insert-or-update acquisition (steal only an
      expired lease).
-  4. Enforce hierarchical lease names (`pass:collection:<id>`, `pass:placement:<library_id>`,
+  - [ ] 4. Enforce hierarchical lease names (`pass:collection:<id>`, `pass:placement:<library_id>`,
      `pass:lifecycle:<library_id>`, `job:<job_id>`) and heartbeat-driven abort on lease loss.
-  5. Structure every long-running pass as: snapshot read, do the I/O, commit in short transactions at
+  - [ ] 5. Structure every long-running pass as: snapshot read, do the I/O, commit in short transactions at
      defined checkpoints — never one transaction wrapping the I/O.
-- **Done when:** `I-DATA-2` and `I-DATA-3` pass — two logical passes racing for the same lease name
+- [ ] **Done when:** `I-DATA-2` and `I-DATA-3` pass — two logical passes racing for the same lease name
   never both proceed, the write actor is the only code path that opens a write connection, and no test
   or lint finds a transaction held open across an HTTP call or a library-root filesystem write.
 
@@ -234,14 +252,14 @@ a unique index. Both are cheap now and are table rebuilds later.
 - **Build:** the application log, the single-row `settings` table with history, and instance identity.
 - **Where:** `crates/afisharr` (log init, config loading); `crates/core` (settings, `instance` table).
 - **Subtasks:**
-  1. Implement structured logging to `logs/afisharr.log`, rotated, distinct from the database-backed
+  - [ ] 1. Implement structured logging to `logs/afisharr.log`, rotated, distinct from the database-backed
      run-event log the GUI reads.
-  2. Implement the `instance` table, generating `client_identifier` once on first start and never
+  - [ ] 2. Implement the `instance` table, generating `client_identifier` once on first start and never
      regenerating it.
-  3. Implement `settings` and `settings_history` as one JSON body deserialised into a typed struct with
+  - [ ] 3. Implement `settings` and `settings_history` as one JSON body deserialised into a typed struct with
      unknown-field rejection, never a key-value table.
-  4. Implement config loading (environment, file) that populates `settings` on first start.
-- **Done when:** a fresh instance boots, writes one `instance` row with a `client_identifier` that
+  - [ ] 4. Implement config loading (environment, file) that populates `settings` on first start.
+- [ ] **Done when:** a fresh instance boots, writes one `instance` row with a `client_identifier` that
   survives a restart unchanged, and every settings write lands as one versioned body in
   `settings_history` rather than a partial key-value update.
 
@@ -249,12 +267,12 @@ a unique index. Both are cheap now and are table rebuilds later.
 - **Build:** encrypted credential storage per D-032, isolated from `settings`.
 - **Where:** `crates/core` (secrets table, cipher); `crates/afisharr` (key file lifecycle).
 - **Subtasks:**
-  1. Implement the `secrets` table: ciphertext, nonce, algorithm, per-secret.
-  2. Implement XChaCha20-Poly1305 encryption with a random nonce per secret.
-  3. Generate a 32-byte key from the OS CSPRNG on first start, store it beside the database at
+  - [ ] 1. Implement the `secrets` table: ciphertext, nonce, algorithm, per-secret.
+  - [ ] 2. Implement XChaCha20-Poly1305 encryption with a random nonce per secret.
+  - [ ] 3. Generate a 32-byte key from the OS CSPRNG on first start, store it beside the database at
      `secrets.key` with mode `0600`, and support the `AFISHARR_SECRET_KEY` override.
-  4. Verify no secret value can reach `settings.body_json` or a `settings_history` diff.
-- **Done when:** a secret written through the table round-trips through encrypt and decrypt; the key
+  - [ ] 4. Verify no secret value can reach `settings.body_json` or a `settings_history` diff.
+- [ ] **Done when:** a secret written through the table round-trips through encrypt and decrypt; the key
   file is created with mode `0600` on first start; `AFISHARR_SECRET_KEY` overrides it when set; and
   `I-DATA-11` passes — a database copied without `secrets.key` cannot decrypt any stored secret, and no
   secret value appears anywhere in `settings` or its history.
@@ -284,12 +302,12 @@ the eight-step journey on top of it.
 - **Build:** the HTTP surface's spine — routing, a structured error model, and the health route.
 - **Where:** `crates/api`.
 - **Subtasks:**
-  1. Stand up Axum with a router that groups routes by the six primary destinations plus settings.
-  2. Define one structured error type carrying a JSON pointer, expected-versus-actual, and an HTTP
+  - [ ] 1. Stand up Axum with a router that groups routes by the six primary destinations plus settings.
+  - [ ] 2. Define one structured error type carrying a JSON pointer, expected-versus-actual, and an HTTP
      status mapping, so every error surface downstream reuses it rather than inventing shapes.
-  3. Implement the health route with no authentication requirement.
-  4. Wire OpenAPI generation via utoipa and the generated TypeScript client build step.
-- **Done when:** the health route returns 200 with no credentials; every other route returns the one
+  - [ ] 3. Implement the health route with no authentication requirement.
+  - [ ] 4. Wire OpenAPI generation via utoipa and the generated TypeScript client build step.
+- [ ] **Done when:** the health route returns 200 with no credentials; every other route returns the one
   structured error shape on failure; and the generated TypeScript client builds from the OpenAPI
   document with zero manual edits.
 
@@ -298,15 +316,15 @@ the eight-step journey on top of it.
 - **Where:** `crates/api` (routes); `crates/core` (`users`, `plex_pin_logins`); `crates/plex` (the
   plex.tv PIN and OAuth calls).
 - **Subtasks:**
-  1. Implement local login: Argon2id password hashing at PHC-string parameters tuned to roughly 250 ms
+  - [ ] 1. Implement local login: Argon2id password hashing at PHC-string parameters tuned to roughly 250 ms
      on the reference machine.
-  2. Implement the first-run rule: no default credentials, nothing reachable until the admin account
+  - [ ] 2. Implement the first-run rule: no default credentials, nothing reachable until the admin account
      exists, and no admin account creatable without the setup claim built in Task 1.12.
-  3. Implement the Plex PIN login flow: create a pin resource, present the code, poll until a token
+  - [ ] 3. Implement the Plex PIN login flow: create a pin resource, present the code, poll until a token
      appears or the pin expires, checking `client_identifier` against the instance value.
-  4. Implement the Plex OAuth variant of the same flow, sharing the polling machinery.
-  5. Store the returned token in `secrets`, never in `plex_pin_logins`.
-- **Done when:** a fresh instance rejects every route except health and the claim endpoint, and
+  - [ ] 4. Implement the Plex OAuth variant of the same flow, sharing the polling machinery.
+  - [ ] 5. Store the returned token in `secrets`, never in `plex_pin_logins`.
+- [ ] **Done when:** a fresh instance rejects every route except health and the claim endpoint, and
   rejects first-run admin creation itself without an active claim; a completed PIN or OAuth flow
   produces a working session; and a pin issued under a mismatched `client_identifier` fails visibly
   rather than yielding a token that silently does not work.
@@ -315,15 +333,15 @@ the eight-step journey on top of it.
 - **Build:** session lifecycle and revocable, scoped API keys.
 - **Where:** `crates/api`; `crates/core` (`sessions`, `api_keys`).
 - **Subtasks:**
-  1. Store sessions by the SHA-256 of the cookie value, never the value itself; set `Secure`,
+  - [ ] 1. Store sessions by the SHA-256 of the cookie value, never the value itself; set `Secure`,
      `HttpOnly`, `SameSite=Lax`.
-  2. Implement a 7-day idle timeout sliding on `last_seen_at` and a 30-day absolute timeout with no
+  - [ ] 2. Implement a 7-day idle timeout sliding on `last_seen_at` and a 30-day absolute timeout with no
      extension.
-  3. Rotate the session id on privilege change and on password change; revoke every session for a user
+  - [ ] 3. Rotate the session id on privilege change and on password change; revoke every session for a user
      on password change, with individual revocation available from Settings.
-  4. Implement API keys hashed at rest, individually revocable, showing the plaintext once at creation
+  - [ ] 4. Implement API keys hashed at rest, individually revocable, showing the plaintext once at creation
      and a last-used timestamp thereafter.
-- **Done when:** a database read never yields a working session id or API key in plaintext; a password
+- [ ] **Done when:** a database read never yields a working session id or API key in plaintext; a password
   change revokes every existing session for that user; and a revoked API key is rejected on its next
   use.
 
@@ -331,14 +349,14 @@ the eight-step journey on top of it.
 - **Build:** per-IP and per-account rate limiting that cannot be defeated by a forged forwarded header.
 - **Where:** `crates/api`.
 - **Subtasks:**
-  1. Implement the limit table: login per account (5 failures / 15 min, exponential lockout to 24 h),
+  - [ ] 1. Implement the limit table: login per account (5 failures / 15 min, exponential lockout to 24 h),
      login per IP (20 failures / 15 min), authenticated API (600 req/min), provider-calling endpoints
      (60 req/min).
-  2. Implement `trustProxy` as a list of trusted proxy addresses or CIDR ranges, never a boolean.
-  3. Honour `X-Forwarded-For` only when the immediate peer is in that list; use the peer address
+  - [ ] 2. Implement `trustProxy` as a list of trusted proxy addresses or CIDR ranges, never a boolean.
+  - [ ] 3. Honour `X-Forwarded-For` only when the immediate peer is in that list; use the peer address
      otherwise.
-  4. Return 429 with `Retry-After` on exceed.
-- **Done when:** `I-SEC-1` passes — a request carrying a forged `X-Forwarded-For` from a peer outside
+  - [ ] 4. Return 429 with `Retry-After` on exceed.
+- [ ] **Done when:** `I-SEC-1` passes — a request carrying a forged `X-Forwarded-For` from a peer outside
   the trusted list is rate-limited against its real address, not the forged one, and the same request
   from a trusted proxy honours the forwarded value.
 
@@ -346,14 +364,14 @@ the eight-step journey on top of it.
 - **Build:** the fixed response-header set and always-on CSRF protection.
 - **Where:** `crates/api` (middleware).
 - **Subtasks:**
-  1. Apply `Strict-Transport-Security`, `Content-Security-Policy` (`default-src 'self'`, no inline
+  - [ ] 1. Apply `Strict-Transport-Security`, `Content-Security-Policy` (`default-src 'self'`, no inline
      script, `frame-ancestors 'none'`), `X-Content-Type-Options: nosniff`, `Referrer-Policy:
      no-referrer`, and a `Permissions-Policy` denying camera, microphone, and geolocation — as
      middleware, not per-handler.
-  2. Emit `Strict-Transport-Security` only over HTTPS, trusting the forwarded-protocol header only from
+  - [ ] 2. Emit `Strict-Transport-Security` only over HTTPS, trusting the forwarded-protocol header only from
      an address on the trusted-proxy list.
-  3. Implement CSRF protection with no toggle, per D-002-class decisions on this surface.
-- **Done when:** `I-SEC-2` passes — every route, including ones added after this task, carries the full
+  - [ ] 3. Implement CSRF protection with no toggle, per D-002-class decisions on this surface.
+- [ ] **Done when:** `I-SEC-2` passes — every route, including ones added after this task, carries the full
   header set on every response, verified by a test that asserts headers at the middleware layer rather
   than per-route.
 
@@ -361,12 +379,12 @@ the eight-step journey on top of it.
 - **Build:** the jailed browser used by the asset picker and placeholder roots.
 - **Where:** `crates/api` (routes); `crates/core` (path canonicalisation and containment check).
 - **Subtasks:**
-  1. Canonicalise every requested path and resolve symbolic links before checking containment within
+  - [ ] 1. Canonicalise every requested path and resolve symbolic links before checking containment within
      an enabled root — never before.
-  2. Refuse traversal sequences, absolute paths, and links resolving outside a root with one message
+  - [ ] 2. Refuse traversal sequences, absolute paths, and links resolving outside a root with one message
      naming the root, never the resolved path.
-  3. Apply the same containment rule to placeholder writes against `placeholderRoots`.
-- **Done when:** `I-SEC-3` passes — traversal sequences, absolute paths, and symlinks pointing outside
+  - [ ] 3. Apply the same containment rule to placeholder writes against `placeholderRoots`.
+- [ ] **Done when:** `I-SEC-3` passes — traversal sequences, absolute paths, and symlinks pointing outside
   a configured root are all refused with the root named in the message; `I-SEC-4`'s placeholder-write
   path reuses the identical containment function rather than a second implementation.
 
@@ -375,11 +393,11 @@ the eight-step journey on top of it.
   production.
 - **Where:** `web/`; `crates/afisharr` (embedding).
 - **Subtasks:**
-  1. Configure `adapter-static` prerendering with no server load functions, form actions, server
+  - [ ] 1. Configure `adapter-static` prerendering with no server load functions, form actions, server
      hooks, or server-side database access — these are structurally unavailable on this stack.
-  2. Embed the built SPA into the `afisharr` binary so the release artefact is one file.
-  3. Wire the generated OpenAPI TypeScript client as the SPA's only data-access path.
-- **Done when:** the release binary serves the SPA with no separate static-file directory required at
+  - [ ] 2. Embed the built SPA into the `afisharr` binary so the release artefact is one file.
+  - [ ] 3. Wire the generated OpenAPI TypeScript client as the SPA's only data-access path.
+- [ ] **Done when:** the release binary serves the SPA with no separate static-file directory required at
   runtime, and every SPA data call goes through the generated typed client.
 
 ### Task 1.8 The nine-state component vocabulary
@@ -387,17 +405,17 @@ the eight-step journey on top of it.
   the API already distinguishes.
 - **Where:** `web/` (shared component library).
 - **Subtasks:**
-  1. Build one component each for Loading, Empty, Error, Frozen, Degraded, Stale, Pending, Blocked,
+  - [ ] 1. Build one component each for Loading, Empty, Error, Frozen, Degraded, Stale, Pending, Blocked,
      and Non-convergent, each independently importable.
-  2. Implement the Loading sub-policy: nothing under 300 ms, skeleton from 300 ms to ~3 s, progress
+  - [ ] 2. Implement the Loading sub-policy: nothing under 300 ms, skeleton from 300 ms to ~3 s, progress
      text beyond ~3 s, SSE progress for long operations, partial data rendering as it arrives.
-  3. Implement the three Empty sub-kinds (nothing created yet, nothing matched, nothing yet but
+  - [ ] 3. Implement the three Empty sub-kinds (nothing created yet, nothing matched, nothing yet but
      pending) as distinct treatments, never conflated with a failed fetch.
-  4. Implement destructive-action affordances: preview with named counts, confirmation proportional to
+  - [ ] 4. Implement destructive-action affordances: preview with named counts, confirmation proportional to
      consequence, an afterward report — never a default, focused, or single-step destructive action.
-  5. Add a lint rule that fails the build if a page branches on an HTTP status code to choose a display
+  - [ ] 5. Add a lint rule that fails the build if a page branches on an HTTP status code to choose a display
      state instead of reading the state the API returned alongside the data.
-- **Done when:** `I-UX-1`, `I-UX-2`, and `I-UX-3` pass — every data-bearing page renders one of the nine
+- [ ] **Done when:** `I-UX-1`, `I-UX-2`, and `I-UX-3` pass — every data-bearing page renders one of the nine
   states from what the API returned, no page infers a state from response shape or timing, and the
   lint rule catches an attempt to do so.
 
@@ -406,12 +424,12 @@ the eight-step journey on top of it.
   after auth.
 - **Where:** `crates/api` (SSE endpoint); `web/` (client, reconnection logic).
 - **Subtasks:**
-  1. Implement one connection per client, multiplexed by topic, established after authentication.
-  2. Implement backoff reconnection; on reconnect, refetch state rather than replay missed events.
-  3. Implement a small, non-modal disconnection indicator distinct from every other state.
-  4. Ensure every SSE-fed surface is correct after a plain page load with no stream connected at all —
+  - [ ] 1. Implement one connection per client, multiplexed by topic, established after authentication.
+  - [ ] 2. Implement backoff reconnection; on reconnect, refetch state rather than replay missed events.
+  - [ ] 3. Implement a small, non-modal disconnection indicator distinct from every other state.
+  - [ ] 4. Ensure every SSE-fed surface is correct after a plain page load with no stream connected at all —
      the stream accelerates, it is never the only source of truth.
-- **Done when:** `I-UX-9` passes — with SSE blocked, every surface the stream feeds still renders
+- [ ] **Done when:** `I-UX-9` passes — with SSE blocked, every surface the stream feeds still renders
   correct data on load and the disconnection is visible; a client that misses events during a
   disconnect and then reconnects ends up identical to a client that loaded the page fresh, verified by
   a reconnect-and-refetch test; the disconnection indicator appears within one missed heartbeat.
@@ -420,11 +438,11 @@ the eight-step journey on top of it.
 - **Build:** the message-catalogue framework, shipping English, with interpolation and plural rules.
 - **Where:** `web/` (catalogue, lint rule); `crates/core` (locale as a data concept for formatters).
 - **Subtasks:**
-  1. Wire a message-catalogue library with interpolation and plural-rule support.
-  2. Add a lint rule, active from the first commit, that fails on a hard-coded user-facing string.
-  3. Thread locale through as a first-class setting the way the formatter registry will expect it in
+  - [ ] 1. Wire a message-catalogue library with interpolation and plural-rule support.
+  - [ ] 2. Add a lint rule, active from the first commit, that fails on a hard-coded user-facing string.
+  - [ ] 3. Thread locale through as a first-class setting the way the formatter registry will expect it in
      Phase 3.
-- **Done when:** `I-UX-7` passes — the lint rule rejects a hard-coded user-facing string at commit time,
+- [ ] **Done when:** `I-UX-7` passes — the lint rule rejects a hard-coded user-facing string at commit time,
   and English ships as a complete catalogue with no untranslated-key fallback needed anywhere in the
   shell.
 
@@ -433,17 +451,17 @@ the eight-step journey on top of it.
   first-run and login flows that make the shell reachable.
 - **Where:** `web/src/routes`.
 - **Subtasks:**
-  1. Route Dashboard, Collections, Design, Home Screen, Lifecycle, and Doctor, plus a Settings area
+  - [ ] 1. Route Dashboard, Collections, Design, Home Screen, Lifecycle, and Doctor, plus a Settings area
      with its sub-page navigation, organised around the object the operator is thinking about rather
      than the owning subsystem.
-  2. Build the claim page — the token field, the recovery affordance once an admin exists, and the
+  - [ ] 2. Build the claim page — the token field, the recovery affordance once an admin exists, and the
      Blocked treatment carrying the retry time — against the endpoints from Task 1.12.
-  3. Build the first-run admin-account creation page, reachable only with an active claim and only
+  - [ ] 3. Build the first-run admin-account creation page, reachable only with an active claim and only
      when no admin exists.
-  4. Build the login page covering both local credentials and the Plex PIN/OAuth flow from Task 1.2.
-  5. Render every shell page in the "nothing created yet" Empty treatment, since no page carries real
+  - [ ] 4. Build the login page covering both local credentials and the Plex PIN/OAuth flow from Task 1.2.
+  - [ ] 5. Render every shell page in the "nothing created yet" Empty treatment, since no page carries real
      data until a later phase populates it.
-- **Done when:** a fresh instance boots directly to the claim page, refuses every other route until
+- [ ] **Done when:** a fresh instance boots directly to the claim page, refuses every other route until
   the instance is claimed and an admin exists, and every one of the six destinations plus Settings
   resolves to a routed page rather than a 404.
 
@@ -454,35 +472,35 @@ the eight-step journey on top of it.
 - **Where:** `crates/afisharr` (banner, token state); `crates/api` (claim, recovery, and the claim
   gate); `crates/core` (`setup:claim` lease, derived resume step).
 - **Subtasks:**
-  1. Implement token generation: three four-character segments from a 36-character lowercase
+  - [ ] 1. Implement token generation: three four-character segments from a 36-character lowercase
      alphanumeric alphabet, drawn from the OS CSPRNG with rejection sampling — discard and redraw any
      byte at or above 252 rather than reducing modulo 36, or the 62-bit claim is false.
-  2. Hold the token in process memory with a 15-minute expiry, replacing any predecessor. Assert by
+  - [ ] 2. Hold the token in process memory with a 15-minute expiry, replacing any predecessor. Assert by
      test that it reaches no table, no response body, and no line of `logs/afisharr.log`.
-  3. Print the banner from the startup sequence built in Task 0.3, only when
+  - [ ] 3. Print the banner from the startup sequence built in Task 0.3, only when
      `instance.setup_completed_at` is `NULL`: the token, the setup URL composed from the configured
      host and port, and the three events that end the token's life.
-  4. Implement validation as check-and-keep, not consume: exists, unexpired, length matches, then a
+  - [ ] 4. Implement validation as check-and-keep, not consume: exists, unexpired, length matches, then a
      constant-time comparison. One error response covers wrong, expired, malformed, and empty.
-  5. Implement the claim as a `setup:claim` lease whose `owner` is the SHA-256 of the cookie value,
+  - [ ] 5. Implement the claim as a `setup:claim` lease whose `owner` is the SHA-256 of the cookie value,
      with a 10-minute expiry, and set `afisharr_setup_claim` with `HttpOnly`, `Secure` over HTTPS,
      `SameSite=Lax`, `Path=/api/setup`, and `Max-Age=600`.
-  6. Implement the claim gate as middleware over every setup endpoint: renew on success, refuse with
+  - [ ] 6. Implement the claim gate as middleware over every setup endpoint: renew on success, refuse with
      the Blocked response and the claim's expiry time otherwise. Renewal moves both the lease expiry
      and the cookie's `Max-Age`.
-  7. Order the claim endpoint as: holder renews and succeeds; held-elsewhere returns Blocked before
+  - [ ] 7. Order the claim endpoint as: holder renews and succeeds; held-elsewhere returns Blocked before
      the rate limiter is consulted; then the limiter from Task 1.4 at 5 attempts per IP per 15
      minutes; then the token comparison.
-  8. Implement recovery: admin credentials mint a claim when setup is incomplete, an admin exists,
+  - [ ] 8. Implement recovery: admin credentials mint a claim when setup is incomplete, an admin exists,
      and no claim is active. Verify the password with the Argon2id path from Task 1.2; return the
      same response for an unknown username and a wrong password.
-  9. Implement the derived resume step from the table in PRD §7.14, reading `instance.setup_acked_steps`
+  - [ ] 9. Implement the derived resume step from the table in PRD §7.14, reading `instance.setup_acked_steps`
      for the two acknowledgement-only steps, and reject any client-supplied step index outright.
-  10. Append one `job_run_events` row per setup step under a single `Api`-triggered `job_runs` row —
+  - [ ] 10. Append one `job_run_events` row per setup step under a single `Api`-triggered `job_runs` row —
       not the lifecycle audit record, which PRD §21.4.8 reserves for what the engine did.
-  11. Implement release: completing setup writes `instance.setup_completed_at`, deletes the lease,
+  - [ ] 11. Implement release: completing setup writes `instance.setup_completed_at`, deletes the lease,
       clears the in-memory token, and expires the cookie. The setup endpoints answer 404 thereafter.
-- **Done when:** `I-SEC-8` passes — every wizard endpoint refuses without a claim on a fresh
+- [ ] **Done when:** `I-SEC-8` passes — every wizard endpoint refuses without a claim on a fresh
   instance; wrong, expired, malformed, and empty tokens are indistinguishable in the response; a
   second cookie's claim attempt against a held claim returns the retry time and changes no state; the
   token appears in no table, no response, and no log file; and a restart with setup incomplete
@@ -509,19 +527,19 @@ cannot express the failures the invariants from Phase 4 onward are written again
   per-library filter-metadata discovery.
 - **Where:** `crates/plex`.
 - **Subtasks:**
-  1. Implement the `X-Plex-*` header contract and the PIN/OAuth token exchange consumed by Task 1.2.
-  2. Implement library listing and item listing, including the filter-query parameter shapes
+  - [ ] 1. Implement the `X-Plex-*` header contract and the PIN/OAuth token exchange consumed by Task 1.2.
+  - [ ] 2. Implement library listing and item listing, including the filter-query parameter shapes
      (`/library/sections/{key}/all?…`) with operator suffixes (`!=`, `>>=`, `<<=`, `&=`, doubled `=`
      for exact string matching).
-  3. Implement collection create, update, and item add/remove/reorder calls, plus hub reposition and
+  - [ ] 3. Implement collection create, update, and item add/remove/reorder calls, plus hub reposition and
      visibility calls.
-  4. Implement label add/remove, media-stream fact retrieval, and artwork upload.
-  5. Implement the per-library, per-libtype filter-metadata discovery calls: filtering types, fields
+  - [ ] 4. Implement label add/remove, media-stream fact retrieval, and artwork upload.
+  - [ ] 5. Implement the per-library, per-libtype filter-metadata discovery calls: filtering types, fields
      with type and subtype, per-type legal operators, and enumerated filter choices with their fast
      keys.
-  6. Implement machine-identifier retrieval as its own call, since a changed value must be detectable
+  - [ ] 6. Implement machine-identifier retrieval as its own call, since a changed value must be detectable
      without a full library fetch.
-- **Done when:** the crate compiles with no dependency on any other Afisharr crate's domain types, and
+- [ ] **Done when:** the crate compiles with no dependency on any other Afisharr crate's domain types, and
   every call in this list is exercised by a unit test against a hand-rolled fixture response before the
   fake in Task 2.2 exists.
 
@@ -533,17 +551,17 @@ cannot express the failures the invariants from Phase 4 onward are written again
 - **Where:** a test-support module inside `crates/plex`, compiled only under test, consumed by every
   later phase's test suite.
 - **Subtasks:**
-  1. Implement a move that reports success over the wire while not actually changing order, triggered
+  - [ ] 1. Implement a move that reports success over the wire while not actually changing order, triggered
      past a configurable precision budget.
-  2. Implement artwork URLs in at least two unrecognised formats.
-  3. Implement rating-key churn: the same logical item reappearing under a new key on a later fetch.
-  4. Implement partial scan states — an item indexed but not yet complete.
-  5. Implement sort titles with independently settable value, presence, and lock state.
-  6. Implement timeout and 5xx injection at a caller-chosen operation, mid-pass.
-  7. Implement a machine-identifier change, triggerable on demand.
-  8. Seed every behaviour from one explicit seed value; assert byte-identical replay from the same
+  - [ ] 2. Implement artwork URLs in at least two unrecognised formats.
+  - [ ] 3. Implement rating-key churn: the same logical item reappearing under a new key on a later fetch.
+  - [ ] 4. Implement partial scan states — an item indexed but not yet complete.
+  - [ ] 5. Implement sort titles with independently settable value, presence, and lock state.
+  - [ ] 6. Implement timeout and 5xx injection at a caller-chosen operation, mid-pass.
+  - [ ] 7. Implement a machine-identifier change, triggerable on demand.
+  - [ ] 8. Seed every behaviour from one explicit seed value; assert byte-identical replay from the same
      seed across two runs.
-- **Done when:** every row of the fidelity contract reproduces deterministically from its seed, and
+- [ ] **Done when:** every row of the fidelity contract reproduces deterministically from its seed, and
   `I-ID-5` passes against the fake — a changed machine identifier is detected and treated as a possibly
   different server rather than silently reconciled.
 
@@ -552,12 +570,12 @@ cannot express the failures the invariants from Phase 4 onward are written again
   release lane, that keeps the fake honest.
 - **Where:** `crates/plex/tests`, wired into the release lane from Task 0.1.
 - **Subtasks:**
-  1. Exercise the same call surface as Task 2.1 against a real server reachable in CI via a
+  - [ ] 1. Exercise the same call surface as Task 2.1 against a real server reachable in CI via a
      release-lane credential.
-  2. Assert response shapes match what Task 2.1's parsers expect for the happy path on every call.
-  3. Fail the release lane, by name, on any call whose real-server shape has drifted from what the fake
+  - [ ] 2. Assert response shapes match what Task 2.1's parsers expect for the happy path on every call.
+  - [ ] 3. Fail the release lane, by name, on any call whose real-server shape has drifted from what the fake
      assumes.
-- **Done when:** the contract test passes in the release lane against a real server, and a deliberately
+- [ ] **Done when:** the contract test passes in the release lane against a real server, and a deliberately
   introduced shape mismatch between the fake and a captured real response fails the test rather than
   passing silently.
 
@@ -566,12 +584,12 @@ cannot express the failures the invariants from Phase 4 onward are written again
   using the nine-state vocabulary from Task 1.8, without displaying any library content.
 - **Where:** `web/src/routes` (Settings › Plex connection); `crates/api`.
 - **Subtasks:**
-  1. Add a lightweight connectivity check hitting the machine-identifier call from Task 2.1.
-  2. Render the three connection states (reachable, unreachable, wrong-server per `I-ID-5`'s blocking
+  - [ ] 1. Add a lightweight connectivity check hitting the machine-identifier call from Task 2.1.
+  - [ ] 2. Render the three connection states (reachable, unreachable, wrong-server per `I-ID-5`'s blocking
      condition) through the shared state components.
-  3. Surface the blocking "this is a new server, rebind" or "restore a backup" choice as a Blocked
+  - [ ] 3. Surface the blocking "this is a new server, rebind" or "restore a backup" choice as a Blocked
      state, with no library data behind it.
-- **Done when:** the Settings page shows a live connectivity state sourced from Task 2.1's calls, and a
+- [ ] **Done when:** the Settings page shows a live connectivity state sourced from Task 2.1's calls, and a
   simulated machine-identifier change renders as Blocked with both recovery options offered, neither
   auto-resolved.
 
@@ -597,12 +615,12 @@ depends on that answer, so it runs second.
 - **Where:** a spike harness outside the crate boundary, exercising `crates/plex` against a real
   server; not merged into product code.
 - **Subtasks:**
-  1. Instrument a real server to observe how home-screen hub composition behaves under controlled
+  - [ ] 1. Instrument a real server to observe how home-screen hub composition behaves under controlled
      reordering across more than one library.
-  2. Test both hypotheses directly against server behaviour rather than against documentation of it.
-  3. Record the answer with its supporting measurement.
-  4. Amend the placement design document with the resolved answer.
-- **Done when:** the question is answered with a recorded measurement, and the placement design
+  - [ ] 2. Test both hypotheses directly against server behaviour rather than against documentation of it.
+  - [ ] 3. Record the answer with its supporting measurement.
+  - [ ] 4. Amend the placement design document with the resolved answer.
+- [ ] **Done when:** the question is answered with a recorded measurement, and the placement design
   document states, with evidence, which of the two shapes ordering takes.
 
 ### Task S.2 Q-014 — the real precision budget
@@ -610,13 +628,13 @@ depends on that answer, so it runs second.
   least 2,500 items — a short sequence measures the wrong thing.
 - **Where:** the same spike harness, against `crates/plex` and a real server.
 - **Subtasks:**
-  1. Build a sequence of at least 2,500 items against a real server, shaped by S.1's answer (global or
+  - [ ] 1. Build a sequence of at least 2,500 items against a real server, shaped by S.1's answer (global or
      per-library).
-  2. Measure actual move-precision behaviour — how many moves silently no-op, and under what
+  - [ ] 2. Measure actual move-precision behaviour — how many moves silently no-op, and under what
      conditions — at that scale.
-  3. Compare the measurement against the placement budget recorded in the PRD's §21.2.2.
-  4. Confirm the existing budget or replace it with the measured value.
-- **Done when:** the precision budget in the PRD's §21.2.2 is either confirmed or replaced by a
+  - [ ] 3. Compare the measurement against the placement budget recorded in the PRD's §21.2.2.
+  - [ ] 4. Confirm the existing budget or replace it with the measured value.
+- [ ] **Done when:** the precision budget in the PRD's §21.2.2 is either confirmed or replaced by a
   recorded measurement from a sequence of at least 2,500 items, and the placement design document is
   amended accordingly.
 
@@ -638,17 +656,17 @@ document amended, and the placement budget confirmed or replaced.
   `spec`), the seven kinds, and the storage and concurrency machinery around them.
 - **Where:** `crates/core` (definition module); `crates/api` (`/api/definitions/{kind}` CRUD).
 - **Subtasks:**
-  1. Implement the envelope type and canonical JSON serialisation with stable key ordering.
-  2. Implement the seven kinds — `Collection`, `Playlist`, `Placement`, `OverlayTemplate`,
+  - [ ] 1. Implement the envelope type and canonical JSON serialisation with stable key ordering.
+  - [ ] 2. Implement the seven kinds — `Collection`, `Playlist`, `Placement`, `OverlayTemplate`,
      `PosterTemplate`, `SmartFilterDef`, `PackManifest` — as typed `spec` variants.
-  3. Implement namespaced identifiers: an immutable ULID plus a `namespace/slug` handle, with packs
+  - [ ] 3. Implement namespaced identifiers: an immutable ULID plus a `namespace/slug` handle, with packs
      owning their namespace and user definitions living under `user/`.
-  4. Wire the `definitions` table with its derived columns, `definition_refs`, and
+  - [ ] 4. Wire the `definitions` table with its derived columns, `definition_refs`, and
      `definition_libraries`.
-  5. Implement optimistic concurrency: the GUI save is a compare-and-swap on `body_hash`; a background
+  - [ ] 5. Implement optimistic concurrency: the GUI save is a compare-and-swap on `body_hash`; a background
      pass whose read hash has since changed discards its results for that definition and re-queues it,
      never merges.
-- **Done when:** a definition round-trips through export and import byte-for-byte after
+- [ ] **Done when:** a definition round-trips through export and import byte-for-byte after
   canonicalisation for every kind; a save against a stale `body_hash` affects zero rows and returns the
   current body for a diff rather than overwriting it; and deleting a definition with inbound
   `definition_refs` rows requires an explicit cascade choice rather than succeeding silently.
@@ -658,14 +676,14 @@ document amended, and the placement budget confirmed or replaced.
   and lifecycle rules — leaves, combinators, and scoped quantifiers.
 - **Where:** `crates/core` (expression tree, evaluator).
 - **Subtasks:**
-  1. Implement leaves (`field`/`op`/`value`), combinators (`all`/`any`/`not`), and scoped quantifiers
+  - [ ] 1. Implement leaves (`field`/`op`/`value`), combinators (`all`/`any`/`not`), and scoped quantifiers
      (`scope`, `quantifier: any|all|none|{countGte:N}|{countLt:N}`, `tree`).
-  2. Implement empty-child semantics exactly: over zero children, `any` is false, `none` is true, `all`
+  - [ ] 2. Implement empty-child semantics exactly: over zero children, `any` is false, `none` is true, `all`
      is vacuously true, `countGte:1` is false.
-  3. Cap nesting depth at two scoped levels and require the child data behind a quantifier to be
+  - [ ] 3. Cap nesting depth at two scoped levels and require the child data behind a quantifier to be
      batch-loadable rather than evaluated per item.
-  4. Implement regex leaves using the linear-time engine, compiled and size-capped at save time.
-- **Done when:** `I-DEF-7` passes — a table-driven test exercises every empty-child case in the
+  - [ ] 4. Implement regex leaves using the linear-time engine, compiled and size-capped at save time.
+- [ ] **Done when:** `I-DEF-7` passes — a table-driven test exercises every empty-child case in the
   semantics above and each returns the specified value; the GUI condition builder warns when `all` is
   used without a companion `countGte` guard.
 
@@ -676,21 +694,21 @@ document amended, and the placement budget confirmed or replaced.
 - **Where:** `crates/core` (registry constants, generated JSON artifact); `crates/api` (serving the
   artifact to the GUI).
 - **Subtasks:**
-  1. Encode the static-core field catalogue (`item.*`, `media.*`, `ratings.*`, `lifecycle.*`,
+  - [ ] 1. Encode the static-core field catalogue (`item.*`, `media.*`, `ratings.*`, `lifecycle.*`,
      `show.*`/`season.*`/`episode.*`, `collection.*`) as Rust constants, each with type, cardinality,
      scope, availability class, provenance, nullability, legal operators, legal formatters.
-  2. Implement the operator set with its type/cardinality acceptance table and the boolean-field
+  - [ ] 2. Implement the operator set with its type/cardinality acceptance table and the boolean-field
      restriction to `eq`/`exists` only.
-  3. Implement the formatter registry as pure functions, each declared with its accepted input type,
+  - [ ] 3. Implement the formatter registry as pure functions, each declared with its accepted input type,
      including locale-dependent formatters taking the instance locale by default with an explicit
      override.
-  4. Implement the `discovered_fields`/`discovered_field_choices`/`discovered_sorts` snapshot cache and
+  - [ ] 4. Implement the `discovered_fields`/`discovered_field_choices`/`discovered_sorts` snapshot cache and
      its snapshot-scoped atomic swap, so the field registry is genuinely two-layered.
-  5. Implement `registry_versions` as the append-only version-snapshot table, populated from the
+  - [ ] 5. Implement `registry_versions` as the append-only version-snapshot table, populated from the
      compiled constants, with a generated JSON artifact and a CI drift check comparing the artifact
      against the constants that produced it.
-  6. Enforce that static-core keys win on collision with discovered `plex.*` keys.
-- **Done when:** the CI drift check fails if the generated JSON artifact and the compiled Rust constants
+  - [ ] 6. Enforce that static-core keys win on collision with discovered `plex.*` keys.
+- [ ] **Done when:** the CI drift check fails if the generated JSON artifact and the compiled Rust constants
   diverge; a condition referencing a discovered field records the library it was authored against and
   falls back to local evaluation with a flag, never a silent drop, when that field is later absent
   (`I-DEF-2`, per D-017's stale-field rule — warn and fall back, never block the save).
@@ -700,17 +718,17 @@ document amended, and the placement budget confirmed or replaced.
   pointer-addressed errors.
 - **Where:** `crates/core` (validation); `crates/api` (surfacing structured errors).
 - **Subtasks:**
-  1. Implement the eleven checks in order, stopping at the first failure: envelope shape; kind schema;
+  - [ ] 1. Implement the eleven checks in order, stopping at the first failure: envelope shape; kind schema;
      source parameters against JSON Schema; field-key existence and scope; operator legality for type
      and cardinality; literal-value type and enum membership; formatter legality and pipeline
      type-checking; ordering-mode compatibility with source capabilities; seed presence for
      non-deterministic sources; reference resolution and cron parsing; regex compile within the size
      cap.
-  2. Return every failure as a JSON pointer plus registry key plus expected-versus-actual, matching the
+  - [ ] 2. Return every failure as a JSON pointer plus registry key plus expected-versus-actual, matching the
      structured error type from Task 1.1.
-  3. Reject a definition combining Plex-native compiled filtering with `sourcePosition` or manual
+  - [ ] 3. Reject a definition combining Plex-native compiled filtering with `sourcePosition` or manual
      ordering — the smart-collection constraint — at save time.
-- **Done when:** `I-DEF-1` passes — no definition body can carry executable code or a string expression
+- [ ] **Done when:** `I-DEF-1` passes — no definition body can carry executable code or a string expression
   language, verified by fuzzing the body shape; a definition combining Plex-native filtering with
   manual ordering is rejected at save with a pointer to the offending field, never accepted and
   silently mis-ordered later.
@@ -719,11 +737,11 @@ document amended, and the placement budget confirmed or replaced.
 - **Build:** canonical-JSON export and import with exact round-trip.
 - **Where:** `crates/core`; `crates/api` (export/import endpoints).
 - **Subtasks:**
-  1. Implement pretty-printed canonical JSON export for any definition.
-  2. Implement import running the same eleven-step validation as a save.
-  3. Implement the missing-dependency prompt for an imported definition referencing a pack asset the
+  - [ ] 1. Implement pretty-printed canonical JSON export for any definition.
+  - [ ] 2. Implement import running the same eleven-step validation as a save.
+  - [ ] 3. Implement the missing-dependency prompt for an imported definition referencing a pack asset the
      importing instance does not have installed.
-- **Done when:** `import(export(x)) == x` byte-for-byte after canonicalisation for every kind, and
+- [ ] **Done when:** `import(export(x)) == x` byte-for-byte after canonicalisation for every kind, and
   importing a definition referencing an uninstalled pack asset produces the missing-dependency prompt
   rather than a silently broken reference.
 
@@ -732,13 +750,13 @@ document amended, and the placement budget confirmed or replaced.
 - **Where:** `crates/core` (`definition_history`); `crates/api`; `web/` (history panel, per the
   cross-cutting affordances every definition-backed object carries).
 - **Subtasks:**
-  1. Write a `definition_history` row on every accepted save, keyed by `(definition_id,
+  - [ ] 1. Write a `definition_history` row on every accepted save, keyed by `(definition_id,
      body_version)`, with no foreign key to `definitions` so history outlives deletion.
-  2. Implement a diff view between any two retained versions.
-  3. Implement restore: writing an old body back through the normal save path, including
+  - [ ] 2. Implement a diff view between any two retained versions.
+  - [ ] 3. Implement restore: writing an old body back through the normal save path, including
      revalidation.
-  4. Enforce retention at 20 versions per definition.
-- **Done when:** restoring a historical version re-runs full save-time validation rather than writing
+  - [ ] 4. Enforce retention at 20 versions per definition.
+- [ ] **Done when:** restoring a historical version re-runs full save-time validation rather than writing
   the old body directly, and a deleted definition's history remains readable for the retention window.
 
 ### Task 3.7 User-defined computed fields
@@ -746,17 +764,17 @@ document amended, and the placement budget confirmed or replaced.
   two registered numeric fields, in a closed `user.*` namespace.
 - **Where:** `crates/core` (`computed_fields` table, registry integration).
 - **Subtasks:**
-  1. Implement the `computed_fields` table: operation (`add`/`subtract`/`multiply`/`divide`), two
+  - [ ] 1. Implement the `computed_fields` table: operation (`add`/`subtract`/`multiply`/`divide`), two
      operand field keys, result type, `null_policy` (`Null` default, `Zero` opt-in), derived
      availability class.
-  2. Enforce that both operands must be registered, non-computed numeric fields — no nesting, ever.
-  3. Enforce exactly one operation, no constants, no third operand.
-  4. Enforce the closed `user.` namespace, colliding with neither the static core nor `plex.*`.
-  5. Implement tombstone deletion: `deleted_at` set, the unique index still covering deleted rows so
+  - [ ] 2. Enforce that both operands must be registered, non-computed numeric fields — no nesting, ever.
+  - [ ] 3. Enforce exactly one operation, no constants, no third operand.
+  - [ ] 4. Enforce the closed `user.` namespace, colliding with neither the static core nor `plex.*`.
+  - [ ] 5. Implement tombstone deletion: `deleted_at` set, the unique index still covering deleted rows so
      the key can never be reused.
-  6. Derive `availability` as `integration` if either operand is `integration`, so pack
+  - [ ] 6. Derive `availability` as `integration` if either operand is `integration`, so pack
      `requiresFields` resolution keeps working through a computed field.
-- **Done when:** `I-DEF-6` passes — an attempt to reference a computed field as an operand of another
+- [ ] **Done when:** `I-DEF-6` passes — an attempt to reference a computed field as an operand of another
   computed field is rejected at save time; a division by zero yields null under both null policies; and
   a deleted computed field's key can never be reused by a later create.
 
@@ -765,13 +783,13 @@ document amended, and the placement budget confirmed or replaced.
   the cross-cutting affordances every definition-backed object carries.
 - **Where:** `web/src/routes` (definition editors); `web/` (shared condition-builder component).
 - **Subtasks:**
-  1. Build a condition-tree builder generated from the field and operator registries — adding a field
+  - [ ] 1. Build a condition-tree builder generated from the field and operator registries — adding a field
      to the registry must add a working control with no frontend code change.
-  2. Build export, history-with-diff-and-restore, duplicate (including forking a pack-origin
+  - [ ] 2. Build export, history-with-diff-and-restore, duplicate (including forking a pack-origin
      definition to `user/`), enable/disable, and where-used affordances, available on every
      definition-backed object.
-  3. Build the computed-field creation control from Task 3.7's constraints.
-- **Done when:** adding a new field to the static-core registry produces a working condition-builder
+  - [ ] 3. Build the computed-field creation control from Task 3.7's constraints.
+- [ ] **Done when:** adding a new field to the static-core registry produces a working condition-builder
   control with zero changes to the frontend beyond the registry constant, verified by adding one test
   field and confirming the control appears.
 
@@ -792,28 +810,28 @@ streaming discipline is set on the first pass that needs it, not retrofitted ont
 - **Build:** discovery and tracking of Plex libraries, filtering to the two representable types.
 - **Where:** `crates/core` (`libraries` table); `crates/plex` (the discovery calls from Phase 2).
 - **Subtasks:**
-  1. Populate `libraries` from the server's section list, keyed on `section_uuid` with an immutable
+  - [ ] 1. Populate `libraries` from the server's section list, keyed on `section_uuid` with an immutable
      `handle` that definitions reference.
-  2. Filter `music` and `photo` library types out at discovery — they are never inserted, so an
+  - [ ] 2. Filter `music` and `photo` library types out at discovery — they are never inserted, so an
      unrepresentable state cannot be reached by a bug.
-  3. Rebind after a section-key change by matching `section_uuid` first, then `(type, title)` with
+  - [ ] 3. Rebind after a section-key change by matching `section_uuid` first, then `(type, title)` with
      confirmation.
-  4. Track `scanned_at`, `cache_refreshed_at`, and `missing_since` per library.
-- **Done when:** a library whose Plex section key changes rebinds to the same `handle` with no
+  - [ ] 4. Track `scanned_at`, `cache_refreshed_at`, and `missing_since` per library.
+- [ ] **Done when:** a library whose Plex section key changes rebinds to the same `handle` with no
   definition edit required, and a music or photo library never produces a row.
 
 ### Task 4.2 The item cache
 - **Build:** the per-item cache — movies, shows, seasons, episodes — with soft deletion.
 - **Where:** `crates/core` (`library_items`).
 - **Subtasks:**
-  1. Populate `library_items` with parent linkage (season → show, episode → season), `rating_key`,
+  - [ ] 1. Populate `library_items` with parent linkage (season → show, episode → season), `rating_key`,
      `guid`, and the tracked metadata fields.
-  2. Implement `is_placeholder` as a column set only inside the transaction that materialises or
+  - [ ] 2. Implement `is_placeholder` as a column set only inside the transaction that materialises or
      resolves a lifecycle intent — never derived from filename or Plex label.
-  3. Implement soft deletion via `missing_since`: an item absent for one pass is not hard-deleted,
+  - [ ] 3. Implement soft deletion via `missing_since`: an item absent for one pass is not hard-deleted,
      since it may be mid-scan.
-  4. Implement the reaping job that hard-deletes items missing longer than the retention window.
-- **Done when:** `I-DATA-4` passes — an item that disappears from Plex for a single pass and then
+  - [ ] 4. Implement the reaping job that hard-deletes items missing longer than the retention window.
+- [ ] **Done when:** `I-DATA-4` passes — an item that disappears from Plex for a single pass and then
   reappears retains its base-poster and lifecycle bindings across the gap, because it was soft-deleted
   rather than hard-deleted on first absence.
 
@@ -822,15 +840,15 @@ streaming discipline is set on the first pass that needs it, not retrofitted ont
   availability class.
 - **Where:** `crates/core` (`library_item_state`).
 - **Subtasks:**
-  1. Compute `metadata_hash` on `library_items` from the tracked metadata fields, to detect changes
+  - [ ] 1. Compute `metadata_hash` on `library_items` from the tracked metadata fields, to detect changes
      cheaply on each pass.
-  2. Implement `library_item_state` with `facts_json`/`facts_hash` separate from
+  - [ ] 2. Implement `library_item_state` with `facts_json`/`facts_hash` separate from
      `ratings_json`/`ratings_hash`/`ratings_fetched_at`.
-  3. Preserve the distinction between a `NULL` `ratings_json` (unavailable — fetch failed or
+  - [ ] 3. Preserve the distinction between a `NULL` `ratings_json` (unavailable — fetch failed or
      unconfigured) and a JSON `null` inside a populated body (known to have no value).
-  4. Compute the `state_hash` digest over facts, ratings, and lifecycle as the overlay render key's
+  - [ ] 4. Compute the `state_hash` digest over facts, ratings, and lifecycle as the overlay render key's
      dependency.
-- **Done when:** a failed rating fetch leaves `facts_json` untouched, and a test asserts the
+- [ ] **Done when:** a failed rating fetch leaves `facts_json` untouched, and a test asserts the
   `NULL`-versus-`null` distinction survives a full write/read cycle rather than collapsing to one
   meaning.
 
@@ -839,15 +857,15 @@ streaming discipline is set on the first pass that needs it, not retrofitted ont
   library, invalidated on observable events only.
 - **Where:** `crates/core` (`discovery_snapshots` and children, `definition_field_uses`).
 - **Subtasks:**
-  1. Write a new snapshot and flip `is_current` in one transaction, so a failed or partial discovery
+  - [ ] 1. Write a new snapshot and flip `is_current` in one transaction, so a failed or partial discovery
      never leaves the cache half-rewritten.
-  2. Retain the two most recent non-current snapshots for diagnosis; delete older ones, cascading to
+  - [ ] 2. Retain the two most recent non-current snapshots for diagnosis; delete older ones, cascading to
      their fields and choices.
-  3. Trigger invalidation on three events only: a library scan advancing `scanned_at`, a Plex version
+  - [ ] 3. Trigger invalidation on three events only: a library scan advancing `scanned_at`, a Plex version
      change, and an explicit doctor-page refresh — no TTL.
-  4. Populate `definition_field_uses` on every definition save, recording the authored library for each
+  - [ ] 4. Populate `definition_field_uses` on every definition save, recording the authored library for each
      discovered-field reference.
-- **Done when:** a discovery run that fails partway through leaves the previous snapshot's fields fully
+- [ ] **Done when:** a discovery run that fails partway through leaves the previous snapshot's fields fully
   usable, with no window where `discovered_fields` returns a partial set as if it were complete.
 
 ### Task 4.5 Canonical id resolution
@@ -855,13 +873,13 @@ streaming discipline is set on the first pass that needs it, not retrofitted ont
   with ambiguity recorded rather than guessed.
 - **Where:** `crates/core` (`library_item_ids`, `ambiguous_matches`).
 - **Subtasks:**
-  1. Populate `library_item_ids` from Plex's own GUID plus agent- and mapping-derived identifiers.
-  2. Implement the lookup index resolving `(id_space, id_value)` to a library item within a library.
-  3. Detect more than one match within a library and record it in `ambiguous_matches` rather than
+  - [ ] 1. Populate `library_item_ids` from Plex's own GUID plus agent- and mapping-derived identifiers.
+  - [ ] 2. Implement the lookup index resolving `(id_space, id_value)` to a library item within a library.
+  - [ ] 3. Detect more than one match within a library and record it in `ambiguous_matches` rather than
      guessing; block every subject action referencing the ambiguous identifier until it resolves.
-  4. Implement resolution recording (`resolved_item_id`, `resolved_by`) so a later pass reads the
+  - [ ] 4. Implement resolution recording (`resolved_item_id`, `resolved_by`) so a later pass reads the
      pinned choice rather than re-detecting.
-- **Done when:** `I-EVID-8` passes — an unresolved ambiguous match blocks every action on the subjects
+- [ ] **Done when:** `I-EVID-8` passes — an unresolved ambiguous match blocks every action on the subjects
   it covers, visibly, until an explicit resolution is recorded; a resolved row is read directly on the
   next pass with no re-detection.
 
@@ -870,23 +888,23 @@ streaming discipline is set on the first pass that needs it, not retrofitted ont
   wholesale on a schedule, kept apart from per-item state.
 - **Where:** `crates/core` (`id_mappings`).
 - **Subtasks:**
-  1. Implement `id_mappings` as a composite-key, `WITHOUT ROWID` table, season-aware where a mapping
+  - [ ] 1. Implement `id_mappings` as a composite-key, `WITHOUT ROWID` table, season-aware where a mapping
      depends on season.
-  2. Implement the wholesale-refresh import job for the mapping dataset, separate from
+  - [ ] 2. Implement the wholesale-refresh import job for the mapping dataset, separate from
      `library_item_ids` so a dataset refresh never rewrites per-item state.
-- **Done when:** a dataset refresh rewrites `id_mappings` in full without touching a single row of
+- [ ] **Done when:** a dataset refresh rewrites `id_mappings` in full without touching a single row of
   `library_item_ids`.
 
 ### Task 4.7 Rebinding and self-healing
 - **Build:** recovery from Plex-assigned identifier churn without treating the item as new.
 - **Where:** `crates/core` (rebinding logic over `library_items` and `library_item_ids`).
 - **Subtasks:**
-  1. Detect rating-key churn — the same canonical identity reappearing under a new `rating_key` — and
+  - [ ] 1. Detect rating-key churn — the same canonical identity reappearing under a new `rating_key` — and
      rebind the existing row via `UPDATE`, never a re-key.
-  2. Detect unrecognised artwork URL formats without failing the pass; record and continue.
-  3. Feed rebinding into the ambiguity surface (Task 4.5) when a churned key resolves to more than one
+  - [ ] 2. Detect unrecognised artwork URL formats without failing the pass; record and continue.
+  - [ ] 3. Feed rebinding into the ambiguity surface (Task 4.5) when a churned key resolves to more than one
      candidate.
-- **Done when:** `I-ID-1` and `I-ID-3` pass against the fake's rating-key-churn scenario — the same
+- [ ] **Done when:** `I-ID-1` and `I-ID-3` pass against the fake's rating-key-churn scenario — the same
   logical item under a new key rebinds to its existing row rather than creating a duplicate; `I-ID-2`
   passes — an unrecognised artwork URL format is recorded and does not abort the pass.
 
@@ -895,11 +913,11 @@ streaming discipline is set on the first pass that needs it, not retrofitted ont
   doctor page.
 - **Where:** `crates/api` (resolution endpoint); `web/` (minimal list, feeding the doctor page later).
 - **Subtasks:**
-  1. Expose an endpoint listing unresolved `ambiguous_matches` rows with their candidates.
-  2. Expose a resolution endpoint recording `resolved_item_id` and `resolved_by`.
-  3. Surface the list on a minimal page reachable from the collection editor via a deep link, per the
+  - [ ] 1. Expose an endpoint listing unresolved `ambiguous_matches` rows with their candidates.
+  - [ ] 2. Expose a resolution endpoint recording `resolved_item_id` and `resolved_by`.
+  - [ ] 3. Surface the list on a minimal page reachable from the collection editor via a deep link, per the
      shape D-013 settles (resolution stored once, applying everywhere it is read).
-- **Done when:** `I-ID-4` passes — resolving an ambiguous match through this surface is read by every
+- [ ] **Done when:** `I-ID-4` passes — resolving an ambiguous match through this surface is read by every
   later pass with no re-detection, and the same resolved state is visible whether reached from the
   editor deep link or the list directly.
 
@@ -908,23 +926,23 @@ streaming discipline is set on the first pass that needs it, not retrofitted ont
   here because this is the first component that does.
 - **Where:** `crates/core` (pass execution).
 - **Subtasks:**
-  1. Process items in bounded batches rather than materialising a full 200,000-item library in memory.
-  2. Make every full-library pass resumable at a batch boundary, consistent with the no-transaction-
+  - [ ] 1. Process items in bounded batches rather than materialising a full 200,000-item library in memory.
+  - [ ] 2. Make every full-library pass resumable at a batch boundary, consistent with the no-transaction-
      across-I/O rule from Task 0.4.
-  3. Establish the pattern as a reusable pass-execution helper so later full-library passes (rendering,
+  - [ ] 3. Establish the pattern as a reusable pass-execution helper so later full-library passes (rendering,
      lifecycle) reuse it rather than reinventing it.
-- **Done when:** `I-PERF-1` passes — a full-library pass over a 200,000-item fixture library completes
+- [ ] **Done when:** `I-PERF-1` passes — a full-library pass over a 200,000-item fixture library completes
   within the memory budget in the PRD's *Non-functional requirements*, measured rather than assumed.
 
 ### Task 4.10 Interface pages this phase ships
 - **Build:** the Libraries settings page and item-cache status indicators.
 - **Where:** `web/src/routes` (Settings › libraries).
 - **Subtasks:**
-  1. List discovered libraries with type, item count, last scan, and last cache-refresh time.
-  2. Show a library missing from the server (per `missing_since`) as a distinct state, not silently
+  - [ ] 1. List discovered libraries with type, item count, last scan, and last cache-refresh time.
+  - [ ] 2. Show a library missing from the server (per `missing_since`) as a distinct state, not silently
      dropped from the list.
-  3. Surface the minimal ambiguous-match list from Task 4.8 as a page section.
-- **Done when:** the Libraries page reflects `libraries.missing_since` and `cache_refreshed_at` live,
+  - [ ] 3. Surface the minimal ambiguous-match list from Task 4.8 as a page section.
+- [ ] **Done when:** the Libraries page reflects `libraries.missing_since` and `cache_refreshed_at` live,
   and every unresolved ambiguous match from Task 4.8 is reachable from this page.
 
 ---
@@ -953,13 +971,13 @@ is adapters — a content decision, not an engine one.
   circuit breaker, response validator, and health-status hook built once.
 - **Where:** `crates/sources` (trait and shared scaffolding).
 - **Subtasks:**
-  1. Define the `SourceBuilder` trait: fetch, declared parameters (JSON Schema), declared endpoints
+  - [ ] 1. Define the `SourceBuilder` trait: fetch, declared parameters (JSON Schema), declared endpoints
      (the ladder), declared `idSpace`.
-  2. Wire every adapter through the shared typed HTTP client, rate limiter, and circuit breaker rather
+  - [ ] 2. Wire every adapter through the shared typed HTTP client, rate limiter, and circuit breaker rather
      than each adapter owning its own.
-  3. Implement mandatory response validation ahead of parsing, so a challenge page can never reach a
+  - [ ] 3. Implement mandatory response validation ahead of parsing, so a challenge page can never reach a
      parser and be counted as zero items.
-- **Done when:** a minimal reference adapter implementing only `SourceBuilder` compiles and runs
+- [ ] **Done when:** a minimal reference adapter implementing only `SourceBuilder` compiles and runs
   end-to-end against the shared client, breaker, and validator with no adapter-owned HTTP code.
 
 ### Task 5.2 The endpoint ladder with per-rung capabilities
@@ -967,13 +985,13 @@ is adapters — a content decision, not an engine one.
   rung carrying its own `parserVersion` and capability flags, per D-040.
 - **Where:** `crates/sources` (ladder execution); `crates/core` (registry entry shape from Task 3.3).
 - **Subtasks:**
-  1. Implement the ladder as an ordered list tried top to bottom, most sources declaring exactly one
+  - [ ] 1. Implement the ladder as an ordered list tried top to bottom, most sources declaring exactly one
      rung.
-  2. Implement per-rung `affirmativeEmpty`, `ordered`, `deterministic`, `paginated`, `supportsLimit`.
-  3. Apply the capability flags of the rung that actually answered, never the source's best rung.
-  4. Reject `order.by: sourcePosition` against a source/rung declaring `ordered: false` at definition
+  - [ ] 2. Implement per-rung `affirmativeEmpty`, `ordered`, `deterministic`, `paginated`, `supportsLimit`.
+  - [ ] 3. Apply the capability flags of the rung that actually answered, never the source's best rung.
+  - [ ] 4. Reject `order.by: sourcePosition` against a source/rung declaring `ordered: false` at definition
      save time.
-- **Done when:** `I-SRC-8` passes — a source whose top rung declares `affirmativeEmpty: true` and whose
+- [ ] **Done when:** `I-SRC-8` passes — a source whose top rung declares `affirmativeEmpty: true` and whose
   fallback rung declares `affirmativeEmpty: false` is tested falling through to the fallback, and the
   engine treats the resulting zero-item response as a failure, not an affirmed empty list.
 
@@ -981,29 +999,29 @@ is adapters — a content decision, not an engine one.
 - **Build:** persisted, per-source circuit-breaker state that survives restart.
 - **Where:** `crates/sources` (`source_health`).
 - **Subtasks:**
-  1. Implement `source_health` keyed on `(source_type, instance_ref)`, tracking consecutive failures,
+  - [ ] 1. Implement `source_health` keyed on `(source_type, instance_ref)`, tracking consecutive failures,
      open/half-open/closed state, and cooldown.
-  2. Classify every failure into `last_error_kind` (`Timeout`/`Http4xx`/`Http5xx`/`Challenge`/
+  - [ ] 2. Classify every failure into `last_error_kind` (`Timeout`/`Http4xx`/`Http5xx`/`Challenge`/
      `Parse`/`Auth`/`RateLimit`), with `Challenge` distinguished from `Parse` specifically.
-  3. Persist breaker state to the table on every transition, so a crash-loop or routine restart never
+  - [ ] 3. Persist breaker state to the table on every transition, so a crash-loop or routine restart never
      resets an open breaker into a burst of retries against an already-failing service.
-  4. Record a fallthrough to a lower ladder rung as a degradation the breaker/health record surfaces,
+  - [ ] 4. Record a fallthrough to a lower ladder rung as a degradation the breaker/health record surfaces,
      not a silent success.
-- **Done when:** `I-SRC-4` passes — restarting the process mid-cooldown leaves the breaker open rather
+- [ ] **Done when:** `I-SRC-4` passes — restarting the process mid-cooldown leaves the breaker open rather
   than resetting to closed, verified by a restart test against a source whose breaker is open.
 
 ### Task 5.4 Frozen contributions and degraded state
 - **Build:** the last-known-good freeze that keeps a failed source from emptying a collection.
 - **Where:** `crates/sources` / `crates/core` (`source_contributions`).
 - **Subtasks:**
-  1. Implement `source_contributions`, retaining at most two rows per `(definition_id, source_index)`:
+  - [ ] 1. Implement `source_contributions`, retaining at most two rows per `(definition_id, source_index)`:
      most recent, and most recent trustworthy (`status = 'Ok'` and either `item_count > 0` or
      `affirmed_empty = 1`).
-  2. Freeze a source's contribution at its last trustworthy value on failure or on an unaffirmed empty
+  - [ ] 2. Freeze a source's contribution at its last trustworthy value on failure or on an unaffirmed empty
      result, rather than emptying the collection.
-  3. Guard the freeze with `params_hash`: a frozen contribution whose parameters have changed since is
+  - [ ] 3. Guard the freeze with `params_hash`: a frozen contribution whose parameters have changed since is
      not reused, because it answers a different question now.
-- **Done when:** `I-SRC-1` passes — a source returning zero items without declaring
+- [ ] **Done when:** `I-SRC-1` passes — a source returning zero items without declaring
   `affirmativeEmpty` freezes at its last trustworthy contribution rather than propagating an empty
   result downstream, verified against the fake's mid-pass failure injection from Task 2.2.
 
@@ -1012,12 +1030,12 @@ is adapters — a content decision, not an engine one.
   deduplication.
 - **Where:** `crates/sources` (shared client module).
 - **Subtasks:**
-  1. Enforce a mandatory per-request timeout with no adapter able to opt out.
-  2. Implement retry with exponential backoff and jitter, bounded, feeding failures into the breaker
+  - [ ] 1. Enforce a mandatory per-request timeout with no adapter able to opt out.
+  - [ ] 2. Implement retry with exponential backoff and jitter, bounded, feeding failures into the breaker
      from Task 5.3.
-  3. Implement log deduplication so a failing source does not flood the log at retry cadence.
-  4. Detect challenge pages by response validation ahead of the transport ladder's fallback client.
-- **Done when:** a request exceeding the configured timeout is aborted and classified `Timeout` in
+  - [ ] 3. Implement log deduplication so a failing source does not flood the log at retry cadence.
+  - [ ] 4. Detect challenge pages by response validation ahead of the transport ladder's fallback client.
+- [ ] **Done when:** a request exceeding the configured timeout is aborted and classified `Timeout` in
   `source_health` rather than hanging the calling pass, verified by a test against an artificially slow
   endpoint.
 
@@ -1026,14 +1044,14 @@ is adapters — a content decision, not an engine one.
   spread to avoid a synchronized refetch storm — per D-043.
 - **Where:** `crates/sources` (`http_cache`).
 - **Subtasks:**
-  1. Compute `cache_key` as a digest over method, URL, relevant headers, and `parser_version` — inside
+  - [ ] 1. Compute `cache_key` as a digest over method, URL, relevant headers, and `parser_version` — inside
      the key, not stored beside it.
-  2. Compute `expires_at` as `fetched_at + ttl - random(0, ttl / 4)` on every write, so entries written
+  - [ ] 2. Compute `expires_at` as `fetched_at + ttl - random(0, ttl / 4)` on every write, so entries written
      together do not expire together.
-  3. Implement conditional revalidation via `etag`/`last_modified` where a provider supports it.
-  4. Wire `parser_version` from each source registry entry's per-rung `parserVersion`, bumped by the
+  - [ ] 3. Implement conditional revalidation via `etag`/`last_modified` where a provider supports it.
+  - [ ] 4. Wire `parser_version` from each source registry entry's per-rung `parserVersion`, bumped by the
      adapter author in the same commit as any parsing fix.
-- **Done when:** `I-DATA-12` passes — bumping a source's `parserVersion` makes every previously cached
+- [ ] **Done when:** `I-DATA-12` passes — bumping a source's `parserVersion` makes every previously cached
   entry for that source miss and refetch, never returning a response shaped by the old parser;
   `I-PERF-4` passes — a batch of cache writes at the same instant produces a measurably spread
   distribution of `expires_at` values, not a single cluster.
@@ -1043,15 +1061,15 @@ is adapters — a content decision, not an engine one.
   names the binary ships — per D-041.
 - **Where:** `crates/sources` (`volatile_params`, feed fetch and verification).
 - **Subtasks:**
-  1. Implement `volatile_params`, rejecting any `name` absent from the shipped registry's
+  - [ ] 1. Implement `volatile_params`, rejecting any `name` absent from the shipped registry's
      `volatileParams` declarations.
-  2. Verify the feed's signature before applying any value; report an unverifiable feed on the doctor
+  - [ ] 2. Verify the feed's signature before applying any value; report an unverifiable feed on the doctor
      surface without applying it.
-  3. Check every fetched value against its declared syntactic constraint before storing it; on failure,
+  - [ ] 3. Check every fetched value against its declared syntactic constraint before storing it; on failure,
      increment `reject_count`, record `last_reject_reason`, and keep `last_good_value` in force.
-  4. Ensure the feed can change a declared parameter's value and do nothing else — no new parameter,
+  - [ ] 4. Ensure the feed can change a declared parameter's value and do nothing else — no new parameter,
      no type change, nothing executable.
-- **Done when:** `I-SEC-7` passes — a feed value failing its declared constraint is rejected, the
+- [ ] **Done when:** `I-SEC-7` passes — a feed value failing its declared constraint is rejected, the
   previous `last_good_value` remains in effect for the next request, and `reject_count` increments;
   an unsigned or badly signed feed is never applied.
 
@@ -1060,15 +1078,15 @@ is adapters — a content decision, not an engine one.
   generation — per D-042.
 - **Where:** `crates/sources` (`reference_datasets`, `reference_dataset_rows`).
 - **Subtasks:**
-  1. Stream-decompress and batch-insert the incoming file at `generation + 1` with
+  - [ ] 1. Stream-decompress and batch-insert the incoming file at `generation + 1` with
      `import_state = 'Staging'`, never loading the full file into memory.
-  2. Verify row count and a spot-check before promotion.
-  3. Promote `generation + 1` to `Live` and delete the old generation in a single transaction; on
+  - [ ] 2. Verify row count and a spot-check before promotion.
+  - [ ] 3. Promote `generation + 1` to `Live` and delete the old generation in a single transaction; on
      failure, leave the previous generation `Live` and record `Failed` with a reason.
-  4. Expose imported values as registry fields of availability class `integration` — never as a source
+  - [ ] 4. Expose imported values as registry fields of availability class `integration` — never as a source
      contributing items, so this importer sits outside the circuit breaker and `affirmativeEmpty`
      entirely.
-- **Done when:** `I-DATA-13` passes — a deliberately truncated import file leaves the previous
+- [ ] **Done when:** `I-DATA-13` passes — a deliberately truncated import file leaves the previous
   generation live and readable, with the failure recorded and no half-imported generation ever visible
   to a reader.
 
@@ -1077,16 +1095,16 @@ is adapters — a content decision, not an engine one.
   watch providers, and person collections (auto-collections).
 - **Where:** `crates/sources/tmdb`.
 - **Subtasks:**
-  1. Implement `tmdb.chart` (popular/topRated/trending, window, mediaType, limit).
-  2. Implement `tmdb.franchise` (franchise id or seed title, includeParts) and `tmdb.list` (list url or
+  - [ ] 1. Implement `tmdb.chart` (popular/topRated/trending, window, mediaType, limit).
+  - [ ] 2. Implement `tmdb.franchise` (franchise id or seed title, includeParts) and `tmdb.list` (list url or
      id).
-  3. Implement `tmdb.discover` with nested and/or filter groups and `sortBy`.
-  4. Implement `tmdb.watchProvider` (providerId, region, mediaType).
-  5. Implement `tmdb.person` (role, minItems, separator options) as an auto-collection source, distinct
+  - [ ] 3. Implement `tmdb.discover` with nested and/or filter groups and `sortBy`.
+  - [ ] 4. Implement `tmdb.watchProvider` (providerId, region, mediaType).
+  - [ ] 5. Implement `tmdb.person` (role, minItems, separator options) as an auto-collection source, distinct
      from the Tier-1 people-browse source.
-  6. Implement `tmdb.random` (pool params, explicit seed) and reject its absence of a seed at save
+  - [ ] 6. Implement `tmdb.random` (pool params, explicit seed) and reject its absence of a seed at save
      time.
-- **Done when:** all six TMDB source types validate against their published JSON Schema, declare
+- [ ] **Done when:** all six TMDB source types validate against their published JSON Schema, declare
   `affirmativeEmpty: true` on their structured rung, and each produces a deterministic result set from
   the fake or a recorded fixture.
 
@@ -1094,10 +1112,10 @@ is adapters — a content decision, not an engine one.
 - **Build:** charts, custom lists, recommendations.
 - **Where:** `crates/sources/trakt`.
 - **Subtasks:**
-  1. Implement `trakt.chart` (chart, period, mediaType).
-  2. Implement `trakt.list` (list url).
-  3. Implement `trakt.recommendations` (mediaType, limit).
-- **Done when:** all three validate against their JSON Schema and pass the shared adapter contract test
+  - [ ] 1. Implement `trakt.chart` (chart, period, mediaType).
+  - [ ] 2. Implement `trakt.list` (list url).
+  - [ ] 3. Implement `trakt.recommendations` (mediaType, limit).
+- [ ] **Done when:** all three validate against their JSON Schema and pass the shared adapter contract test
   from Task 5.1.
 
 ### Task 5.11 IMDb adapters
@@ -1106,88 +1124,98 @@ is adapters — a content decision, not an engine one.
   empty from broken.
 - **Where:** `crates/sources/imdb`.
 - **Subtasks:**
-  1. Implement `imdb.chart` and `imdb.list` against the structured rung, declaring
+  - [ ] 1. Implement `imdb.chart` and `imdb.list` against the structured rung, declaring
      `affirmativeEmpty: true` there because its typed errors distinguish not-found from forbidden from
      empty.
-  2. Implement the embedded-payload fallback rung, declaring `affirmativeEmpty: false`.
-  3. Declare the structured rung's authenticating hash as a `volatileParams` entry, supplied by
+  - [ ] 2. Implement the embedded-payload fallback rung, declaring `affirmativeEmpty: false`.
+  - [ ] 3. Declare the structured rung's authenticating hash as a `volatileParams` entry, supplied by
      Task 5.7's feed.
-  4. Scope both adapters to charts and custom lists only — no ratings, which arrive through Task 5.8's
+  - [ ] 4. Scope both adapters to charts and custom lists only — no ratings, which arrive through Task 5.8's
      bulk importer on a separate cadence.
-- **Done when:** the fallthrough from structured to embedded rung is exercised by a forced-failure test
+- [ ] **Done when:** the fallthrough from structured to embedded rung is exercised by a forced-failure test
   and the engine applies `affirmativeEmpty: false` for that run, per `I-SRC-8`.
 
 ### Task 5.12 Letterboxd lists adapter
 - **Build:** the scraped-tier list source.
 - **Where:** `crates/sources/letterboxd`.
 - **Subtasks:**
-  1. Implement `letterboxd.list` (list url, random) audited against the endpoint ladder before any
+  - [ ] 1. Implement `letterboxd.list` (list url, random) audited against the endpoint ladder before any
      parser is written.
-  2. Declare `affirmativeEmpty: false` by default, behind challenge detection and the shared circuit
+  - [ ] 2. Declare `affirmativeEmpty: false` by default, behind challenge detection and the shared circuit
      breaker.
-- **Done when:** a challenge-page fixture response is rejected by response validation before reaching
+- [ ] **Done when:** a challenge-page fixture response is rejected by response validation before reaching
   the parser and is never counted as zero items.
 
 ### Task 5.13 MDBList adapter
 - **Build:** `mdblist.list` (list url).
 - **Where:** `crates/sources/mdblist`.
-- **Subtasks:** 1. Audit against the endpoint ladder and implement at the highest rung reached. 2.
-  Declare capabilities per rung.
-- **Done when:** the adapter passes the shared adapter contract test from Task 5.1.
+- **Subtasks:**
+  - [ ] 1. Audit against the endpoint ladder and implement at the highest rung reached.
+  - [ ] 2. Declare capabilities per rung.
+- [ ] **Done when:** the adapter passes the shared adapter contract test from Task 5.1.
 
 ### Task 5.14 AniList adapter
 - **Build:** `anilist.*` (chart or list url).
 - **Where:** `crates/sources/anilist`.
-- **Subtasks:** 1. Implement chart and list variants against AniList's structured API. 2. Resolve
-  results through the anime id mapping from Task 4.6 where the target library speaks TVDB/TMDB.
-- **Done when:** an AniList result resolves to the correct library item via `id_mappings`, verified
+- **Subtasks:**
+  - [ ] 1. Implement chart and list variants against AniList's structured API.
+  - [ ] 2. Resolve results through the anime id mapping from Task 4.6 where the target library speaks
+     TVDB/TMDB.
+- [ ] **Done when:** an AniList result resolves to the correct library item via `id_mappings`, verified
   against a fixture with a known AniList-to-TVDB mapping.
 
 ### Task 5.15 MyAnimeList adapter
 - **Build:** `mal.*` (chart or list).
 - **Where:** `crates/sources/mal`.
-- **Subtasks:** 1. Implement chart and list variants. 2. Resolve through the anime id mapping as in
-  Task 5.14.
-- **Done when:** the adapter passes the shared adapter contract test and resolves through
+- **Subtasks:**
+  - [ ] 1. Implement chart and list variants.
+  - [ ] 2. Resolve through the anime id mapping as in Task 5.14.
+- [ ] **Done when:** the adapter passes the shared adapter contract test and resolves through
   `id_mappings` identically to Task 5.14.
 
 ### Task 5.16 FlixPatrol adapters
 - **Build:** networks and originals, scraped tier.
 - **Where:** `crates/sources/flixpatrol`.
 - **Subtasks:**
-  1. Implement `flixpatrol.networks` (country, platform) and `flixpatrol.originals` (platform).
-  2. Declare `affirmativeEmpty: false`, behind challenge detection and the circuit breaker.
-- **Done when:** both adapters pass the shared adapter contract test with `affirmativeEmpty: false`
+  - [ ] 1. Implement `flixpatrol.networks` (country, platform) and `flixpatrol.originals` (platform).
+  - [ ] 2. Declare `affirmativeEmpty: false`, behind challenge detection and the circuit breaker.
+- [ ] **Done when:** both adapters pass the shared adapter contract test with `affirmativeEmpty: false`
   enforced.
 
 ### Task 5.17 Overseerr adapter
 - **Build:** `overseerr.requests` (scope global/perUser, status).
 - **Where:** `crates/sources/overseerr`.
-- **Subtasks:** 1. Implement the requests query against Overseerr's API. 2. Declare
-  `affirmativeEmpty: true` on its structured rung.
-- **Done when:** the adapter passes the shared adapter contract test.
+- **Subtasks:**
+  - [ ] 1. Implement the requests query against Overseerr's API.
+  - [ ] 2. Declare `affirmativeEmpty: true` on its structured rung.
+- [ ] **Done when:** the adapter passes the shared adapter contract test.
 
 ### Task 5.18 Tautulli adapter
 - **Build:** `tautulli.stats` (metric × unit, days, minPlays).
 - **Where:** `crates/sources/tautulli`.
-- **Subtasks:** 1. Implement the popular/watched metric crossed with plays/duration unit. 2. Support
-  the `days`/`minPlays` parameters as JSON-Schema-validated inputs.
-- **Done when:** the adapter passes the shared adapter contract test.
+- **Subtasks:**
+  - [ ] 1. Implement the popular/watched metric crossed with plays/duration unit.
+  - [ ] 2. Support the `days`/`minPlays` parameters as JSON-Schema-validated inputs.
+- [ ] **Done when:** the adapter passes the shared adapter contract test.
 
 ### Task 5.19 Radarr/Sonarr tag adapters
 - **Build:** `radarr.tag` and `sonarr.tag` (instanceId, tagId).
 - **Where:** `crates/sources/radarr`, `crates/sources/sonarr`.
-- **Subtasks:** 1. Implement both against multi-instance configuration. 2. Declare `ordered: false`.
-- **Done when:** both adapters pass the shared adapter contract test and reject
+- **Subtasks:**
+  - [ ] 1. Implement both against multi-instance configuration.
+  - [ ] 2. Declare `ordered: false`.
+- [ ] **Done when:** both adapters pass the shared adapter contract test and reject
   `order.by: sourcePosition` at save time per Task 5.2.
 
 ### Task 5.20 Plex library modes adapter
 - **Build:** `plex.library` (mode: recentlyAdded / recentlyReleased / recentlyReleasedEpisodes, limit),
   reading through the Phase 2 client — no writes.
 - **Where:** `crates/sources/plex_library`, consuming `crates/plex`.
-- **Subtasks:** 1. Implement all three modes as read-only queries against the library-listing calls
-  from Task 2.1. 2. Declare `ordered: true`, `affirmativeEmpty: true`.
-- **Done when:** the adapter passes the shared adapter contract test using the fake from Task 2.2 with
+- **Subtasks:**
+  - [ ] 1. Implement all three modes as read-only queries against the library-listing calls from
+     Task 2.1.
+  - [ ] 2. Declare `ordered: true`, `affirmativeEmpty: true`.
+- [ ] **Done when:** the adapter passes the shared adapter contract test using the fake from Task 2.2 with
   no write call ever issued.
 
 ### Task 5.21 Lifecycle Coming Soon adapter
@@ -1195,11 +1223,11 @@ is adapters — a content decision, not an engine one.
   the source interface is complete even though the lifecycle state machine it reads lands later.
 - **Where:** `crates/sources/lifecycle`.
 - **Subtasks:**
-  1. Implement the source's parameter schema and query shape against the lifecycle fields the registry
+  - [ ] 1. Implement the source's parameter schema and query shape against the lifecycle fields the registry
      already declares (Task 3.3's `lifecycle.*` catalogue).
-  2. Stub the underlying data query against a fixture until the lifecycle state machine exists,
+  - [ ] 2. Stub the underlying data query against a fixture until the lifecycle state machine exists,
      documented as a known forward dependency, not a silent gap.
-- **Done when:** the adapter validates against its JSON Schema and passes the shared adapter contract
+- [ ] **Done when:** the adapter validates against its JSON Schema and passes the shared adapter contract
   test against fixture data; its live query is revisited when the lifecycle phase lands.
 
 ### Task 5.22 Multi-source composition
@@ -1207,10 +1235,10 @@ is adapters — a content decision, not an engine one.
   `hubReplacement` (shadows a native Plex hub, excluding placeholder items).
 - **Where:** `crates/sources/meta`.
 - **Subtasks:**
-  1. Implement `multi`, mapping its combine modes onto the merge strategy and order stage from
+  - [ ] 1. Implement `multi`, mapping its combine modes onto the merge strategy and order stage from
      Task 5.23.
-  2. Implement `hubReplacement`, filtering on `library_items.is_placeholder`.
-- **Done when:** a `multi` source composed of two children with different priorities produces a
+  - [ ] 2. Implement `hubReplacement`, filtering on `library_items.is_placeholder`.
+- [ ] **Done when:** a `multi` source composed of two children with different priorities produces a
   deterministic merged result, and `hubReplacement` never includes a placeholder item.
 
 ### Task 5.23 Merge, filter, and order — one pipeline
@@ -1220,15 +1248,15 @@ is adapters — a content decision, not an engine one.
   rating, or seeded random; franchise parts by release date).
 - **Where:** `crates/core` (pipeline).
 - **Subtasks:**
-  1. Implement merge with the three strategies, per-source caps, and canonical-identifier
+  - [ ] 1. Implement merge with the three strategies, per-source caps, and canonical-identifier
      deduplication.
-  2. Implement the `exclusions` table (global and per-definition scope) as the filter stage's
+  - [ ] 2. Implement the `exclusions` table (global and per-definition scope) as the filter stage's
      exclusion source.
-  3. Implement deterministic ordering with a mandatory seed for any non-deterministic mode, rotated on
+  - [ ] 3. Implement deterministic ordering with a mandatory seed for any non-deterministic mode, rotated on
      schedule, never per run.
-  4. Route every collection and every mode — smart or manual — through this one pipeline, with no
+  - [ ] 4. Route every collection and every mode — smart or manual — through this one pipeline, with no
      divergent quick and full paths.
-- **Done when:** `I-SRC-7` passes — a definition combining any two source types produces the same
+- [ ] **Done when:** `I-SRC-7` passes — a definition combining any two source types produces the same
   output whether run as a "quick preview" or a full sync, because both paths call the same pipeline
   function; `I-SRC-2`, `I-SRC-3`, and `I-SRC-5` pass against their respective merge, filter, and order
   fixtures.
@@ -1239,14 +1267,14 @@ is adapters — a content decision, not an engine one.
 - **Where:** `web/src/routes` (collection editor, preview panel); `crates/api` (exposing
   `source_health` and `source_contributions`).
 - **Subtasks:**
-  1. Render each source's health state (closed/open/half-open, frozen, degraded) inline in the
+  - [ ] 1. Render each source's health state (closed/open/half-open, frozen, degraded) inline in the
      collection editor.
-  2. Build the preview panel: resolved items with per-source attribution and counts, showing partial
+  - [ ] 2. Build the preview panel: resolved items with per-source attribution and counts, showing partial
      results with the failing source named rather than replacing the whole panel with an error.
-  3. Generate source parameter forms from each source's published JSON Schema, including
+  - [ ] 3. Generate source parameter forms from each source's published JSON Schema, including
      `x-control`-driven live-lookup pickers (an *arr tag selector populating from the configured
      instance) and `x-dependsOn` conditional fields.
-- **Done when:** `I-EVID-1` and `I-EVID-4` pass — a preview where one of several sources fails still
+- [ ] **Done when:** `I-EVID-1` and `I-EVID-4` pass — a preview where one of several sources fails still
   shows every successful source's results, with the failure named rather than the panel replaced by an
   error, verified against the fake's mid-pass-failure injection.
 
@@ -1269,15 +1297,15 @@ state, artwork, and sort-title records.
   produces, one row per `(definition, library, variant)`.
 - **Where:** `crates/core` (`managed_collections`); `crates/plex` (create/update calls from Task 2.1).
 - **Subtasks:**
-  1. Implement `managed_collections` with `variant_key` for the multi-collection modes (per-franchise,
+  - [ ] 1. Implement `managed_collections` with `variant_key` for the multi-collection modes (per-franchise,
      per-person), keyed uniquely on `(definition_id, library_id, variant_key)`.
-  2. Map `collection_mode` and `collection_sort` to Plex's integer values (`-1`/`0`/`1`/`2` and
+  - [ ] 2. Map `collection_mode` and `collection_sort` to Plex's integer values (`-1`/`0`/`1`/`2` and
      `0`/`1`/`2` respectively), documented at the point they are written.
-  3. Enforce that `collection_sort` is never written on a smart collection, matching the save-time
+  - [ ] 3. Enforce that `collection_sort` is never written on a smart collection, matching the save-time
      constraint from Task 3.4.
-  4. Create the Plex collection on first sync; update its Plex-visible attributes on later syncs
+  - [ ] 4. Create the Plex collection on first sync; update its Plex-visible attributes on later syncs
      without deleting it.
-- **Done when:** a collection's title or smart-filter attributes change across a resync while its
+- [ ] **Done when:** a collection's title or smart-filter attributes change across a resync while its
   `rating_key` stays identical, verified against the fake.
 
 ### Task 6.2 Reconcile membership
@@ -1285,13 +1313,13 @@ state, artwork, and sort-title records.
   rewrite.
 - **Where:** `crates/core` (reconciliation); `crates/plex` (item add/remove/reorder calls).
 - **Subtasks:**
-  1. Diff the desired item set against `managed_collection_items`, the last reconciled membership.
-  2. Issue only the add/remove/reorder calls the diff requires — no unconditional clear-and-rewrite.
-  3. Self-heal by label and canonical identity when a rating key has churned (using Task 4.7's
+  - [ ] 1. Diff the desired item set against `managed_collection_items`, the last reconciled membership.
+  - [ ] 2. Issue only the add/remove/reorder calls the diff requires — no unconditional clear-and-rewrite.
+  - [ ] 3. Self-heal by label and canonical identity when a rating key has churned (using Task 4.7's
      rebinding), rather than treating a churned item as departed.
-  4. Never act on a failed or unaffirmed-empty source fetch — read the frozen-contribution state from
+  - [ ] 4. Never act on a failed or unaffirmed-empty source fetch — read the frozen-contribution state from
      Task 5.4 before writing.
-- **Done when:** `I-SRC-6` passes — updating a collection's membership never deletes and recreates the
+- [ ] **Done when:** `I-SRC-6` passes — updating a collection's membership never deletes and recreates the
   Plex collection object, verified by asserting `rating_key` is unchanged across a membership change in
   the fake; `I-IDEM-1` passes — a second reconciliation run with unchanged inputs issues zero write
   calls.
@@ -1300,36 +1328,36 @@ state, artwork, and sort-title records.
 - **Build:** enforcement of `reconcile.mutualExclusionGroup` across collections sharing a group.
 - **Where:** `crates/core` (reconciliation, using `ix_managed_collection_items__item`).
 - **Subtasks:**
-  1. Before adding an item to a collection with a mutual-exclusion group, check existing membership
+  - [ ] 1. Before adding an item to a collection with a mutual-exclusion group, check existing membership
      across every other collection in that group via the item-indexed lookup.
-  2. Resolve a conflict deterministically (first-writer-wins by definition order, or the rule the
+  - [ ] 2. Resolve a conflict deterministically (first-writer-wins by definition order, or the rule the
      engine's pipeline already establishes) rather than allowing both memberships to stand.
-- **Done when:** an item that qualifies for two collections sharing a mutual-exclusion group ends up in
+- [ ] **Done when:** an item that qualifies for two collections sharing a mutual-exclusion group ends up in
   exactly one of them after reconciliation, deterministically reproducible across runs.
 
 ### Task 6.4 Self-healing for a vanished collection
 - **Build:** recovery when a managed collection disappears from Plex between passes.
 - **Where:** `crates/core` (`managed_collections.missing_since`, `heal_count`).
 - **Subtasks:**
-  1. Detect a managed collection's absence via `missing_since` rather than assuming deletion means
+  - [ ] 1. Detect a managed collection's absence via `missing_since` rather than assuming deletion means
      intent.
-  2. Recreate it on the next pass, incrementing `heal_count` rather than silently resetting it.
-  3. Surface a rising `heal_count` as a doctor-facing signal that something is fighting the
+  - [ ] 2. Recreate it on the next pass, incrementing `heal_count` rather than silently resetting it.
+  - [ ] 3. Surface a rising `heal_count` as a doctor-facing signal that something is fighting the
      reconciliation, not a healthy pattern.
-- **Done when:** a collection deleted out-of-band in the fake is recreated on the next pass with its
+- [ ] **Done when:** a collection deleted out-of-band in the fake is recreated on the next pass with its
   membership restored from `managed_collection_items`, and `heal_count` increments rather than resets.
 
 ### Task 6.5 Adoption of user-made collections, with consent
 - **Build:** consent-gated adoption of collections the user created, per D-014.
 - **Where:** `crates/core` (adoption state, sort-title consent); `web/` (consent controls).
 - **Subtasks:**
-  1. Implement the per-library adoption-consent control, with a per-collection override for
+  - [ ] 1. Implement the per-library adoption-consent control, with a per-collection override for
      exceptions, and no global control at launch.
-  2. Gate any sort-title modification of an adopted collection on `sortTitleConsent`, recording the
+  - [ ] 2. Gate any sort-title modification of an adopted collection on `sortTitleConsent`, recording the
      original value before the first write.
-  3. Restore the original sort title (value, presence, and lock state, not merely the value) on
+  - [ ] 3. Restore the original sort title (value, presence, and lock state, not merely the value) on
      demotion or teardown.
-- **Done when:** `I-REV-6` passes — no adopted collection's sort title is modified without recorded
+- [ ] **Done when:** `I-REV-6` passes — no adopted collection's sort title is modified without recorded
   per-library or per-collection consent; `I-REV-5` passes — restoring a demoted adopted collection
   returns its original sort-title value, presence, and lock state exactly, not merely the value.
 
@@ -1337,13 +1365,13 @@ state, artwork, and sort-title records.
 - **Build:** the Collections list page and adoption-consent controls in Settings.
 - **Where:** `web/src/routes` (Collections list; Settings › libraries adoption consent).
 - **Subtasks:**
-  1. List every collection with name, target libraries, item count, last-run outcome, next run, and
+  - [ ] 1. List every collection with name, target libraries, item count, last-run outcome, next run, and
      current state (frozen/degraded/never-run/disabled/mid-sync), each legible without opening the
      collection.
-  2. Build the per-library adoption-consent toggle and the per-collection override.
-  3. Surface `heal_count` on the collection's row when it is rising, linking to the doctor surface this
+  - [ ] 2. Build the per-library adoption-consent toggle and the per-collection override.
+  - [ ] 3. Surface `heal_count` on the collection's row when it is rising, linking to the doctor surface this
      phase does not otherwise build.
-- **Done when:** every collection's state in the list matches its `managed_collections` row with no
+- [ ] **Done when:** every collection's state in the list matches its `managed_collections` row with no
   need to open the collection to confirm it, verified by a test asserting list-state matches
   backend-recorded state across all five listed states.
 ## Phase 7 — Placement
@@ -1372,13 +1400,13 @@ stops.
   participant ULID, deduplicated by identifier before any planning runs.
 - **Where:** crates/core
 - **Subtasks:**
-  1. Read `placement_desired` rows into an ordered sequence per (surface, library).
-  2. Sort by `(position, participant ULID)` ascending.
-  3. Deduplicate by participant identifier before planning; collapse to the first occurrence and
+  - [ ] 1. Read `placement_desired` rows into an ordered sequence per (surface, library).
+  - [ ] 2. Sort by `(position, participant ULID)` ascending.
+  - [ ] 3. Deduplicate by participant identifier before planning; collapse to the first occurrence and
      report the duplication as a doctor finding rather than silently dropping it.
-  4. Property test: many participants sharing one position produce a byte-identical desired sequence
+  - [ ] 4. Property test: many participants sharing one position produce a byte-identical desired sequence
      across repeated computations.
-- **Done when:** I-CONV-7 passes — the desired sequence is byte-identical across repeated
+- [ ] **Done when:** I-CONV-7 passes — the desired sequence is byte-identical across repeated
   computations for a fixture with duplicate positions, and a second pass over unchanged desired
   input emits zero moves.
 
@@ -1389,12 +1417,12 @@ stops.
   exactly `n − LIS` moves, each item moved once, `after` its already-correct predecessor.
 - **Where:** crates/core
 - **Subtasks:**
-  1. Implement LIS-over-desired-rank on the actual sequence.
-  2. Emit the move list: everything outside the LIS, in desired order, each placed `after` its
+  - [ ] 1. Implement LIS-over-desired-rank on the actual sequence.
+  - [ ] 2. Emit the move list: everything outside the LIS, in desired order, each placed `after` its
      correct predecessor.
-  3. Property test over random permutation pairs: assert the emitted move count is never more than
+  - [ ] 3. Property test over random permutation pairs: assert the emitted move count is never more than
      `n − LIS`, and that fewer is never observed either — `n − LIS` is the provable minimum.
-- **Done when:** I-CONV-1 passes — the property test over generated permutation pairs finds no case
+- [ ] **Done when:** I-CONV-1 passes — the property test over generated permutation pairs finds no case
   where the planner emits more than `n − LIS` moves.
 
 ### Task 7.3 Gap-budget accounting
@@ -1405,18 +1433,18 @@ stops.
   participant was just re-promoted with fresh spacing.
 - **Where:** crates/core (accounting), crates/plex (the position observations that seed the estimate)
 - **Subtasks:**
-  1. Implement the `placement_gaps` split-on-insertion update: two child rows with incremented
+  - [ ] 1. Implement the `placement_gaps` split-on-insertion update: two child rows with incremented
      depth, parent row removed.
-  2. Implement the `gapBudget` threshold check (default 8): a planned insertion into a gap whose
+  - [ ] 2. Implement the `gapBudget` threshold check (default 8): a planned insertion into a gap whose
      depth exceeds the budget schedules a rebalance instead of attempting the move and handling a
      failure.
-  3. Track `insertions` as a diagnostic counter alongside `depth`, without using it for the budget
+  - [ ] 3. Track `insertions` as a diagnostic counter alongside `depth`, without using it for the budget
      decision — a pair with high `insertions` and low `depth` is a different, interesting signal,
      not a trigger.
-  4. Simulate deep, repeated subdivision of one region; assert the depth-based check fires while a
+  - [ ] 4. Simulate deep, repeated subdivision of one region; assert the depth-based check fires while a
      naive raw-insertion-count check would not, because every "fresh" child pair would read a low
      count forever.
-- **Done when:** a simulated precision-exhaustion fixture shows the rebalance scheduled by
+- [ ] **Done when:** a simulated precision-exhaustion fixture shows the rebalance scheduled by
   accounting strictly before any move is attempted against the exhausted gap.
 
 ### Task 7.4 The escalation ladder and anchor preference
@@ -1427,20 +1455,20 @@ stops.
   unpromoted at any rung.
 - **Where:** crates/core (ladder logic), crates/plex (unpromote / promote / move calls)
 - **Subtasks:**
-  1. Rung 0: apply the minimal move plan from Task 7.2, one attempt, verify by read-back (Task 7.5).
-  2. Rung 1: for each item still misplaced and re-promotable, unpromote and re-promote with fresh
+  - [ ] 1. Rung 0: apply the minimal move plan from Task 7.2, one attempt, verify by read-back (Task 7.5).
+  - [ ] 2. Rung 1: for each item still misplaced and re-promotable, unpromote and re-promote with fresh
      spacing, then re-plan the remainder; bound to `rebalanceLimit` items per pass (default 5).
-  3. Rung 2: full rebalance of one library — unpromote every re-promotable participant, re-promote
+  - [ ] 3. Rung 2: full rebalance of one library — unpromote every re-promotable participant, re-promote
      in desired order, then position anchors around them; scoped to non-anchor participants only,
      idempotent, and recorded before execution; bound to one library per pass.
-  4. Rung 3: stop; mark the surface `non-convergent` with the specific unsettled items; surface it;
+  - [ ] 4. Rung 3: stop; mark the surface `non-convergent` with the specific unsettled items; surface it;
      the next pass does not re-enter rung 0 without new inputs.
-  5. Anchor preference: when a plan has freedom between moving A after B or B before A, prefer
+  - [ ] 5. Anchor preference: when a plan has freedom between moving A after B or B before A, prefer
      moving the re-promotable participant over the anchor.
-  6. Explicitly forbid the "reset all hub management and rebuild" fallback as an automated rung-2
+  - [ ] 6. Explicitly forbid the "reset all hub management and rebuild" fallback as an automated rung-2
      action; it exists only as an explicit, previewed operator action reserved for the doctor page
      (Phase 13).
-- **Done when:** I-CONV-3, I-CONV-4, and I-CONV-6 all pass — a library whose participants are
+- [ ] **Done when:** I-CONV-3, I-CONV-4, and I-CONV-6 all pass — a library whose participants are
   majority anchors completes every rung with zero unpromote calls against any participant the
   server reports as non-deletable; an unconvergeable fixture terminates at rung 3 with a recorded
   reason at every rung entered, and the next pass does not silently re-enter rung 0.
@@ -1452,13 +1480,13 @@ stops.
   issues zero API calls beyond the cheap verification read.
 - **Where:** crates/core, crates/plex
 - **Subtasks:**
-  1. Compute `desired_hash` before planning; compare against `placement_surface_state.verified_hash`.
-  2. On a hash match, skip planning and writes entirely — only the cheap verification read runs.
-  3. On every applied move, read back the resulting order and compare to the plan; treat a mismatch
+  - [ ] 1. Compute `desired_hash` before planning; compare against `placement_surface_state.verified_hash`.
+  - [ ] 2. On a hash match, skip planning and writes entirely — only the cheap verification read runs.
+  - [ ] 3. On every applied move, read back the resulting order and compare to the plan; treat a mismatch
      as detected on the same pass, never deferred to the next.
-  4. Record `placement_passes` rows: participant count, moves planned/applied, rebalances, rung
+  - [ ] 4. Record `placement_passes` rows: participant count, moves planned/applied, rebalances, rung
      reached, verification result, gap pressure.
-- **Done when:** I-CONV-2 passes — a fake whose moves silently no-op past a gap budget has the
+- [ ] **Done when:** I-CONV-2 passes — a fake whose moves silently no-op past a gap budget has the
   mismatch detected on the same pass; and a second pass with unchanged desired sequence and
   visibility set issues zero writes and zero reads beyond the verification read.
 
@@ -1469,13 +1497,13 @@ stops.
   principals at Tier 0.
 - **Where:** crates/core, crates/plex
 - **Subtasks:**
-  1. Resolve each participant's visibility set from `placement_visibility` per surface.
-  2. Apply visibility writes strictly before the ordering pass for that surface — a newly visible
+  - [ ] 1. Resolve each participant's visibility set from `placement_visibility` per surface.
+  - [ ] 2. Apply visibility writes strictly before the ordering pass for that surface — a newly visible
      item must exist in the ordering space before its position is set; a newly hidden item consumes
      no move.
-  3. Confirm the write path accepts a per-user principal row without a migration, even though only
+  - [ ] 3. Confirm the write path accepts a per-user principal row without a migration, even though only
      the `everyone` principal is ever written by the Tier 0 interface.
-- **Done when:** a fixture pass shows visibility changes applied strictly before positioning writes
+- [ ] **Done when:** a fixture pass shows visibility changes applied strictly before positioning writes
   for the same surface, and inserting a non-`everyone` principal row against the shipped schema
   succeeds with no migration.
 
@@ -1488,19 +1516,19 @@ stops.
 - **Where:** crates/core (policy, the one function), crates/plex (raw-attribute read, locked
   edit-endpoint write)
 - **Subtasks:**
-  1. Implement the single prefix compute/strip function; no second implementation exists anywhere
+  - [ ] 1. Implement the single prefix compute/strip function; no second implementation exists anywhere
      in the codebase.
-  2. Before the first mutation of any item's sort title, read the raw attribute — never the parsed,
+  - [ ] 2. Before the first mutation of any item's sort title, read the raw attribute — never the parsed,
      title-defaulted value — and record `was_present`, `was_locked`, `original_value` (as bytes),
      and `original_sha256` into `sort_title_originals`; refuse the mutation outright if capture
      fails.
-  3. Resolve consent via `adoption_consents` (most-specific-wins: participant, then library, then
+  - [ ] 3. Resolve consent via `adoption_consents` (most-specific-wins: participant, then library, then
      global, defaulting to not-granted) before any write to a collection Afisharr did not create;
      refuse and raise a finding when unresolved.
-  4. Implement promote/demote as a pair that restores the captured value, presence, and lock flag
+  - [ ] 4. Implement promote/demote as a pair that restores the captured value, presence, and lock flag
      together, writing the field's value and its lock flag in the same edit call.
-  5. Assert applying the prefix twice yields an identical string.
-- **Done when:** the capture-before-mutate rule holds for every fixture — a failed capture blocks
+  - [ ] 5. Assert applying the prefix twice yields an identical string.
+- [ ] **Done when:** the capture-before-mutate rule holds for every fixture — a failed capture blocks
   the mutation and leaves the item untouched — and consent resolution refuses a write with no
   resolvable row. (This capture rule is the same one Phase 8 claims as I-REV-1 once an equivalent
   path exists for base posters; the full byte-exact round trip this task enables is claimed as
@@ -1514,13 +1542,13 @@ stops.
   a participant's own occupied positions.
 - **Where:** crates/core
 - **Subtasks:**
-  1. Implement each row of the self-healing table as an explicit branch, not a generic catch-all.
-  2. Implement `randomization_epochs`: the shuffle is seeded by `(epoch, surface)`; the epoch
+  - [ ] 1. Implement each row of the self-healing table as an explicit branch, not a generic catch-all.
+  - [ ] 2. Implement `randomization_epochs`: the shuffle is seeded by `(epoch, surface)`; the epoch
      advances only on schedule or an explicit re-roll, never per pass.
-  3. Constrain the shuffle to the position set already occupied by flagged participants.
-  4. Fixture: inject unrecognised participants at random positions across every rung; assert
+  - [ ] 3. Constrain the shuffle to the position set already occupied by flagged participants.
+  - [ ] 4. Fixture: inject unrecognised participants at random positions across every rung; assert
      survival and that their presence is recorded.
-- **Done when:** I-CONV-5, I-IDEM-2, and I-IDEM-3 all pass — unrecognised participants survive
+- [ ] **Done when:** I-CONV-5, I-IDEM-2, and I-IDEM-3 all pass — unrecognised participants survive
   every rung with their presence recorded; three passes within one epoch produce zero moves;
   advancing the epoch produces a different, reproducible order; and the multiset of positions
   occupied by randomized participants is unchanged before and after a shuffle, with no unflagged
@@ -1533,18 +1561,18 @@ stops.
   explicitly, with a full keyboard path for every drag operation.
 - **Where:** crates/api (routes, SSE for pass status), web/
 - **Subtasks:**
-  1. Confirm Q-014 and Q-015 have landed with recorded measurements, and the PRD's placement design
+  - [ ] 1. Confirm Q-014 and Q-015 have landed with recorded measurements, and the PRD's placement design
      amended accordingly, before building against their answer.
-  2. Render the applicable states explicitly: move pending verification, move failed verification,
+  - [ ] 2. Render the applicable states explicitly: move pending verification, move failed verification,
      library non-convergent, rebalance scheduled or in progress, adopted collection lacking
      consent, anchor row, unrecognised participant present.
-  3. A reordered row shows pending until read-back confirms it; it is never shown as settled before
+  - [ ] 3. A reordered row shows pending until read-back confirms it; it is never shown as settled before
      that.
-  4. Never offer an operation on an anchor row that anchors cannot support (no unpromote /
+  - [ ] 4. Never offer an operation on an anchor row that anchors cannot support (no unpromote /
      re-promote affordance).
-  5. Implement drag-and-drop reordering and an equivalent keyboard path (layer list, move-up,
+  - [ ] 5. Implement drag-and-drop reordering and an equivalent keyboard path (layer list, move-up,
      move-down, move-to-position) that produce an identical resulting definition.
-- **Done when:** I-UX-4 and I-UX-6 pass — a reorder against a fake with delayed verification shows
+- [ ] **Done when:** I-UX-4 and I-UX-6 pass — a reorder against a fake with delayed verification shows
   pending and settles only after read-back returns, and the same reorder performed by drag and by
   keyboard produces an identical definition. I-CONV-8 also passes here: a reorder made through the
   board is written, verified, and still in place after the next scheduled sync runs against
@@ -1578,17 +1606,17 @@ state machine passes its own tests.
   content-addressed; quarantine any capture whose provenance is uncertain.
 - **Where:** crates/render (capture pipeline), crates/plex (thumbnail read)
 - **Subtasks:**
-  1. On first touch of a library item, read the poster bytes via the item's recorded thumbnail key
+  - [ ] 1. On first touch of a library item, read the poster bytes via the item's recorded thumbnail key
      and hash to `sha256`; insert into the content-addressed asset store (deduplicated on the
      unique digest index), then into `base_posters` keyed by `library_item_id` — the primary key
      enforces that there is never a second base poster for an item.
-  2. Refuse capture, and refuse the pending modification, if the read or hash fails.
-  3. Mark a capture `is_suspect` when it occurs after Afisharr already wrote a poster for that item,
+  - [ ] 2. Refuse capture, and refuse the pending modification, if the read or hash fails.
+  - [ ] 3. Mark a capture `is_suspect` when it occurs after Afisharr already wrote a poster for that item,
      or when the thumbnail key does not match the one previously recorded; exclude suspect bases
      from compositing and raise a doctor finding.
-  4. Fixture every provenance-uncertain scenario: a restored backup, a reinstall, an item touched by
+  - [ ] 4. Fixture every provenance-uncertain scenario: a restored backup, a reinstall, an item touched by
      another tool.
-- **Done when:** I-REV-1 and I-RENDER-2 pass — a fault-injected capture failure blocks the
+- [ ] **Done when:** I-REV-1 and I-RENDER-2 pass — a fault-injected capture failure blocks the
   modification entirely with the item left untouched, and every constructed provenance-uncertain
   scenario is quarantined, excluded from compositing, and raised as a finding.
 
@@ -1598,14 +1626,14 @@ state machine passes its own tests.
   pure functions of value, locale, and arguments, and the null-skip rule for unresolved variables.
 - **Where:** crates/render
 - **Subtasks:**
-  1. Implement the element model: layers, positioned elements, per-element conditions bound to
+  - [ ] 1. Implement the element model: layers, positioned elements, per-element conditions bound to
      registry fields.
-  2. Implement formatters as pure functions — no clock, no I/O, no randomness; an architectural
+  - [ ] 2. Implement formatters as pure functions — no clock, no I/O, no randomness; an architectural
      test asserts none reach the clock or the network.
-  3. An element whose bound value is null or unavailable is skipped entirely — never drawn blank,
+  - [ ] 3. An element whose bound value is null or unavailable is skipped entirely — never drawn blank,
      never drawn with a placeholder string; the render audit records why.
-  4. A value-to-asset mapping table must declare a fallback at save time or is rejected.
-- **Done when:** I-RENDER-4, I-RENDER-5, and I-RENDER-7 pass — every element type renders absent
+  - [ ] 4. A value-to-asset mapping table must declare a fallback at save time or is rejected.
+- [ ] **Done when:** I-RENDER-4, I-RENDER-5, and I-RENDER-7 pass — every element type renders absent
   (not blank) under null and unavailable inputs, with the reason recorded; every formatter is
   idempotent under repeated identical calls and none reach the clock or network; and saving a
   mapping without a fallback is a structured save-time error.
@@ -1617,13 +1645,13 @@ state machine passes its own tests.
   applied over an overlay.
 - **Where:** crates/render
 - **Subtasks:**
-  1. Implement a single render entry point used by both the preview endpoint and the apply job — no
+  - [ ] 1. Implement a single render entry point used by both the preview endpoint and the apply job — no
      second renderer.
-  2. Every render reads the base poster from the base-poster store, never from a previously
+  - [ ] 2. Every render reads the base poster from the base-poster store, never from a previously
      rendered output.
-  3. Architectural test: assert Afisharr's own render output is never read back as an input to a
+  - [ ] 3. Architectural test: assert Afisharr's own render output is never read back as an input to a
      subsequent render.
-- **Done when:** I-RENDER-1 and I-RENDER-3 pass — applying overlays, changing the template, and
+- [ ] **Done when:** I-RENDER-1 and I-RENDER-3 pass — applying overlays, changing the template, and
   applying again yields a second render whose input digest equals the stored base digest and whose
   output is byte-identical to rendering the new template once from a clean library; rendering a
   template corpus through both entry points yields byte-identical output.
@@ -1635,13 +1663,13 @@ state machine passes its own tests.
   `last_used_at` eviction that never evicts an entry a database constraint protects.
 - **Where:** crates/render
 - **Subtasks:**
-  1. Implement the five-term key composition; mutating any one term must change the key.
-  2. On an unchanged key, skip the upload entirely — a cache hit, no write.
-  3. Implement eviction by `last_used_at` once the cache exceeds its configured cap; the eviction
+  - [ ] 1. Implement the five-term key composition; mutating any one term must change the key.
+  - [ ] 2. On an unchanged key, skip the upload entirely — a cache hit, no write.
+  - [ ] 3. Implement eviction by `last_used_at` once the cache exceeds its configured cap; the eviction
      scan must skip rows a `RESTRICT` constraint protects (an output still bound to a live Plex
      upload).
-  4. Drive renders past the cap in a fixture and assert the cap holds under sustained load.
-- **Done when:** I-RENDER-6 and I-PERF-2 pass — mutating each of the five key components
+  - [ ] 4. Drive renders past the cap in a fixture and assert the cap holds under sustained load.
+- [ ] **Done when:** I-RENDER-6 and I-PERF-2 pass — mutating each of the five key components
   independently changes the key and forces a re-render, changing nothing produces a cache hit with
   no upload, the cache never exceeds its configured cap under load, and a render still bound to a
   live upload survives eviction.
@@ -1652,18 +1680,18 @@ state machine passes its own tests.
   a grace window before deletion and a filesystem reconciliation pass for unreferenced files.
 - **Where:** crates/render, crates/core (nightly job wiring)
 - **Subtasks:**
-  1. Mark: walk every table that can reference an asset — base posters, the render cache, pack
+  - [ ] 1. Mark: walk every table that can reference an asset — base posters, the render cache, pack
      assets, local asset files, and definition-body asset references — and touch `last_used_at` on
      every asset reached.
-  2. Sweep: delete asset rows older than the grace window (default 7 days) whose deletion is not
+  - [ ] 2. Sweep: delete asset rows older than the grace window (default 7 days) whose deletion is not
      blocked by a `RESTRICT` constraint; unlink the files.
-  3. Reconcile: sample the filesystem for files with no asset row and delete them after the same
+  - [ ] 3. Reconcile: sample the filesystem for files with no asset row and delete them after the same
      grace window.
-  4. Run the sweep against a database where every asset appears unreferenced; assert the
+  - [ ] 4. Run the sweep against a database where every asset appears unreferenced; assert the
      constraint-protected classes survive because of the constraint, not the sweep's own logic —
      reference counting was rejected precisely because a drifting counter cannot be told apart from
      a correct one without the same full walk the mark phase already performs.
-- **Done when:** I-DATA-9 passes — a full-unreferenced fixture leaves every pristine base poster,
+- [ ] **Done when:** I-DATA-9 passes — a full-unreferenced fixture leaves every pristine base poster,
   every render bound to a live upload, and every pack-required asset intact after the sweep runs.
 
 ### Task 8.6 Restoration: byte-exact, not re-rendered
@@ -1672,11 +1700,11 @@ state machine passes its own tests.
   re-encode, format conversion, or crop.
 - **Where:** crates/render, crates/plex
 - **Subtasks:**
-  1. Implement the reset path as a direct upload of the stored base asset's bytes; it never passes
+  - [ ] 1. Implement the reset path as a direct upload of the stored base asset's bytes; it never passes
      through the renderer.
-  2. Fixture a base poster of an unusual aspect ratio and a non-default format; apply overlays, then
+  - [ ] 2. Fixture a base poster of an unusual aspect ratio and a non-default format; apply overlays, then
      reset.
-- **Done when:** I-REV-2 passes — the bytes Plex serves after reset hash-equal the captured
+- [ ] **Done when:** I-REV-2 passes — the bytes Plex serves after reset hash-equal the captured
   original, for both the unusual-aspect and non-default-format fixtures.
 
 ### Task 8.7 Interface: the template editor (overlay and poster)
@@ -1686,13 +1714,13 @@ state machine passes its own tests.
   drift.
 - **Where:** crates/api, web/
 - **Subtasks:**
-  1. Layer list, canvas, element inspector, and per-element condition editing bound to the field
+  - [ ] 1. Layer list, canvas, element inspector, and per-element condition editing bound to the field
      registry.
-  2. Live preview calling the same render entry point as production.
-  3. Handle the states beyond the universal ones: a referenced font or icon asset missing; an
+  - [ ] 2. Live preview calling the same render entry point as production.
+  - [ ] 3. Handle the states beyond the universal ones: a referenced font or icon asset missing; an
      element's bound field unavailable on this server; a preview item with no media (so `media.*`
      resolves null); a pack-origin template read-only until forked.
-- **Done when:** I-RENDER-3's byte-equality property holds through this page specifically — a
+- [ ] **Done when:** I-RENDER-3's byte-equality property holds through this page specifically — a
   corpus of templates rendered via the editor preview and via the applied-output path, both reached
   through this page's API calls, are byte-identical.
 
@@ -1725,26 +1753,26 @@ Phase 8 until this phase's state machine passes its own tests, in isolation, fir
   transitions that never destroy on a release date moving backwards.
 - **Where:** crates/core
 - **Subtasks:**
-  1. Implement the subject model against the lifecycle-subjects table, including its identity
+  - [ ] 1. Implement the subject model against the lifecycle-subjects table, including its identity
      uniqueness (library, id space, id value, season) and the whole-title/season split from D-025.
-  2. Implement phase resolution: bidirectional transitions, the release-date priority ladder per
+  - [ ] 2. Implement phase resolution: bidirectional transitions, the release-date priority ladder per
      media type (digital, then physical, then a theatrical estimate for movies; first-air or
      next-episode for shows; a season's own air date for season subjects, never inherited from the
      show), and recording of which basis resolved the date.
-  3. Implement the fixed six-step pass: refresh evidence, assess staleness, re-evaluate references,
+  - [ ] 3. Implement the fixed six-step pass: refresh evidence, assess staleness, re-evaluate references,
      compute target axes, emit transitions subject to guards, execute side effects.
-  4. Implement the seven guards exactly: a stale subject transitions on no axis; presence reaches
+  - [ ] 4. Implement the seven guards exactly: a stale subject transitions on no axis; presence reaches
      `RemovalPending` only through the allowlist; `Real` is set only from positive Plex
      confirmation; a destructive transition justified solely by a theatrical-estimate date is
      refused under `strictDates`; a referenced subject is never removed for departure; two
      transitions of one axis in one pass fails loudly rather than picking one; an ambiguous
      canonical match enters `Ambiguous` and is never acted on until a human resolves it.
-  5. Table-test the full product of axes and triggers: every legal `(from, to, trigger)` triple
+  - [ ] 5. Table-test the full product of axes and triggers: every legal `(from, to, trigger)` triple
      succeeds; every triple outside that set is refused with a named reason.
-  6. Generate date sequences moving forward and backward across every phase boundary; assert zero
+  - [ ] 6. Generate date sequences moving forward and backward across every phase boundary; assert zero
      destructive actions arise from a backwards move, and that a delayed title keeps its
      placeholder.
-- **Done when:** I-LIFE-1 and I-LIFE-3 pass — the table test over the full product of axes and
+- [ ] **Done when:** I-LIFE-1 and I-LIFE-3 pass — the table test over the full product of axes and
   triggers shows the legal set closed and enumerable, with every legal triple exercised and every
   off-list triple refused; and the generated forward/backward date sequences produce zero
   destructive actions from any backwards move.
@@ -1756,19 +1784,19 @@ Phase 8 until this phase's state machine passes its own tests, in isolation, fir
   one placeholder path.
 - **Where:** crates/core
 - **Subtasks:**
-  1. Implement `seasonGranularity` resolution (off by default, instance/definition default, per-show
+  - [ ] 1. Implement `seasonGranularity` resolution (off by default, instance/definition default, per-show
      override) and season-subject creation only for seasons whose air date falls inside
      `countdownWindow`.
-  2. Implement placeholder ownership: the whole-title subject owns the placeholder while the show is
+  - [ ] 2. Implement placeholder ownership: the whole-title subject owns the placeholder while the show is
      absent; a season subject owns its own placeholder only once the show is `Real` and that season
      is absent; while the show is absent and seasons are tracked, only the whole-title subject
      writes anything.
-  3. Implement production as a show-level fact a season subject reads from its parent rather than
+  - [ ] 3. Implement production as a show-level fact a season subject reads from its parent rather than
      recomputing.
-  4. Table-test the product of (show presence, season presence, `seasonGranularity`), including
+  - [ ] 4. Table-test the product of (show presence, season presence, `seasonGranularity`), including
      running the season subject's evaluation both before and after the show subject's, within the
      same pass.
-- **Done when:** I-LIFE-4 passes — across the full product table, at most one subject holds a
+- [ ] **Done when:** I-LIFE-4 passes — across the full product table, at most one subject holds a
   placeholder path per pass, the path sets of the two granularities are disjoint, and the ordering
   variant produces the same outcome both ways.
 
@@ -1778,15 +1806,15 @@ Phase 8 until this phase's state machine passes its own tests, in isolation, fir
   label overlay packs render, exposed under a `lifecycle.*` field-registry namespace.
 - **Where:** crates/core
 - **Subtasks:**
-  1. Implement the status table as a pure function — no I/O, no clock reads beyond the evaluation
+  - [ ] 1. Implement the status table as a pure function — no I/O, no clock reads beyond the evaluation
      clock.
-  2. Register `lifecycle.status`, `lifecycle.phase`, `lifecycle.acquisition`, `lifecycle.presence`,
+  - [ ] 2. Register `lifecycle.status`, `lifecycle.phase`, `lifecycle.acquisition`, `lifecycle.presence`,
      `lifecycle.production`, `lifecycle.releaseDate`, `lifecycle.releaseDateBasis`,
      `lifecycle.daysUntilRelease`, `lifecycle.daysSinceRelease`, `lifecycle.isStale`,
      `lifecycle.isPlaceholder`, and `lifecycle.seasonNumber` as field-registry entries with declared
      types and legal operators.
-  3. Table-test every reachable composite.
-- **Done when:** I-LIFE-2 passes — the table test over every reachable composite shows the mapping
+  - [ ] 3. Table-test every reachable composite.
+- [ ] **Done when:** I-LIFE-2 passes — the table test over every reachable composite shows the mapping
   total and single-valued: no composite maps to none, none maps to two.
 
 ### Task 9.4 Placeholder materialisation, discovery, and title repair
@@ -1798,25 +1826,25 @@ Phase 8 until this phase's state machine passes its own tests, in isolation, fir
 - **Where:** crates/core (intent orchestration, filesystem writes, marker application), crates/plex
   (label write, scan trigger, rating-key discovery)
 - **Subtasks:**
-  1. Implement the intent lifecycle: Intend (transactional, moves presence to
+  - [ ] 1. Implement the intent lifecycle: Intend (transactional, moves presence to
      `PlaceholderPending` / `RemovalPending`) → Execute (file operation plus Plex scan or refresh) →
      Confirm (verify the observable result, settle presence).
-  2. Implement the placeholder marker as three layers: a Plex label as the authoritative runtime
+  - [ ] 2. Implement the placeholder marker as three layers: a Plex label as the authoritative runtime
      marker, the rating-key-to-subject database binding as the authoritative durable marker, and an
      edition filename tag as a hint only, never load-bearing for correctness.
-  3. Implement discovery: after a scan, bind the newly indexed placeholder's rating key to its
+  - [ ] 3. Implement discovery: after a scan, bind the newly indexed placeholder's rating key to its
      subject by label and canonical identity.
-  4. Implement title repair: when evidence's resolved title diverges from the placeholder's current
+  - [ ] 4. Implement title repair: when evidence's resolved title diverges from the placeholder's current
      title, rewrite it through the same intend/execute/confirm sequence.
-  5. Enforce writes only under configured placeholder roots: canonicalise and symlink-resolve the
+  - [ ] 5. Enforce writes only under configured placeholder roots: canonicalise and symlink-resolve the
      target path before the containment check, refuse anything resolving outside an enabled root,
      and settle the subject to a reported error rather than `Placeholder` on refusal.
-  6. Both create and remove operations are idempotent: creating an existing placeholder is a no-op;
+  - [ ] 6. Both create and remove operations are idempotent: creating an existing placeholder is a no-op;
      deleting an absent one is a no-op.
-  7. Crash-inject between every pair of intend/execute/confirm steps, for every intent kind, and
+  - [ ] 7. Crash-inject between every pair of intend/execute/confirm steps, for every intent kind, and
      assert one startup pass — re-driving every open intent from the execute step — reaches a
      consistent state.
-- **Done when:** I-DATA-1 and I-SEC-4 pass — crash injection between every step pair, for every
+- [ ] **Done when:** I-DATA-1 and I-SEC-4 pass — crash injection between every step pair, for every
   intent kind, converges to a consistent state after one startup pass; and a traversal-and-symlink
   corpus applied to placeholder writes shows no file created outside a configured root, with the
   subject settling to a reported error rather than `Placeholder`.
@@ -1828,21 +1856,21 @@ Phase 8 until this phase's state machine passes its own tests, in isolation, fir
   only a count reaching zero departs a subject.
 - **Where:** crates/core
 - **Subtasks:**
-  1. Implement the seven triggers (`Materialized`, `Departed`, `Retired`, `FilteredOut`, `Disabled`,
+  - [ ] 1. Implement the seven triggers (`Materialized`, `Departed`, `Retired`, `FilteredOut`, `Disabled`,
      `Manual`, `Reaped`), each writing a transition row with `is_destructive` set and a complete
      evidence array — relying on the schema constraint (built in Phase 0) that makes an off-list
      trigger unrepresentable at the database level.
-  2. Recompute the reference count each pass from the collections that currently resolve to the
+  - [ ] 2. Recompute the reference count each pass from the collections that currently resolve to the
      subject; never increment or decrement it ad hoc. The reason a reference was dropped — filter
      fail, removed from source, definition deleted — is written directly into the transition's
      evidence.
-  3. Implement `Real` as reachable only from a positive Plex media-part confirmation, never from
+  - [ ] 3. Implement `Real` as reachable only from a positive Plex media-part confirmation, never from
      provider or `*arr` data alone.
-  4. Implement staleness as a full stop: a subject whose evidence could not be refreshed keeps every
+  - [ ] 4. Implement staleness as a full stop: a subject whose evidence could not be refreshed keeps every
      axis unchanged this pass.
-  5. Implement the not-evidence rule for upstream absence: a provider that stops serving a
+  - [ ] 5. Implement the not-evidence rule for upstream absence: a provider that stops serving a
      previously resolved subject marks it stale, never `Departed`.
-- **Done when:** I-EVID-2, I-EVID-3, I-EVID-5, I-EVID-6, and I-EVID-7 all pass — a property test
+- [ ] **Done when:** I-EVID-2, I-EVID-3, I-EVID-5, I-EVID-6, and I-EVID-7 all pass — a property test
   over generated evidence sequences shows no placeholder deleted without an allowlisted trigger and
   complete evidence, backed by a database-level test that an off-list destructive insert is
   rejected by the schema; `Real` is unreachable from any evidence set lacking Plex media-part
@@ -1858,13 +1886,13 @@ Phase 8 until this phase's state machine passes its own tests, in isolation, fir
   Phase 10.
 - **Where:** crates/core
 - **Subtasks:**
-  1. Implement the eligibility gates (position cap, minimum year, minimum ratings, genre / country /
+  - [ ] 1. Implement the eligibility gates (position cap, minimum year, minimum ratings, genre / country /
      language / keyword filters, collection enablement) as pure evaluators over evidence.
-  2. Resolve TV shaping (maximum seasons, per-show cap, grab order) to a concrete season list,
+  - [ ] 2. Resolve TV shaping (maximum seasons, per-show cap, grab order) to a concrete season list,
      without submitting it anywhere.
-  3. Compute and record the routing decision (request versus direct-to-`*arr`) without executing it;
+  - [ ] 3. Compute and record the routing decision (request versus direct-to-`*arr`) without executing it;
      Phase 10 adds the client calls that act on it.
-- **Done when:** gate evaluation is deterministic and reproducible from evidence alone across a
+- [ ] **Done when:** gate evaluation is deterministic and reproducible from evidence alone across a
   fixture corpus. (The full reproducibility guarantee is claimed as an exit invariant in Phase 10,
   once the write path exists to reproduce against.)
 
@@ -1874,12 +1902,12 @@ Phase 8 until this phase's state machine passes its own tests, in isolation, fir
   200,000-item, 2,000-collection scale target (D-030), asserting process RSS never exceeds 1 GB.
 - **Where:** crates/core (streaming discipline across the full pass), the nightly CI lane (D-035)
 - **Subtasks:**
-  1. Assemble scale fixtures at 200,000 items across several libraries and 2,000 collections,
+  - [ ] 1. Assemble scale fixtures at 200,000 items across several libraries and 2,000 collections,
      reusing the streaming batch discipline established for the item cache earlier in the plan.
-  2. Run a full pass — sources through lifecycle — under a memory-bounded harness; assert peak RSS
+  - [ ] 2. Run a full pass — sources through lifecycle — under a memory-bounded harness; assert peak RSS
      stays under 1 GB. Elapsed time is recorded for trend, not asserted.
-  3. Wire the run into the nightly lane.
-- **Done when:** I-PERF-3 passes — the memory-bounded nightly run over the scale fixtures completes
+  - [ ] 3. Wire the run into the nightly lane.
+- [ ] **Done when:** I-PERF-3 passes — the memory-bounded nightly run over the scale fixtures completes
   without process RSS exceeding 1 GB.
 
 ### Task 9.8 Interface: the Lifecycle page
@@ -1889,15 +1917,15 @@ Phase 8 until this phase's state machine passes its own tests, in isolation, fir
   here and is completed in Phase 10.
 - **Where:** crates/api, web/
 - **Subtasks:**
-  1. Upcoming-by-date view ordered by each subject's resolved release date.
-  2. Placeholders-currently-in-the-library view; each entry shows why it exists (its transitions)
+  - [ ] 1. Upcoming-by-date view ordered by each subject's resolved release date.
+  - [ ] 2. Placeholders-currently-in-the-library view; each entry shows why it exists (its transitions)
      and which definitions reference it.
-  3. Stale-placeholder view: every placeholder past its retirement window under `retirePolicy`, with
+  - [ ] 3. Stale-placeholder view: every placeholder past its retirement window under `retirePolicy`, with
      bulk removal — the surface that turns "keep" into a managed choice per D-011, rather than
      silent accumulation.
-  4. Handle the states beyond the universal ones: a stale subject (evidence could not refresh), an
+  - [ ] 4. Handle the states beyond the universal ones: a stale subject (evidence could not refresh), an
      ambiguous match blocking action, an intent pending, a retire window expired.
-- **Done when:** every placeholder currently in the library is reachable from this page, each entry
+- [ ] **Done when:** every placeholder currently in the library is reachable from this page, each entry
   legibly shows why it exists and which definitions want it, and the stale-placeholder view's
   bulk-removal count matches the set defined by the retirement-window query on the same fixture.
 
@@ -1921,13 +1949,13 @@ state machine's own correctness obligations.
   and circuit breaker already built for these same products as read-only sources.
 - **Where:** crates/sources
 - **Subtasks:**
-  1. Extend each adapter with a write-capable client surface distinct from its read-only
+  - [ ] 1. Extend each adapter with a write-capable client surface distinct from its read-only
      collection-membership surface.
-  2. Implement per-subject override resolution: instance, quality profile, root folder, tags,
+  - [ ] 2. Implement per-subject override resolution: instance, quality profile, root folder, tags,
      monitor mode, search-on-add, season folder.
-  3. Reuse the circuit breaker and its persisted state for the write path — a broken instance must
+  - [ ] 3. Reuse the circuit breaker and its persisted state for the write path — a broken instance must
      not receive write attempts either.
-- **Done when:** a fixture write to each client, against the adversarial fake extended with write
+- [ ] **Done when:** a fixture write to each client, against the adversarial fake extended with write
   endpoints, produces the expected instance-side call with the resolved overrides recorded.
 
 ### Task 10.2 Overseerr request client
@@ -1936,9 +1964,9 @@ state machine's own correctness obligations.
   read-only source built earlier.
 - **Where:** crates/sources
 - **Subtasks:**
-  1. Implement the request-creation call and response handling.
-  2. Route it through the same instrumented-client and breaker infrastructure as the read path.
-- **Done when:** a fixture request against the fake Overseerr endpoint succeeds and is recorded with
+  - [ ] 1. Implement the request-creation call and response handling.
+  - [ ] 2. Route it through the same instrumented-client and breaker infrastructure as the read path.
+- [ ] **Done when:** a fixture request against the fake Overseerr endpoint succeeds and is recorded with
   its external reference id.
 
 ### Task 10.3 Acquisition policy: gates, routing, and reproducibility
@@ -1948,22 +1976,22 @@ state machine's own correctness obligations.
   record complete enough to recompute the decision from the record alone.
 - **Where:** crates/core
 - **Subtasks:**
-  1. Evaluate all eligibility gates and record every gate's verdict, including the ones that
+  - [ ] 1. Evaluate all eligibility gates and record every gate's verdict, including the ones that
      passed.
-  2. Resolve routing to exactly one of request or direct-to-`*arr` per subject.
-  3. Resolve TV shaping to a concrete season list and record it.
-  4. Write one acquisition-decision row per decision: inputs, every gate and its verdict, resolved
+  - [ ] 2. Resolve routing to exactly one of request or direct-to-`*arr` per subject.
+  - [ ] 3. Resolve TV shaping to a concrete season list and record it.
+  - [ ] 4. Write one acquisition-decision row per decision: inputs, every gate and its verdict, resolved
      overrides, the season list, policy version, outcome, and the external reference of the created
      record.
-  5. Implement the partial-availability rule: "already present" resolves to what is specifically
+  - [ ] 5. Implement the partial-availability rule: "already present" resolves to what is specifically
      missing — a series with 1 of 60 episodes present is not a series that is present, and the
      missing seasons are requested while the present one is not.
-  6. Implement the missing-configured-target rule: a definition naming an instance, quality
+  - [ ] 6. Implement the missing-configured-target rule: a definition naming an instance, quality
      profile, root folder, or library that no longer exists fails with a message naming both the
      configured and the found value; the default is never substituted.
-  7. Build a replay harness that loads one decision row with no access to live state and recomputes
+  - [ ] 7. Build a replay harness that loads one decision row with no access to live state and recomputes
      the same decision.
-- **Done when:** I-ACQ-2, I-ACQ-3, I-ACQ-4, and I-ACQ-5 all pass — a series fixture with 1 of 60
+- [ ] **Done when:** I-ACQ-2, I-ACQ-3, I-ACQ-4, and I-ACQ-5 all pass — a series fixture with 1 of 60
   episodes present requests the missing seasons and not the present one; removing each configured
   target in turn produces refusal naming both values with zero calls to any substitute; replaying
   every recorded decision in a generated corpus from the record alone reproduces identical outcomes;
@@ -1975,13 +2003,13 @@ state machine's own correctness obligations.
   being treated as permission to add again.
 - **Where:** crates/core
 - **Subtasks:**
-  1. Detect download-stack unreachability per instance before evaluating gates for any subject
+  - [ ] 1. Detect download-stack unreachability per instance before evaluating gates for any subject
      targeting it.
-  2. On unreachability, freeze the acquisition axis for affected subjects, emit zero add/request
+  - [ ] 2. On unreachability, freeze the acquisition axis for affected subjects, emit zero add/request
      calls, and record the degradation.
-  3. Fixture: make the download stack unreachable mid-pass; assert the outbound acquisition call
+  - [ ] 3. Fixture: make the download stack unreachable mid-pass; assert the outbound acquisition call
      count is exactly zero.
-- **Done when:** I-ACQ-1 passes — the mid-pass unreachability fixture shows zero outbound
+- [ ] **Done when:** I-ACQ-1 passes — the mid-pass unreachability fixture shows zero outbound
   acquisition calls, asserted at the HTTP client boundary, the acquisition axis unchanged, and a
   recorded degradation.
 
@@ -1992,10 +2020,10 @@ state machine's own correctness obligations.
   lifecycle section.
 - **Where:** crates/api, web/
 - **Subtasks:**
-  1. Acquisition-activity view: recent decisions, their outcome, and their route.
-  2. Collection editor's lifecycle section gains the gate, routing, and TV-shaping controls,
+  - [ ] 1. Acquisition-activity view: recent decisions, their outcome, and their route.
+  - [ ] 2. Collection editor's lifecycle section gains the gate, routing, and TV-shaping controls,
      validated against the definition layer.
-- **Done when:** every decision visible in the acquisition-activity view links to the collection
+- [ ] **Done when:** every decision visible in the acquisition-activity view links to the collection
   that produced it and to the Task 10.3 replay for that row.
 
 ---
@@ -2022,11 +2050,11 @@ presence, and lock state — and restoring only the value fails silently and per
   is exercised against it.
 - **Where:** shared test harness
 - **Subtasks:**
-  1. Confirm the fixture library carries collections, overlays, placeholders, and placement state
+  - [ ] 1. Confirm the fixture library carries collections, overlays, placeholders, and placement state
      together, not just each in isolation.
-  2. Snapshot server state before any Afisharr write, as the baseline the teardown result is
+  - [ ] 2. Snapshot server state before any Afisharr write, as the baseline the teardown result is
      compared against.
-- **Done when:** the fixture snapshot captures every field Task 11.2's allowlist comparison will
+- [ ] **Done when:** the fixture snapshot captures every field Task 11.2's allowlist comparison will
   need.
 
 ### Task 11.2 The teardown orchestrator
@@ -2037,18 +2065,18 @@ presence, and lock state — and restoring only the value fails silently and per
 - **Where:** crates/core (orchestration, resumability), crates/plex (restore calls), crates/render
   (base-poster restore, reusing Task 8.6)
 - **Subtasks:**
-  1. Restore every base poster via the byte-exact reset path built in Phase 8.
-  2. Strip every applied sort-title prefix and restore value, presence, and lock state together, via
+  - [ ] 1. Restore every base poster via the byte-exact reset path built in Phase 8.
+  - [ ] 2. Strip every applied sort-title prefix and restore value, presence, and lock state together, via
      the round trip built in Phase 7.
-  3. Remove every applied label; a failed removal is reported, never silently ignored, and leaves
+  - [ ] 3. Remove every applied label; a failed removal is reported, never silently ignored, and leaves
      the item out of "reset" bookkeeping so the next pass retries it.
-  4. Delete every managed collection and placeholder Afisharr created; restore native hub placement
+  - [ ] 4. Delete every managed collection and placeholder Afisharr created; restore native hub placement
      to its pre-Afisharr state where recoverable.
-  5. Persist teardown progress so the whole operation is resumable: a crash or an explicit cancel
+  - [ ] 5. Persist teardown progress so the whole operation is resumable: a crash or an explicit cancel
      mid-run leaves a state a resumed run finishes correctly, without redoing completed restores or
      skipping unfinished ones.
-  6. Produce a final report naming, by object, everything that could not be restored.
-- **Done when:** I-REV-4 passes — an integration test against the fake Plex applies a full sync
+  - [ ] 6. Produce a final report naming, by object, everything that could not be restored.
+- [ ] **Done when:** I-REV-4 passes — an integration test against the fake Plex applies a full sync
   cycle (overlays, placeholders, placement), runs teardown, and the resulting snapshot matches the
   pre-sync snapshot under an explicit allowlist of legitimately changed fields that is empty for
   artwork bytes, sort titles, lock states, and labels; a second variant kills the process
@@ -2061,11 +2089,11 @@ presence, and lock state — and restoring only the value fails silently and per
   unlocked one.
 - **Where:** crates/core, crates/plex
 - **Subtasks:**
-  1. Build three fixtures: no sort title, a locked sort title, an unlocked sort title.
-  2. Round-trip each through promote, then teardown's demote.
-  3. Assert value, presence, and lock flag independently — a value-only comparison must not pass
+  - [ ] 1. Build three fixtures: no sort title, a locked sort title, an unlocked sort title.
+  - [ ] 2. Round-trip each through promote, then teardown's demote.
+  - [ ] 3. Assert value, presence, and lock flag independently — a value-only comparison must not pass
      this test even where it would look correct.
-- **Done when:** I-REV-3 passes on all three fixtures independently for value, presence, and lock
+- [ ] **Done when:** I-REV-3 passes on all three fixtures independently for value, presence, and lock
   state.
 
 ### Task 11.4 Label-removal failure reporting, verified inside teardown
@@ -2074,10 +2102,10 @@ presence, and lock state — and restoring only the value fails silently and per
   teardown path specifically.
 - **Where:** crates/core, crates/plex
 - **Subtasks:**
-  1. Fault-inject a label-removal failure during a teardown run.
-  2. Assert a doctor finding is raised, the item is not recorded as reset, and the next pass retries
+  - [ ] 1. Fault-inject a label-removal failure during a teardown run.
+  - [ ] 2. Assert a doctor finding is raised, the item is not recorded as reset, and the next pass retries
      the removal.
-- **Done when:** the fault-injected fixture, run through teardown specifically, shows a finding
+- [ ] **Done when:** the fault-injected fixture, run through teardown specifically, shows a finding
   raised and a retry on the next pass, with the item excluded from "reset" bookkeeping until it
   succeeds.
 
@@ -2087,13 +2115,13 @@ presence, and lock state — and restoring only the value fails silently and per
   preview's counts matching what teardown actually does.
 - **Where:** crates/api, web/
 - **Subtasks:**
-  1. Preview: compute and display the exact named objects and counts teardown will affect, before
+  - [ ] 1. Preview: compute and display the exact named objects and counts teardown will affect, before
      any write.
-  2. Typed confirmation gate before execution.
-  3. Live resumable progress over SSE; a page reload mid-run reflects the actual in-progress state,
+  - [ ] 2. Typed confirmation gate before execution.
+  - [ ] 3. Live resumable progress over SSE; a page reload mid-run reflects the actual in-progress state,
      not a restarted one.
-  4. Final report listing anything that could not be restored, by name.
-- **Done when:** the preview's counts and named objects match teardown's actual effect against the
+  - [ ] 4. Final report listing anything that could not be restored, by name.
+- [ ] **Done when:** the preview's counts and named objects match teardown's actual effect against the
   same fixture (the general preview-equals-effect property is claimed as I-UX-5 in Phase 13, applied
   here specifically to teardown); and interrupting a run mid-teardown leaves a library that a
   resumed run, driven from this page, finishes correctly — the observable behaviour I-REV-4 requires.
@@ -2117,16 +2145,16 @@ Size `M`.
   weekly archives.
 - **Where:** crates/afisharr (scheduler wiring, backup command), crates/core (scheduling)
 - **Subtasks:**
-  1. Implement the online-backup-API capture path for the database, reusing the mechanism already
+  - [ ] 1. Implement the online-backup-API capture path for the database, reusing the mechanism already
      required for the pre-migration backup built in Phase 0.
-  2. Implement incremental asset backup: sync new digests only, since base-poster assets are
+  - [ ] 2. Implement incremental asset backup: sync new digests only, since base-poster assets are
      content-addressed and immutable — a digest never changes meaning, which is what makes the
      incremental sync safe.
-  3. Implement the retention schedule: seven daily, four weekly; exclude the render cache, HTTP
+  - [ ] 3. Implement the retention schedule: seven daily, four weekly; exclude the render cache, HTTP
      cache, placeholder stubs, and logs from the archive entirely — excluding the render cache alone
      removes roughly half the bytes and all of the churn.
-  4. Make `secrets.key` inclusion an explicit opt-in, default off.
-- **Done when:** a scheduled run produces an archive matching D-033's scope exactly, verified by
+  - [ ] 4. Make `secrets.key` inclusion an explicit opt-in, default off.
+- [ ] **Done when:** a scheduled run produces an archive matching D-033's scope exactly, verified by
   enumerating archive contents against the scope table.
 
 ### Task 12.2 Backup self-verification
@@ -2136,10 +2164,10 @@ Size `M`.
   has never been restored is a hypothesis, not a guarantee.
 - **Where:** crates/afisharr, crates/api (finding surface)
 - **Subtasks:**
-  1. Run an integrity check against the backed-up database copy immediately after capture.
-  2. Sample asset digests in the archive against their recorded values.
-  3. Record the verification timestamp on success; raise a doctor finding on any failure.
-- **Done when:** I-SEC-6 passes — a corrupted written archive fails verification and raises a
+  - [ ] 1. Run an integrity check against the backed-up database copy immediately after capture.
+  - [ ] 2. Sample asset digests in the archive against their recorded values.
+  - [ ] 3. Record the verification timestamp on success; raise a doctor finding on any failure.
+- [ ] **Done when:** I-SEC-6 passes — a corrupted written archive fails verification and raises a
   finding; a valid archive passes and records its verification timestamp.
 
 ### Task 12.3 Restore as a first-class operation
@@ -2149,17 +2177,17 @@ Size `M`.
   assets, reconciles asset rows against the filesystem, and reports what could not be restored.
 - **Where:** crates/afisharr
 - **Subtasks:**
-  1. Refuse to restore into a running instance; require a stop first.
-  2. Verify the archive before any write: database integrity, schema version, a sample of asset
+  - [ ] 1. Refuse to restore into a running instance; require a stop first.
+  - [ ] 2. Verify the archive before any write: database integrity, schema version, a sample of asset
      digests against their files.
-  3. Refuse a backup whose schema version is newer than the binary, naming both versions — reusing
+  - [ ] 3. Refuse a backup whose schema version is newer than the binary, naming both versions — reusing
      the same refusal the startup sequence already applies to migrations.
-  4. Restore the database, then the assets.
-  5. Reconcile: every asset row is checked against the filesystem; a row with no file is marked
+  - [ ] 4. Restore the database, then the assets.
+  - [ ] 5. Reconcile: every asset row is checked against the filesystem; a row with no file is marked
      missing rather than deleted — an asset row with a missing file is recoverable (recapture from
      Plex); a deleted row is not.
-  6. Report what could not be restored, by name and count.
-- **Done when:** the restore path exercises all six steps against a corpus of archives (valid,
+  - [ ] 6. Report what could not be restored, by name and count.
+- [ ] **Done when:** the restore path exercises all six steps against a corpus of archives (valid,
   wrong-schema, simulated mid-write invalid) with the correct refusal or completion in each case.
 
 ### Task 12.4 The credential-less restore path
@@ -2171,12 +2199,12 @@ Size `M`.
   affected integration.
 - **Where:** crates/afisharr, crates/api, web/ (integration re-authentication flow)
 - **Subtasks:**
-  1. Implement the undecryptable-credential marking on restore, rather than deletion or silent
+  - [ ] 1. Implement the undecryptable-credential marking on restore, rather than deletion or silent
      substitution.
-  2. Surface each affected integration as needing re-authentication, with a guided flow.
-  3. Assert full row counts across every table after a credential-less restore, compared against the
+  - [ ] 2. Surface each affected integration as needing re-authentication, with a guided flow.
+  - [ ] 3. Assert full row counts across every table after a credential-less restore, compared against the
      pre-backup state.
-- **Done when:** I-SEC-5 passes — back up, restore without the key, and assert full row counts
+- [ ] **Done when:** I-SEC-5 passes — back up, restore without the key, and assert full row counts
   across every table, every integration reporting a need to re-authenticate, and nothing deleted.
 
 ---
@@ -2203,27 +2231,27 @@ gate itself is claimed as I-SEC-8 in Phase 1, where it guards the first-run page
   and links to where adoption happens, with no bulk-adopt control anywhere in the wizard.
 - **Where:** crates/api, web/
 - **Subtasks:**
-  1. Build the eight wizard steps against the onboarding journey — Claim, Admin, Plex, Libraries,
+  - [ ] 1. Build the eight wizard steps against the onboarding journey — Claim, Admin, Plex, Libraries,
      Integrations, Packs, Report, Review — resumable mid-flow and re-runnable later without
      destroying existing configuration.
-  2. Wire every step to the derived resume endpoint from Task 1.12 rather than to any client-held
+  - [ ] 2. Wire every step to the derived resume endpoint from Task 1.12 rather than to any client-held
      step index, and write `packs` and `existingCollections` into `instance.setup_acked_steps` as
      their steps complete — both complete by acknowledgement, so nothing else marks them done.
-  3. Build the Blocked treatment for the claimed-elsewhere case: the shared Blocked component from
+  - [ ] 3. Build the Blocked treatment for the claimed-elsewhere case: the shared Blocked component from
      Task 1.8, carrying the claim's expiry as a local time. No gate is relaxed to produce it.
-  4. Build the re-run mode reached from Settings: no token, no claim, current values shown as current
+  - [ ] 4. Build the re-run mode reached from Settings: no token, no claim, current values shown as current
      values, and completion that destroys nothing the operator did not change.
-  5. Implement the report-and-adopt-nothing step per D-026: enumerate existing collections per
+  - [ ] 5. Implement the report-and-adopt-nothing step per D-026: enumerate existing collections per
      library, explain adoption in plain language, link to the per-library / per-collection adoption
      control built in Phase 6 and Phase 7, and provide no bulk-adopt affordance anywhere in the
      wizard — the operator with many hand-made collections is the one for whom one click is most
      tempting and most alarming, and a first impression is the worst moment to spend that trust.
-  6. Script the first-run journey against a fixture server end to end: claim with the console token,
+  - [ ] 6. Script the first-run journey against a fixture server end to end: claim with the console token,
      create the admin, connect Plex, select libraries, complete the wizard, run the first sync.
-  7. Script the two interruption paths against the same fixture: close the tab mid-wizard and resume
+  - [ ] 7. Script the two interruption paths against the same fixture: close the tab mid-wizard and resume
      at the same step, and restart the process mid-wizard and resume through admin recovery with the
      console token already dead.
-- **Done when:** I-UX-8 passes — the scripted first-run journey against a fixture server completes
+- [ ] **Done when:** I-UX-8 passes — the scripted first-run journey against a fixture server completes
   the wizard and the first sync inside the target stated in the PRD, asserted on step count and
   blocking calls rather than wall time; and I-UX-10 passes — for each step, a database seeded at that
   step's evidence level derives that step, and a client requesting any other step index is answered
@@ -2236,18 +2264,18 @@ gate itself is claimed as I-SEC-8 in Phase 1, where it guards the first-run page
   upstream, and forking a pack-origin definition into the user's own namespace.
 - **Where:** crates/packs
 - **Subtasks:**
-  1. Implement manifest parsing and asset/definition installation from file, URL, or repository.
-  2. Implement variable resolution and template expansion at install time (D-044): a parameterized
+  - [ ] 1. Implement manifest parsing and asset/definition installation from file, URL, or repository.
+  - [ ] 2. Implement variable resolution and template expansion at install time (D-044): a parameterized
      template plus declared variables materializes into concrete, unparameterized definition
      documents — one row per enumeration member for an expansion over a registry enumeration, with
      no substitution syntax surviving into storage.
-  3. Store the resolved variable values so a later pack upgrade can re-materialize the definitions
+  - [ ] 3. Store the resolved variable values so a later pack upgrade can re-materialize the definitions
      the user has not forked.
-  4. Implement fork: duplicate a pack-origin document into the user's own namespace; forked
+  - [ ] 4. Implement fork: duplicate a pack-origin document into the user's own namespace; forked
      documents are thereafter untouched by upgrade.
-  5. Implement upgrade: replace every non-forked pack-origin document; leave forks alone; report
+  - [ ] 5. Implement upgrade: replace every non-forked pack-origin document; leave forks alone; report
      forks as behind upstream.
-- **Done when:** I-DEF-4 and I-DEF-8 pass — forking a pack definition then upgrading the pack
+- [ ] **Done when:** I-DEF-4 and I-DEF-8 pass — forking a pack definition then upgrading the pack
   leaves the fork unchanged, updates the non-forked pack document, and reports the drift; and
   installing a pack whose manifest declares variables and an expansion over a registry enumeration
   produces one row per member, with no stored body containing substitution syntax and every stored
@@ -2263,17 +2291,17 @@ gate itself is claimed as I-SEC-8 in Phase 1, where it guards the first-run page
   re-discovery, cache rebuild), each behind a preview of what will be lost.
 - **Where:** crates/api, web/
 - **Subtasks:**
-  1. Aggregate findings by severity, deduplicated per check and subject, with first-seen and
+  - [ ] 1. Aggregate findings by severity, deduplicated per check and subject, with first-seen and
      last-seen timestamps and an acknowledge action that suppresses without resolving.
-  2. Ambiguous-match resolution: list every `Ambiguous` subject and canonical-id collision; a
+  - [ ] 2. Ambiguous-match resolution: list every `Ambiguous` subject and canonical-id collision; a
      resolution recorded here persists and unblocks the subject on the next pass without
      re-detection.
-  3. Suspect base posters, orphan-sweep candidates (default resolution: reported, never
+  - [ ] 3. Suspect base posters, orphan-sweep candidates (default resolution: reported, never
      auto-deleted), non-convergent libraries, and asset-store reconciliation, each reading the
      surfaces built in Phases 7 through 9.
-  4. The three explicitly dangerous actions, each computing and displaying a preview of the specific
+  - [ ] 4. The three explicitly dangerous actions, each computing and displaying a preview of the specific
      objects it will affect before any typed confirmation is accepted.
-- **Done when:** I-UX-5 passes — for each of the three dangerous actions, the preview's counts and
+- [ ] **Done when:** I-UX-5 passes — for each of the three dangerous actions, the preview's counts and
   named objects are compared against the operation's actual effect on the same fixture and match
   exactly.
 
@@ -2283,16 +2311,16 @@ gate itself is claimed as I-SEC-8 in Phase 1, where it guards the first-run page
   selection, backoff on consecutive failure, manual triggering — and the jobs/schedules page.
 - **Where:** crates/core (scheduler), crates/api, web/
 - **Subtasks:**
-  1. Implement jitter and next-run-time computation feeding the due-jobs index, on top of the cron
+  - [ ] 1. Implement jitter and next-run-time computation feeding the due-jobs index, on top of the cron
      parsing already validated at save time in Phase 3.
-  2. Implement durable run and event records for every job execution, live over SSE and queryable
+  - [ ] 2. Implement durable run and event records for every job execution, live over SSE and queryable
      for the logs page.
-  3. Implement backoff via a consecutive-failure counter, and startup marking of crash-residue
+  - [ ] 3. Implement backoff via a consecutive-failure counter, and startup marking of crash-residue
      running rows as cancelled.
-  4. Build the jobs/schedules page: what runs, when — a concrete next-run time, not only the cron
+  - [ ] 4. Build the jobs/schedules page: what runs, when — a concrete next-run time, not only the cron
      expression — what happened, manual triggering, and the running / overdue /
      repeatedly-failing-with-backoff / disabled states.
-- **Done when:** every job's next run displays as a concrete time on the page, a manually triggered
+- [ ] **Done when:** every job's next run displays as a concrete time on the page, a manually triggered
   job produces a run record visible over SSE within the same page load, and a job crashed mid-run at
   startup shows as cancelled rather than perpetually running.
 
@@ -2302,10 +2330,10 @@ gate itself is claimed as I-SEC-8 in Phase 1, where it guards the first-run page
   definition, library, source, and level.
 - **Where:** crates/api, web/
 - **Subtasks:**
-  1. Implement filter parameters against the run-events index and each event's scope field.
-  2. Confirm "everything that happened to this collection during last night's run" resolves as one
+  - [ ] 1. Implement filter parameters against the run-events index and each event's scope field.
+  - [ ] 2. Confirm "everything that happened to this collection during last night's run" resolves as one
      filter combination, not a text search.
-- **Done when:** the filter-combination query above returns the correct event set against a seeded
+- [ ] **Done when:** the filter-combination query above returns the correct event set against a seeded
   fixture, sourced entirely from the durable event record rather than a log file.
 
 ### Task 13.6 Close remaining open questions this phase's pages depend on
@@ -2315,11 +2343,11 @@ gate itself is claimed as I-SEC-8 in Phase 1, where it guards the first-run page
   Q-013's board-layout answer needed nothing further once Phase 7 shipped.
 - **Where:** web/
 - **Subtasks:**
-  1. Confirm Q-013 is fully closed by the Phase 7 board; extend it here only if a page in this
+  - [ ] 1. Confirm Q-013 is fully closed by the Phase 7 board; extend it here only if a page in this
      phase surfaces placement content that still depends on it.
-  2. Resolve Q-002 (editor disclosure) and Q-003 (dashboard content) against the Design and
+  - [ ] 2. Resolve Q-002 (editor disclosure) and Q-003 (dashboard content) against the Design and
      Dashboard pages as built.
-- **Done when:** no open item in the plan's open-question register blocks a page shipped in this
+- [ ] **Done when:** no open item in the plan's open-question register blocks a page shipped in this
   phase.
 
 ---
@@ -2338,17 +2366,17 @@ Size `M`.
   build matrix.
 - **Where:** crates/afisharr, repository build and release tooling
 - **Subtasks:**
-  1. Build and publish `linux/amd64` and `linux/arm64` Docker images; treat `linux/amd64` as the
+  - [ ] 1. Build and publish `linux/amd64` and `linux/arm64` Docker images; treat `linux/amd64` as the
      tested target every resource budget in the PRD is measured against.
-  2. Publish best-effort native binaries for `linux/amd64`, `linux/arm64`, `darwin/arm64`, and
+  - [ ] 2. Publish best-effort native binaries for `linux/amd64`, `linux/arm64`, `darwin/arm64`, and
      `windows/amd64`, without per-release manual testing gating the release.
-  3. Exclude `linux/armv7` from the build matrix entirely, with the reason recorded: a 32-bit
+  - [ ] 3. Exclude `linux/armv7` from the build matrix entirely, with the reason recorded: a 32-bit
      address space against a 1 GB memory ceiling and a 50 GB asset store.
-  4. Bundle SQLite rather than linking the system copy, on every target, because the schema depends
+  - [ ] 4. Bundle SQLite rather than linking the system copy, on every target, because the schema depends
      on features a system copy may predate.
-  5. State the minimum supported Plex version per release and wire it into the release-lane contract
+  - [ ] 5. State the minimum supported Plex version per release and wire it into the release-lane contract
      test.
-- **Done when:** the build matrix produces an image or binary for every supported target and none
+- [ ] **Done when:** the build matrix produces an image or binary for every supported target and none
   for `linux/armv7`, and the `linux/amd64` Docker image is the one the release lane's scale and
   precision budgets run against.
 
@@ -2359,12 +2387,12 @@ Size `M`.
   every merge.
 - **Where:** repository CI configuration
 - **Subtasks:**
-  1. Add the restore-path test (Phase 12) to the release lane specifically, since it needs a fully
+  - [ ] 1. Add the restore-path test (Phase 12) to the release lane specifically, since it needs a fully
      populated fixture and is too slow for merge or nightly.
-  2. Add the Plex-version contract test across the stated minimum-and-current version matrix.
-  3. Wire the release lane to run on tag, gating publication of the platform matrix's images and
+  - [ ] 2. Add the Plex-version contract test across the stated minimum-and-current version matrix.
+  - [ ] 3. Wire the release lane to run on tag, gating publication of the platform matrix's images and
      binaries.
-- **Done when:** the release lane passes in full — merge and nightly invariants, the restore path,
+- [ ] **Done when:** the release lane passes in full — merge and nightly invariants, the restore path,
   and the Plex version matrix — before any image or binary is published for a tagged release.
 
 ### Task 14.3 Licence compliance: dependency check, source link, attribution
@@ -2374,16 +2402,16 @@ Size `M`.
 - **Where:** crates/afisharr (version stamp, attribution generation), web/ (About panel, footer
   link), repository tooling (dependency-licence check)
 - **Subtasks:**
-  1. Wire a dependency-licence check with an explicit allow-list (MIT, Apache-2.0, BSD-2/3, ISC,
+  - [ ] 1. Wire a dependency-licence check with an explicit allow-list (MIT, Apache-2.0, BSD-2/3, ISC,
      Zlib, MPL-2.0, Unicode-3.0) into the pre-commit and CI gates, refusing everything else by
      default — explicitly including BSL, SSPL, Elastic, and CC-BY-NC.
-  2. Wire the About panel's Source link, scaffolded earlier as part of the interface shell and
+  - [ ] 2. Wire the About panel's Source link, scaffolded earlier as part of the interface shell and
      Settings, to resolve from the running binary's version stamp rather than a branch, with the
      target field editable so a fork can retarget it; repeat the link in the footer.
-  3. Generate the third-party licence file at build time from the dependency tree; ship it in the
+  - [ ] 3. Generate the third-party licence file at build time from the dependency tree; ship it in the
      image and surface it from the About panel; separately credit the protocol reference this
      project builds against, retaining its notice.
-- **Done when:** the dependency-licence check fails the build on an unlisted licence in a fixture
+- [ ] **Done when:** the dependency-licence check fails the build on an unlisted licence in a fixture
   dependency; the About panel's Source link, checked against two different version-stamped builds,
   resolves to two different targets; and the generated attribution file is present in the built
   image.
@@ -2394,10 +2422,10 @@ Size `M`.
   require.
 - **Where:** repository root
 - **Subtasks:**
-  1. Write `CONTRIBUTING.md` carrying the DCO 1.1 text verbatim, plus the contribution workflow.
-  2. Write `SECURITY.md` with the vulnerability-reporting process.
-  3. Add issue templates.
-- **Done when:** `CONTRIBUTING.md` contains the DCO 1.1 text verbatim, and `SECURITY.md` and the
+  - [ ] 1. Write `CONTRIBUTING.md` carrying the DCO 1.1 text verbatim, plus the contribution workflow.
+  - [ ] 2. Write `SECURITY.md` with the vulnerability-reporting process.
+  - [ ] 3. Add issue templates.
+- [ ] **Done when:** `CONTRIBUTING.md` contains the DCO 1.1 text verbatim, and `SECURITY.md` and the
   issue templates exist at the paths the hosting platform expects.
 
 ### Task 14.5 Interface: the About panel's licence content
@@ -2406,11 +2434,11 @@ Size `M`.
   exact running version, and the source link for that version, together in one place.
 - **Where:** web/
 - **Subtasks:**
-  1. Render the licence name (AGPL-3.0-or-later), the version stamp, and the source link together
+  - [ ] 1. Render the licence name (AGPL-3.0-or-later), the version stamp, and the source link together
      on the About panel.
-  2. Confirm the panel and the footer link stay in sync when the source-link target is edited in
+  - [ ] 2. Confirm the panel and the footer link stay in sync when the source-link target is edited in
      Settings.
-- **Done when:** the About panel and the footer both reflect an edited source-link target within the
+- [ ] **Done when:** the About panel and the footer both reflect an edited source-link target within the
   same session, with no mismatch between the two locations.
 ---
 
@@ -2420,6 +2448,11 @@ Every invariant in *Invariants* in the PRD, assigned exactly once. This table is
 check: 97 invariants, 97 assignments, no orphans and no duplicates. An invariant added to the PRD
 without a row here goes silently unassigned, which looks exactly like being covered — so add the row
 in the same change that adds the invariant.
+
+**This table carries no checkbox, deliberately.** It tracks assignment — every invariant belongs to
+exactly one phase — and not whether an invariant currently passes. Pass and fail are the build's
+answer to a question this document cannot hold, and a table that reported both would be read as
+reporting one.
 
 | Phase | Invariants | Count |
 | --- | --- | --- |
@@ -2509,6 +2542,11 @@ Stated because a plan nobody doubts is a plan nobody corrects.
 
 This appendix is the build-facing form of the coding guidelines. The PRD states the same rules as
 obligations the code must satisfy; here they are commands to run and boxes to tick.
+
+**The boxes in this appendix are a template, not a ledger.** Every `- [ ]` below is worked through
+fresh for each task, by each author and each reviewer, and the copy in this document stays unticked
+permanently. The progress boxes are the ones in the phase bodies (*How to read this*), and those are
+the only checkboxes in this plan that are ever marked in place.
 
 **Reference convention for this appendix.** A reference of the form `§A.n` points at a subsection
 below. Every other numbered reference — `§24.2.6`, `§24.4`, and so on — points at the PRD. The
