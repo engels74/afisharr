@@ -5,14 +5,31 @@
 //!
 //! Skipped when the frontend has not been built, because a checkout that has
 //! not run `bun run build` has nothing to embed and failing over that would
-//! make `cargo nextest run` depend on a second toolchain. CI builds the SPA,
-//! so the assertion lands there.
+//! make `cargo nextest run` depend on a second toolchain.
+//!
+//! CI builds the SPA and sets `AFISHARR_REQUIRE_SPA`, which turns the skip into
+//! a failure. A lane that forgot to build the frontend would otherwise report
+//! green while never exercising the one-file claim at all.
 
 mod harness;
 
 use afisharr::interface::EmbeddedInterface;
 use harness::{RunningInstance, TempInstance};
 use reqwest::{Client, StatusCode};
+
+/// Whether to skip, and a refusal to skip where the SPA was required.
+fn skip_without_spa() -> bool {
+    if EmbeddedInterface::is_present() {
+        return false;
+    }
+    assert!(
+        std::env::var_os("AFISHARR_REQUIRE_SPA").is_none(),
+        "AFISHARR_REQUIRE_SPA is set but no SPA is embedded: the lane built the \
+         binary before the interface, so this assertion never ran"
+    );
+    eprintln!("no SPA in this build; run `bun run build` in frontend/ to exercise this");
+    true
+}
 
 fn client() -> Client {
     Client::builder()
@@ -23,8 +40,7 @@ fn client() -> Client {
 
 #[tokio::test]
 async fn a_page_route_is_answered_by_the_embedded_shell() {
-    if !EmbeddedInterface::is_present() {
-        eprintln!("no SPA in this build; run `bun run build` in frontend/ to exercise this");
+    if skip_without_spa() {
         return;
     }
 
@@ -95,8 +111,7 @@ async fn the_policy_admits_the_shell_the_binary_actually_serves() {
     // The whole point of hashing at boot: `'unsafe-inline'` never appears in
     // `script-src`, and the one inline bootstrap the SPA carries is admitted by
     // the digest of its own bytes. A change to the SPA changes the hash with it.
-    if !EmbeddedInterface::is_present() {
-        eprintln!("no SPA in this build; run `bun run build` in frontend/ to exercise this");
+    if skip_without_spa() {
         return;
     }
 
@@ -142,8 +157,7 @@ async fn the_policy_admits_the_shell_the_binary_actually_serves() {
 
 #[tokio::test]
 async fn a_fingerprinted_bundle_is_cacheable_for_a_year() {
-    if !EmbeddedInterface::is_present() {
-        eprintln!("no SPA in this build; run `bun run build` in frontend/ to exercise this");
+    if skip_without_spa() {
         return;
     }
 

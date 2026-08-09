@@ -1,7 +1,9 @@
 // SPDX-FileCopyrightText: 2026 Afisharr contributors
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-import type { MessageKey } from '$lib/shared/i18n';
+// Relative, not `$lib`: this module is reachable from `bun test`, which
+// resolves outside the Vite graph (see the note in destinations.test.ts).
+import type { MessageKey } from '../../shared/i18n';
 
 /** One entry in the navigation shell. */
 export interface Destination {

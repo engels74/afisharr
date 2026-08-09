@@ -67,12 +67,23 @@ jobs:
   rust-test:
     name: rust-test
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 15
     defaults:
       run:
         working-directory: backend
+    env:
+      # Turns the embedded-interface tests' "no SPA in this build" skip into a
+      # failure. Without it a CI job that forgot to build the frontend would
+      # report green while never exercising the one-file claim at all.
+      AFISHARR_REQUIRE_SPA: "1"
     steps:
       - uses: actions/checkout@v5
+      # The SPA is embedded at compile time, so it has to exist before cargo
+      # builds anything. This is what makes the embedded-interface tests assert
+      # rather than skip.
+      - uses: ./.github/actions/frontend
+      - run: bun run --cwd frontend build
+        working-directory: .
       - uses: ./.github/actions/rust
         with:
           tools: nextest

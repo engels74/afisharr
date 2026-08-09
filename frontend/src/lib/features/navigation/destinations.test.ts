@@ -2,7 +2,10 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 import { describe, expect, test } from 'bun:test';
-import { en } from '$lib/shared/i18n/catalogue.en';
+// Relative, not `$lib`: that alias comes from `.svelte-kit/tsconfig.json`,
+// which `svelte-kit sync` generates, and `bun test` runs outside the Vite
+// graph. A fresh clone has no `.svelte-kit/` and would fail to resolve it.
+import { en } from '../../shared/i18n/catalogue.en';
 import {
 	isActive,
 	landingFor,
