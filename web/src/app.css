@@ -1,0 +1,38 @@
+/* SPDX-FileCopyrightText: 2026 Afisharr contributors
+ * SPDX-License-Identifier: AGPL-3.0-or-later
+ *
+ * shadcn-svelte's design tokens. They are CSS variables rather than UnoCSS
+ * theme entries because that is the form the copied components read, and
+ * presetWind4's variable-based output sits alongside them without conflict.
+ * Dark mode is the class strategy: `.dark` on <html>, driven by mode-watcher.
+ */
+
+:root {
+	--background: oklch(1 0 0);
+	--foreground: oklch(0.145 0 0);
+	--muted: oklch(0.97 0 0);
+	--muted-foreground: oklch(0.556 0 0);
+	--border: oklch(0.922 0 0);
+	--primary: oklch(0.205 0 0);
+	--primary-foreground: oklch(0.985 0 0);
+	--destructive: oklch(0.577 0.245 27.325);
+	--destructive-foreground: oklch(0.985 0 0);
+	--radius: 0.625rem;
+}
+
+.dark {
+	--background: oklch(0.145 0 0);
+	--foreground: oklch(0.985 0 0);
+	--muted: oklch(0.269 0 0);
+	--muted-foreground: oklch(0.708 0 0);
+	--border: oklch(0.269 0 0);
+	--primary: oklch(0.985 0 0);
+	--primary-foreground: oklch(0.205 0 0);
+	--destructive: oklch(0.704 0.191 22.216);
+	--destructive-foreground: oklch(0.985 0 0);
+}
+
+body {
+	background-color: var(--background);
+	color: var(--foreground);
+}

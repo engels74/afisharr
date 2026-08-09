@@ -1,0 +1,12 @@
+# SPDX-FileCopyrightText: 2026 Afisharr contributors
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
+[install]
+registry = "https://registry.npmjs.org/"
+exact = true
+
+[test]
+preload = ["./test-setup.ts"]
+coverage = true
+coverageReporter = ["text", "lcov"]
+coverageThreshold = { lines = 0.85, functions = 0.90, statements = 0.80 }

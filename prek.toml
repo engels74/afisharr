@@ -14,8 +14,10 @@
 # already in place on the first commit of real code, rather than being
 # retrofitted onto a codebase that has already drifted past it.
 
-# One `prek install` installs both shims we rely on.
-default_install_hook_types = ["pre-commit", "commit-msg"]
+# One `prek install` installs every shim we rely on. `pre-push` carries the
+# heavier checks (§A.5): type-checking the SPA is too slow to run on a commit
+# and too important to leave to CI alone.
+default_install_hook_types = ["pre-commit", "commit-msg", "pre-push"]
 
 # Builtin hooks — fast, offline, Rust-native.
 # LICENSE is excluded from the whitespace and EOF fixers: it is the verbatim
@@ -91,5 +93,17 @@ hooks = [
   # svelte-check stays. Biome does not type-check Svelte, so it cannot replace
   # this hook.
   { id = "web-biome", name = "biome ci", entry = "bun run --cwd web lint", language = "system", files = "^web/", pass_filenames = false },
-  { id = "svelte-check", name = "svelte-check", entry = "bun run --cwd web check", language = "system", files = "^web/", pass_filenames = false },
+  { id = "svelte-check", name = "svelte-check", entry = "bun run --cwd web check", language = "system", files = "^web/", pass_filenames = false, stages = ["pre-push"] },
+
+  # Structure gate — the script-checkable half of PRD §24.6 (D-047).
+  #
+  # Commit stage, not push stage, and deliberately: the point of a size limit is
+  # to stop a file crossing it, and a check that runs after five commits reports
+  # a split that is now five commits deep. It exists from the first commit
+  # because a limit introduced in Phase 6 is a limit that first fires as a
+  # backlog (§24.6.4).
+  #
+  # The exempt paths — generated output, build directories, SQL migrations — are
+  # excluded inside the script rather than accommodated by raising a threshold.
+  { id = "file-size", name = "file size limits (PRD 24.6.4)", entry = "scripts/check-file-size.sh", language = "system", pass_filenames = false },
 ]
