@@ -3717,7 +3717,7 @@ CREATE TABLE principals (
 CREATE UNIQUE INDEX ux_principals__plex ON principals(plex_account_id) WHERE plex_account_id IS NOT NULL;
 ```
 
-Three rows are seeded by migration `0001` with fixed identifiers: `Everyone`, `Owner`, `SharedAll`.
+Three rows are seeded by migration `0002` with fixed identifiers: `Everyone`, `Owner`, `SharedAll`.
 These are the whole-audience values the Tier 0 GUI may write. `PlexUser` and `LocalUser` rows are
 *creatable from day one* — the machinery exists and is exercised by tests — but no Tier 0 GUI control
 produces one.

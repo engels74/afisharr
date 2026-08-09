@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2026 Afisharr contributors
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-//! What migration `0001` produces, and the two structural promises it makes.
+//! What migration `0002` produces, and the two structural promises it makes.
 
 // Integration tests may unwrap: a failed setup step is a failed test, and the
 // panic names the line. The rule is about non-test paths (§24.2.3).

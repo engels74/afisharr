@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2026 Afisharr contributors
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-//! The three principal identifiers migration `0001` seeds.
+//! The three principal identifiers migration `0002` seeds.
 
 /// The `Everyone` principal — every viewer of the server.
 pub const EVERYONE: &str = "00000000000000000000000001";

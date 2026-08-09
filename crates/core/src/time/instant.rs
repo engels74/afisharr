@@ -23,7 +23,7 @@ use serde::{Deserialize, Serialize};
 pub struct Timestamp(i64);
 
 impl Timestamp {
-    /// The Unix epoch. Used by migration `0001` for rows that precede the instance.
+    /// The Unix epoch. Used by migration `0002` for rows that precede the instance.
     pub const EPOCH: Self = Self(0);
 
     /// Wraps a millisecond count that is already epoch-relative.
