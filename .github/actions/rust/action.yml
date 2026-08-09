@@ -18,8 +18,13 @@ runs:
     # rustup reads rust-toolchain.toml, so the pinned channel and components
     # come from the repository rather than from a workflow input that can drift
     # away from it.
+    #
+    # It finds that file by walking up from the working directory and never
+    # descends, so the step has to start inside `backend/`. At the checkout root
+    # it would silently install the default toolchain instead.
     - name: install the pinned toolchain
       shell: bash
+      working-directory: backend
       run: rustup show active-toolchain || rustup toolchain install
 
     - uses: actions/cache@v4
@@ -28,8 +33,8 @@ runs:
           ~/.cargo/registry/index
           ~/.cargo/registry/cache
           ~/.cargo/git/db
-          target
-        key: cargo-${{ runner.os }}-${{ hashFiles('rust-toolchain.toml', 'Cargo.lock') }}
+          backend/target
+        key: cargo-${{ runner.os }}-${{ hashFiles('backend/rust-toolchain.toml', 'backend/Cargo.lock') }}
         restore-keys: cargo-${{ runner.os }}-
 
     - uses: actions/cache@v4
@@ -37,11 +42,14 @@ runs:
       id: tool-cache
       with:
         path: ~/.cargo/bin
-        key: cargo-tools-${{ runner.os }}-${{ inputs.tools }}-${{ hashFiles('rust-toolchain.toml') }}
+        key: cargo-tools-${{ runner.os }}-${{ inputs.tools }}-${{ hashFiles('backend/rust-toolchain.toml') }}
 
+    # Also from `backend/`: the subcommands are built by the pinned toolchain,
+    # not by whatever rustup defaults to at the checkout root.
     - name: install cargo subcommands
       if: inputs.tools != '' && steps.tool-cache.outputs.cache-hit != 'true'
       shell: bash
+      working-directory: backend
       run: |
         for tool in ${{ inputs.tools }}; do
           case "$tool" in

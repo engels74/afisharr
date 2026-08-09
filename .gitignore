@@ -24,9 +24,9 @@ target
 .omc/
 
 # Scratch database the sqlx query macros are checked against.
-# Rebuilt by scripts/dev-database.sh; the verified metadata in .sqlx/ is what
-# gets committed.
-/.dev/
+# Rebuilt by scripts/dev-database.sh; the verified metadata in backend/.sqlx/ is
+# what gets committed.
+/backend/.dev/
 
 # Runtime data directory for a locally started instance.
 /data/

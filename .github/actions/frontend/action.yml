@@ -9,10 +9,10 @@ runs:
   steps:
     - uses: oven-sh/setup-bun@v2
       with:
-        bun-version-file: .bun-version
+        bun-version-file: frontend/.bun-version
 
     # `--frozen-lockfile` is the single point where lockfile drift is caught.
     # Never npm or npx, in any lane (§A.5).
     - name: install dependencies
       shell: bash
-      run: bun install --frozen-lockfile --cwd web
+      run: bun install --frozen-lockfile --cwd frontend

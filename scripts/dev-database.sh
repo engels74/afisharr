@@ -3,18 +3,18 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 #
 # Rebuilds the scratch database the sqlx query macros are checked against, then
-# regenerates the offline query data in `.sqlx/`.
+# regenerates the offline query data in `backend/.sqlx/`.
 #
 # `sqlx::query!` checks every statement against a real schema at compile time.
 # CI and a fresh clone have no DATABASE_URL, so the macros read the committed
-# metadata in `.sqlx/` instead. This script sets DATABASE_URL and
+# metadata in `backend/.sqlx/` instead. This script sets DATABASE_URL and
 # SQLX_OFFLINE=false together to force the live check that regenerates it.
 # Run this after changing a migration or a query, and commit what it writes.
 #
 # `--check` compares instead of writing: it fails when the committed data is not
-# what the current queries and migrations produce. That is the CI form. `.sqlx/`
-# is generated, so nothing except this stops a query change from merging with
-# stale metadata that still compiles.
+# what the current queries and migrations produce. That is the CI form.
+# `backend/.sqlx/` is generated, so nothing except this stops a query change
+# from merging with stale metadata that still compiles.
 
 set -euo pipefail
 
@@ -37,11 +37,11 @@ case "${1:-}" in
   ;;
 esac
 
-db="$root/.dev/afisharr.db"
-mkdir -p "$root/.dev"
+db="$root/backend/.dev/afisharr.db"
+mkdir -p "$root/backend/.dev"
 rm -f "$db" "$db-wal" "$db-shm"
 
-for migration in crates/afisharr/migrations/*.sql; do
+for migration in backend/crates/afisharr/migrations/*.sql; do
   sqlite3 "$db" < "$migration"
 done
 sqlite3 "$db" "CREATE TABLE IF NOT EXISTS _sqlx_migrations (
@@ -56,12 +56,17 @@ sqlite3 "$db" "CREATE TABLE IF NOT EXISTS _sqlx_migrations (
 echo "scratch database rebuilt at $db"
 
 if command -v sqlx >/dev/null 2>&1; then
+  # Cargo and rustup discover `.cargo/config.toml` and `rust-toolchain.toml` by
+  # walking up from the working directory, and never descend. Both live in
+  # `backend/`, so every cargo invocation has to start there. `--manifest-path`
+  # would find the workspace but not the pinned toolchain.
+  cd "$root/backend"
   SQLX_OFFLINE=false DATABASE_URL="sqlite://$db" \
     cargo sqlx prepare "${prepare_args[@]}" -- --all-targets
   if [ "$check" = true ]; then
-    echo ".sqlx/ matches the current queries"
+    echo "backend/.sqlx/ matches the current queries"
   else
-    echo "offline query data regenerated in .sqlx/"
+    echo "offline query data regenerated in backend/.sqlx/"
   fi
 else
   echo "sqlx-cli is not installed; skipping 'cargo sqlx prepare'." >&2

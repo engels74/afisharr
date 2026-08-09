@@ -28,6 +28,11 @@ env:
   CARGO_TERM_COLOR: always
   SQLX_OFFLINE: "true"
 
+# The cargo jobs below set `working-directory: backend`. Cargo and rustup find
+# `.cargo/config.toml` and `rust-toolchain.toml` by walking up from the working
+# directory and never descend; both live in `backend/`. `plex-matrix` runs no
+# cargo, so it stays at the checkout root.
+
 jobs:
   merge-lane:
     name: merge-lane
@@ -41,6 +46,9 @@ jobs:
     name: restore-path
     runs-on: ubuntu-latest
     timeout-minutes: 120
+    defaults:
+      run:
+        working-directory: backend
     steps:
       - uses: actions/checkout@v5
       - uses: ./.github/actions/rust
@@ -77,6 +85,9 @@ jobs:
     name: render-cache-bound
     runs-on: ubuntu-latest
     timeout-minutes: 120
+    defaults:
+      run:
+        working-directory: backend
     steps:
       - uses: actions/checkout@v5
       - uses: ./.github/actions/rust

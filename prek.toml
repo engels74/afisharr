@@ -8,11 +8,14 @@
 #   pre-commit and commit-msg Git shims in one shot).
 # Run everything: `prek run --all-files` (do this after changing this file).
 #
-# The repository is documentation-only today. The Rust and frontend hooks below
-# are path-scoped to `crates/` and `web/`, so they stay inert until those trees
-# exist and fire automatically once they do. Adding them now means the gate is
-# already in place on the first commit of real code, rather than being
-# retrofitted onto a codebase that has already drifted past it.
+# The Rust and frontend hooks below are path-scoped to `backend/crates/` and
+# `frontend/`, so each fires only on a commit that touches its own surface.
+#
+# prek runs every hook from the repository root. The cargo hooks therefore cd
+# into `backend/` themselves: cargo and rustup discover `.cargo/config.toml` and
+# `rust-toolchain.toml` by walking up from the working directory and never
+# descend, so a `files` filter alone would leave them running against the
+# default toolchain with no workspace in sight.
 
 # One `prek install` installs every shim we rely on. `pre-push` carries the
 # heavier checks (§A.5): type-checking the SPA is too slow to run on a commit
@@ -69,17 +72,20 @@ hooks = [
   # on PRs is the authoritative gate; this is the fast local mirror.
   { id = "dco-signoff", name = "DCO sign-off (Signed-off-by)", entry = "sh -c 'grep -qE \"^Signed-off-by: .+ <.+@.+>\" \"$1\" || { echo \"Commit message is missing a Signed-off-by line (DCO). Commit with: git commit -s\"; exit 1; }' --", language = "system", stages = ["commit-msg"] },
 
-  # Rust core — crates/ (rustfmt + clippy at deny-warnings).
-  { id = "cargo-fmt", name = "cargo fmt", entry = "cargo fmt --all", language = "system", types = ["rust"], files = "^crates/", pass_filenames = false },
-  { id = "cargo-clippy", name = "cargo clippy", entry = "cargo clippy --workspace --all-targets --all-features -- -D warnings", language = "system", types = ["rust"], files = "^crates/", pass_filenames = false },
+  # Rust core — backend/crates/ (rustfmt + clippy at deny-warnings).
+  { id = "cargo-fmt", name = "cargo fmt", entry = "sh -c 'cd backend && cargo fmt --all'", language = "system", types = ["rust"], files = "^backend/crates/", pass_filenames = false },
+  { id = "cargo-clippy", name = "cargo clippy", entry = "sh -c 'cd backend && cargo clippy --workspace --all-targets --all-features -- -D warnings'", language = "system", types = ["rust"], files = "^backend/crates/", pass_filenames = false },
 
   # cargo-deny — advisory feed plus the licence allow-list. This is the machine
   # check D-028 requires: AGPL-3.0-or-later obliges every dependency to be
   # GPL-compatible, and a transitive crate can introduce an incompatible licence
   # silently. Runs on manifest, lock, and deny.toml changes.
-  { id = "cargo-deny", name = "cargo deny", entry = "cargo deny check", language = "system", files = "(^|/)(Cargo\\.(toml|lock)|deny\\.toml)$", pass_filenames = false },
+  #
+  # The `(^|/)` alternation already matches those files under `backend/`, so the
+  # pattern needs no prefix; only the entry has to move.
+  { id = "cargo-deny", name = "cargo deny", entry = "sh -c 'cd backend && cargo deny check'", language = "system", files = "(^|/)(Cargo\\.(toml|lock)|deny\\.toml)$", pass_filenames = false },
 
-  # SvelteKit SPA — web/ (formatting, linting, and Svelte type-checking).
+  # SvelteKit SPA — frontend/ (formatting, linting, and Svelte type-checking).
   #
   # Biome replaces the Prettier + ESLint pair: one Rust binary, one config, one
   # pass over the tree. `biome ci` checks formatting, lint rules, and import
@@ -87,13 +93,13 @@ hooks = [
   #
   # Caveat: Biome parses `.svelte` files natively from v2.3, but the template
   # half of the file is behind `html.experimentalFullSupportEnabled` in
-  # biome.json. Turn that flag on in web/biome.json, or Biome touches only the
-  # `<script>` and `<style>` blocks and leaves the markup unformatted.
+  # biome.json. Turn that flag on in frontend/biome.json, or Biome touches only
+  # the `<script>` and `<style>` blocks and leaves the markup unformatted.
   #
   # svelte-check stays. Biome does not type-check Svelte, so it cannot replace
   # this hook.
-  { id = "web-biome", name = "biome ci", entry = "bun run --cwd web lint", language = "system", files = "^web/", pass_filenames = false },
-  { id = "svelte-check", name = "svelte-check", entry = "bun run --cwd web check", language = "system", files = "^web/", pass_filenames = false, stages = ["pre-push"] },
+  { id = "web-biome", name = "biome ci", entry = "bun run --cwd frontend lint", language = "system", files = "^frontend/", pass_filenames = false },
+  { id = "svelte-check", name = "svelte-check", entry = "bun run --cwd frontend check", language = "system", files = "^frontend/", pass_filenames = false, stages = ["pre-push"] },
 
   # Structure gate — the script-checkable half of PRD §24.6 (D-047).
   #

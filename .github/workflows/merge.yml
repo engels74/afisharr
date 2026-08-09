@@ -32,11 +32,21 @@ env:
   # database; scripts/dev-database.sh regenerates it.
   SQLX_OFFLINE: "true"
 
+# Every cargo step below carries `working-directory: backend`, set once per job
+# under `defaults.run`. Cargo and rustup discover `.cargo/config.toml` and
+# `rust-toolchain.toml` by walking up from the working directory and never
+# descend, so a cargo step left at the checkout root gets the default toolchain
+# and no `[env]` block, quietly. The exception is `rust-sqlx-prepare`, which
+# calls a root script that does its own `cd`.
+
 jobs:
   rust-fmt:
     name: rust-fmt
     runs-on: ubuntu-latest
     timeout-minutes: 5
+    defaults:
+      run:
+        working-directory: backend
     steps:
       - uses: actions/checkout@v5
       - uses: ./.github/actions/rust
@@ -46,6 +56,9 @@ jobs:
     name: rust-lint
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: backend
     steps:
       - uses: actions/checkout@v5
       - uses: ./.github/actions/rust
@@ -55,6 +68,9 @@ jobs:
     name: rust-test
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: backend
     steps:
       - uses: actions/checkout@v5
       - uses: ./.github/actions/rust
@@ -78,12 +94,18 @@ jobs:
       # stale metadata still compiles — it just describes a query that no longer
       # exists. This lane rebuilds the schema from the migrations and asks sqlx
       # whether what is committed is what the current queries produce.
+      #
+      # No `working-directory` here, unlike every other rust lane: the script
+      # lives at the repository root and cd's into `backend/` itself.
       - run: ./scripts/dev-database.sh --check
 
   rust-supply-chain:
     name: rust-supply-chain
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: backend
     steps:
       - uses: actions/checkout@v5
       - uses: ./.github/actions/rust
@@ -111,7 +133,7 @@ jobs:
           # first is an answer; treating both as one reports a scan that never
           # ran as a clean tree.
           status=0
-          exceptions=$(grep -rn --include='*.rs' -E '^\s*#!\[allow\(unsafe_code' crates) || status=$?
+          exceptions=$(grep -rn --include='*.rs' -E '^\s*#!\[allow\(unsafe_code' backend/crates) || status=$?
           case "$status" in
           0)
             printf '%s\n' "$exceptions" >&2
@@ -154,7 +176,7 @@ jobs:
     steps:
       - uses: actions/checkout@v5
       - uses: ./.github/actions/frontend
-      - run: bun run --cwd web lint
+      - run: bun run --cwd frontend lint
 
   frontend-typecheck:
     name: frontend-typecheck
@@ -164,7 +186,7 @@ jobs:
     steps:
       - uses: actions/checkout@v5
       - uses: ./.github/actions/frontend
-      - run: bun run --cwd web check
+      - run: bun run --cwd frontend check
 
   frontend-test-unit:
     name: frontend-test-unit
@@ -174,7 +196,7 @@ jobs:
     steps:
       - uses: actions/checkout@v5
       - uses: ./.github/actions/frontend
-      - run: bun test --cwd web
+      - run: bun test --cwd frontend
 
   frontend-test-browser:
     name: frontend-test-browser
@@ -187,8 +209,8 @@ jobs:
       - uses: actions/checkout@v5
       - uses: ./.github/actions/frontend
       - run: bunx playwright install --with-deps chromium
-        working-directory: web
-      - run: bun run --cwd web test:browser
+        working-directory: frontend
+      - run: bun run --cwd frontend test:browser
 
   frontend-build:
     name: frontend-build
@@ -200,7 +222,7 @@ jobs:
       - uses: ./.github/actions/frontend
       # adapter-static. A page or component reaching for a server-only primitive
       # covered by §24.4 fails the build here.
-      - run: bun run --cwd web build
+      - run: bun run --cwd frontend build
 
   contract-check:
     name: contract-check
