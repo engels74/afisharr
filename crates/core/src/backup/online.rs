@@ -20,8 +20,10 @@ use crate::backup::BackupError;
 ///
 /// # Errors
 /// Returns [`BackupError::Directory`] when the destination's directory cannot
-/// be created, and [`BackupError::Copy`] when `SQLite` refuses either database or
-/// the copy fails part-way.
+/// be created, [`BackupError::Copy`] when `SQLite` refuses either database or
+/// the copy fails part-way, [`BackupError::Incomplete`] when the copy stops with
+/// the source unread, and [`BackupError::TaskFailed`] when the blocking task
+/// does not finish.
 #[tracing::instrument(skip_all)]
 pub async fn copy(from: impl AsRef<Path>, to: impl AsRef<Path>) -> Result<PathBuf, BackupError> {
     let from = from.as_ref().to_path_buf();
@@ -37,9 +39,27 @@ pub async fn copy(from: impl AsRef<Path>, to: impl AsRef<Path>) -> Result<PathBu
     }
 
     tracing::info!(from = %from.display(), to = %to.display(), "copying the database");
-    tokio::task::spawn_blocking(move || copy_blocking(&from, &to))
-        .await
-        .map_err(|_| BackupError::TaskFailed)?
+    let copied = tokio::task::spawn_blocking({
+        let (from, to) = (from.clone(), to.clone());
+        move || copy_blocking(&from, &to)
+    })
+    .await
+    .map_err(|_| BackupError::TaskFailed)?;
+
+    if copied.is_err() {
+        // The destination was created before the copy failed, and retention
+        // reads a name rather than a database: left there, a truncated file
+        // ranks as the newest copy for its schema and is offered to an operator
+        // as something to restore. A backup that is not real must not look like
+        // one. Removal runs here so the connections are already dropped.
+        if let Err(error) = tokio::fs::remove_file(&to).await
+            && error.kind() != std::io::ErrorKind::NotFound
+        {
+            tracing::warn!(path = %to.display(), %error, "the failed copy could not be removed");
+        }
+    }
+
+    copied
 }
 
 /// The blocking half, kept separate so the async wrapper reads as wiring.
@@ -61,12 +81,31 @@ fn copy_blocking(from: &Path, to: &Path) -> Result<PathBuf, BackupError> {
         .map_err(fail)?
         .step(-1)
         .map_err(fail)?;
-    debug_assert!(
-        matches!(step, StepResult::Done),
-        "a single step of -1 pages copies the whole database"
-    );
+    require_done(step, from, to)?;
 
     Ok(to.to_path_buf())
+}
+
+/// Turns a step that copied less than the whole database into a failure.
+///
+/// `Backup::step` reports `Busy` and `Locked` as `Ok`: the call succeeded, the
+/// copy did not. Left as a `debug_assert!`, a release build accepted them and
+/// reported a destination that exists, is the wrong size, and may hold nothing
+/// — the one outcome the online backup API is used here to rule out.
+fn require_done(step: StepResult, from: &Path, to: &Path) -> Result<(), BackupError> {
+    if matches!(step, StepResult::Done) {
+        return Ok(());
+    }
+    Err(BackupError::Incomplete {
+        from: from.to_path_buf(),
+        to: to.to_path_buf(),
+        step: match step {
+            StepResult::More => "pages still outstanding",
+            StepResult::Busy => "the source busy",
+            StepResult::Locked => "the source locked",
+            _ => "an unrecognised result",
+        },
+    })
 }
 
 #[cfg(test)]
@@ -109,5 +148,42 @@ mod tests {
             .await
             .expect_err("a database that does not exist cannot be backed up");
         assert!(matches!(error, BackupError::Copy { .. }));
+    }
+
+    #[tokio::test]
+    async fn a_failed_copy_leaves_nothing_behind_that_looks_like_a_backup() {
+        let dir = TempDir::new().unwrap();
+        let source = dir.path().join("afisharr.db");
+        // Opening this succeeds; reading it as a database does not, so the
+        // destination is created and then the copy fails.
+        std::fs::write(&source, b"not a database").unwrap();
+        let destination = dir.path().join("backups").join("pre-migration-1-1.db");
+
+        let error = copy(&source, &destination)
+            .await
+            .expect_err("a source that is not a database cannot be backed up");
+
+        assert!(matches!(error, BackupError::Copy { .. }), "{error:?}");
+        assert!(
+            !destination.exists(),
+            "retention reads a name, so a truncated file would rank as the newest copy"
+        );
+    }
+
+    #[test]
+    fn only_a_finished_step_is_a_backup() {
+        let from = Path::new("afisharr.db");
+        let to = Path::new("copy.db");
+
+        require_done(StepResult::Done, from, to).expect("a whole copy is a backup");
+
+        for unfinished in [StepResult::More, StepResult::Busy, StepResult::Locked] {
+            let error = require_done(unfinished, from, to)
+                .expect_err("a copy that stopped early is not a backup");
+            assert!(
+                matches!(error, BackupError::Incomplete { .. }),
+                "{unfinished:?} must be reported, not accepted: {error:?}"
+            );
+        }
     }
 }

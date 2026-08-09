@@ -38,6 +38,22 @@ pub enum BackupError {
         source: rusqlite::Error,
     },
 
+    /// The copy stopped before the whole database had been copied.
+    ///
+    /// `Backup::step` reports a source it could not read as a *successful* call
+    /// with pages still outstanding, so this is the one failure that leaves a
+    /// destination which exists and is the wrong size. A pre-migration backup
+    /// that is not real is worse than one that is missing (`I-DATA-8`).
+    #[error("copying {from} to {to} stopped with {step} before the database was whole")]
+    Incomplete {
+        /// The database being copied.
+        from: PathBuf,
+        /// Where the copy was going.
+        to: PathBuf,
+        /// What `SQLite` reported instead of `Done`.
+        step: &'static str,
+    },
+
     /// The blocking copy task did not finish.
     #[error("the backup task did not complete")]
     TaskFailed,
