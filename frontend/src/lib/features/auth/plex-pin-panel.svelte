@@ -151,7 +151,18 @@
 				// makes this the refusal two concurrent sign-ins produce for
 				// each other, and throwing the attempt away over it cost both
 				// of them a code that was still good (`I-UX-2`).
-				if (result.problem.code === 'rateLimited') {
+				// The same holds for an upstream refusal, and for the same
+				// reason. `upstream` is plex.tv answering something this
+				// instance could not use — a 429 or a 5xx on the account
+				// lookup, which happens *after* plex.tv has already reported
+				// the pin authorised, so the operator has finished their part
+				// and the pin is still open. Treated as fatal, one transient
+				// plex.tv hiccup threw away an attempt that would have
+				// completed on the very next poll (`I-UX-2`).
+				if (
+					result.problem.code === 'rateLimited' ||
+					result.problem.code === 'upstream'
+				) {
 					return;
 				}
 				clearInterval(timer);

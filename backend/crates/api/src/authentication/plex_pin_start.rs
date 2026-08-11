@@ -228,6 +228,20 @@ fn unreturnable(configured: Option<&PublicOrigin>) -> String {
 /// operation never declared, and one that tells a generated client nothing
 /// about whether the fault is upstream or here (§24.5).
 pub(crate) fn plex_failure(error: PinError) -> AppError {
+    // plex.tv answered, and refused. Reported apart from the outage because it
+    // is a different fact and calls for a different move: an outage means wait,
+    // a refusal means try again — the pin the operator is holding is still open
+    // at plex.tv, and the next poll may well get through. Rendered as "did not
+    // respond", a single 429 or 503 on the account lookup sent the operator
+    // looking for an outage that was not happening, and the pin panel threw a
+    // live attempt away on the strength of it.
+    if let Some(status) = error.refused_status() {
+        return AppError::of(
+            ErrorCode::Upstream,
+            format!("plex.tv refused the sign-in with HTTP {status}. Try again in a moment."),
+        )
+        .caused_by(error);
+    }
     match &error {
         PinError::ClientIdentifierMismatch { .. } => AppError::of(
             ErrorCode::Conflict,
@@ -240,9 +254,9 @@ pub(crate) fn plex_failure(error: PinError) -> AppError {
             ErrorCode::Upstream,
             "plex.tv created a sign-in this build cannot follow.",
         ),
-        // `PinError` is `#[non_exhaustive]`; a transport failure and anything
-        // added later read the same way to an operator, and neither is
-        // something they can correct from here.
+        // `PinError` is `#[non_exhaustive]`; no answer arrived, and anything
+        // added later reads the same way to an operator — neither is something
+        // they can correct from here.
         PinError::Transport(_) | _ => AppError::of(
             ErrorCode::Upstream,
             "plex.tv did not respond. Sign-in cannot continue until it does.",

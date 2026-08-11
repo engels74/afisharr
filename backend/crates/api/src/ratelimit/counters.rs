@@ -58,10 +58,42 @@ impl Key {
         Self {
             bucket: bucket.clone(),
             address: if bucket.counts_per_address() {
-                address
+                address.map(counted_as)
             } else {
                 None
             },
+        }
+    }
+}
+
+/// How much of an address is one caller, for counting.
+///
+/// An IPv4 address is one host and is counted whole. An IPv6 address is not: the
+/// smallest thing an ISP or a hosting provider hands out is a `/64`, and a great
+/// many hand out a `/56` or shorter, so the caller chooses the low 64 bits
+/// freely. Keyed whole, a caller sourcing each request from a different address
+/// inside their own prefix filed each one under its own counter — the limit
+/// never fired, and `limiter.held()` reported five-per-address as though it
+/// were working.
+///
+/// What that bought is not abstract. `Bucket::Provider` is the allowance that
+/// stops this instance flooding plex.tv under the operator's own
+/// `X-Plex-Client-Identifier`; rotating past it gets that identifier throttled
+/// by plex.tv, which breaks Plex sign-in for the real operator. The same
+/// rotation defeats `Bucket::SetupAttempt` on a freshly deployed container and
+/// `Bucket::Anonymous` everywhere.
+///
+/// A `/64` and not something narrower, because narrower is the other failure:
+/// a `/48` folds a whole organisation onto one counter, and one careless client
+/// there would refuse everybody else. The `/64` is the unit the address plan
+/// itself hands out, so it is the smallest prefix a caller cannot rotate within.
+fn counted_as(address: IpAddr) -> IpAddr {
+    match address {
+        IpAddr::V4(_) => address,
+        IpAddr::V6(v6) => {
+            let mut octets = v6.octets();
+            octets[8..].fill(0);
+            IpAddr::V6(std::net::Ipv6Addr::from(octets))
         }
     }
 }
@@ -126,6 +158,31 @@ mod tests {
         let here = Key::of(&Bucket::Anonymous, "1.2.3.4".parse::<IpAddr>().ok());
         let there = Key::of(&Bucket::Anonymous, "9.9.9.9".parse::<IpAddr>().ok());
         assert_ne!(here, there);
+    }
+
+    #[test]
+    fn one_ipv6_caller_cannot_rotate_through_its_own_prefix_for_fresh_budgets() {
+        // The smallest allocation an ISP hands out is a /64, so every address
+        // in it is the same caller. Keyed whole, each request bought its own
+        // counter and no per-address limit ever fired.
+        let first = Key::of(&Bucket::Anonymous, "2001:db8:1:2::1".parse::<IpAddr>().ok());
+        let second = Key::of(
+            &Bucket::Anonymous,
+            "2001:db8:1:2:ffff:ffff:ffff:ffff".parse::<IpAddr>().ok(),
+        );
+        assert_eq!(first, second);
+
+        // The bound: a different /64 is a different caller, so one client
+        // cannot refuse the rest of a provider's customers.
+        let elsewhere = Key::of(&Bucket::Anonymous, "2001:db8:1:3::1".parse::<IpAddr>().ok());
+        assert_ne!(first, elsewhere);
+    }
+
+    #[test]
+    fn an_ipv4_address_is_still_counted_whole() {
+        let here = Key::of(&Bucket::Anonymous, "203.0.113.9".parse::<IpAddr>().ok());
+        let neighbour = Key::of(&Bucket::Anonymous, "203.0.113.10".parse::<IpAddr>().ok());
+        assert_ne!(here, neighbour);
     }
 
     #[test]

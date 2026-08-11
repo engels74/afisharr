@@ -32,11 +32,23 @@ pub struct Health {
 }
 
 /// Reports that the instance is up.
+///
+/// The 429 is declared because the group carries a rate limit, and a layer
+/// answering on a route's behalf must be in that route's own annotations: the
+/// generated client is built from them and nothing else, so an undeclared answer
+/// is one the interface simply does not handle (§24.5).
 #[utoipa::path(
     get,
     path = "/api/health",
     tag = "health",
-    responses((status = 200, description = "The instance is serving", body = Health)),
+    responses(
+        (status = 200, description = "The instance is serving", body = Health),
+        (
+            status = 429,
+            description = "Too many requests",
+            body = crate::error::Problem,
+        ),
+    ),
 )]
 pub async fn health(State(state): State<ApiState>) -> Json<Health> {
     Json(Health {

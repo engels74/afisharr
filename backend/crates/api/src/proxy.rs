@@ -22,6 +22,7 @@ mod origin;
 mod peer;
 mod trusted;
 
+pub(crate) use forwarded::Claim;
 pub use origin::{PublicOrigin, PublicOriginError};
 pub use peer::{ClientContext, Scheme};
-pub use trusted::{TrustedProxies, TrustedProxyError};
+pub use trusted::{TrustedProxies, TrustedProxyError, canonical};

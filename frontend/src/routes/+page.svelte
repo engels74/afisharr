@@ -51,9 +51,28 @@
 			return;
 		}
 		const setupCompleted = data.setupCompleted;
-		const signedIn =
-			setupCompleted && (await readSession()).outcome === 'ok';
-		await goto(landingFor(setupCompleted, signedIn), { replaceState: true });
+		if (!setupCompleted) {
+			await goto(landingFor(false, false), { replaceState: true });
+			return;
+		}
+
+		// Only a refused credential is a signed-out one — the same rule
+		// `session.svelte.ts` keeps, kept here too because this is the route
+		// that *acts* on the answer. `readSession()` refuses for any non-2xx: a
+		// 500, a proxy's 502, a 429, or the 503 the client synthesises when the
+		// instance cannot be reached at all. Health is unmetered and answers
+		// from memory, so it can succeed in the same instant the session call
+		// does not — and reading that as "nobody is here" sent an administrator
+		// holding a perfectly valid cookie to the sign-in page to type their
+		// password again, over a five-second container restart (P1).
+		const asked = await readSession();
+		if (asked.outcome === 'refused' && asked.problem.code !== 'unauthenticated') {
+			refusal = asked.problem;
+			return;
+		}
+		await goto(landingFor(true, asked.outcome === 'ok'), {
+			replaceState: true,
+		});
 	}
 
 	/** Asks again, from the state the first attempt started in. */

@@ -146,7 +146,13 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** Reports that the instance is up. */
+        /**
+         * Reports that the instance is up.
+         * @description The 429 is declared because the group carries a rate limit, and a layer
+         *     answering on a route's behalf must be in that route's own annotations: the
+         *     generated client is built from them and nothing else, so an undeclared answer
+         *     is one the interface simply does not handle (§24.5).
+         */
         get: operations["health"];
         put?: never;
         post?: never;
@@ -1207,6 +1213,15 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["Health"];
+                };
+            };
+            /** @description Too many requests */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Problem"];
                 };
             };
         };

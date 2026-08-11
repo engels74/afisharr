@@ -12,7 +12,7 @@
 use axum::http::{HeaderMap, header::HOST};
 
 use crate::proxy::{
-    ClientContext, PublicOrigin, Scheme, forwarded,
+    ClientContext, PublicOrigin, Scheme,
     peer::{FORWARDED_FOR, FORWARDED_PROTO},
 };
 
@@ -54,18 +54,16 @@ impl ClientContext {
     /// - No forwarded header at all — nothing forwarded this, so it arrived here
     ///   over the plaintext this instance serves. Left alone.
     ///
-    /// The entry read is the *client-facing* hop's, which is the one
-    /// [`Edge::scheme`] already resolved this request's scheme from — indexed
-    /// from the right by [`ClientContext::forwarded_hops`], never the rightmost
-    /// and never the leftmost. Reading the rightmost was a hole: a chain
-    /// arriving as `X-Forwarded-Proto: http, https` from a client-facing proxy
-    /// on plain `:80` answered "the hop stated TLS", so the request was
-    /// upgraded here and marked as vouched for, and the sign-in answered
-    /// `Set-Cookie: …; Secure` plus a year of HSTS over plaintext. The leftmost
-    /// entry is whatever the caller prepended, which is why neither end of the
-    /// header is read. A caller reaching this instance directly can still write
-    /// the whole header, and gains a `Secure` cookie their own plaintext
-    /// browser discards and HSTS in their own browser — nobody else's.
+    /// The claim read is [`ClientContext::stated`] — the one value the request's
+    /// scheme itself came from, resolved once when the chain was walked, never
+    /// re-derived here. Re-deriving it was a hole: a chain arriving as
+    /// `X-Forwarded-Proto: http, https` from a client-facing proxy on plain
+    /// `:80` answered "the hop stated TLS", so the request was upgraded here and
+    /// marked as vouched for, and the sign-in answered `Set-Cookie: …; Secure`
+    /// plus a year of HSTS over plaintext. A caller reaching this instance
+    /// directly can still write the whole header, and gains a `Secure` cookie
+    /// their own plaintext browser discards and HSTS in their own browser —
+    /// nobody else's.
     ///
     /// It does not cover every deployment. A proxy that rewrites `Host` to the
     /// upstream's own name — `proxy_pass` with no `proxy_set_header Host` —
@@ -89,8 +87,8 @@ impl ClientContext {
         headers: &HeaderMap,
         configured: Option<&PublicOrigin>,
     ) -> Self {
-        let stated = forwarded::stated_scheme(headers, self.forwarded_hops);
-        if self.scheme.is_secure() || !crossed_a_proxy(headers) || claims_plaintext(stated) {
+        let stated = self.stated;
+        if self.scheme.is_secure() || !crossed_a_proxy(headers) || stated.is_plaintext() {
             return self;
         }
         let Some(origin) = configured.filter(|origin| origin.is_secure()) else {
@@ -102,7 +100,7 @@ impl ClientContext {
             .is_some_and(|host| origin.matches_host(host));
         if arrived_at_it {
             self.scheme = Scheme::Https;
-            self.scheme_inferred = !claims_https(stated);
+            self.scheme_inferred = !stated.is_tls();
         }
         self
     }
@@ -111,23 +109,6 @@ impl ClientContext {
 /// Whether anything in front of this instance forwarded this request.
 fn crossed_a_proxy(headers: &HeaderMap) -> bool {
     headers.contains_key(FORWARDED_FOR) || headers.contains_key(FORWARDED_PROTO)
-}
-
-/// Whether the client-facing hop states it served the client over plaintext.
-///
-/// Absent is not a claim: a proxy that forwards `X-Forwarded-For` and leaves the
-/// scheme alone has said nothing, and this answers `false` for it.
-fn claims_plaintext(stated: Option<&str>) -> bool {
-    stated.is_some_and(|claimed| !forwarded::is_https(claimed))
-}
-
-/// Whether the client-facing hop states it served the client over TLS.
-///
-/// The other side of [`claims_plaintext`], and not its negation: absent is
-/// neither. This is what separates a reading the chain vouched for from one
-/// resting on `publicOrigin` alone.
-fn claims_https(stated: Option<&str>) -> bool {
-    stated.is_some_and(forwarded::is_https)
 }
 
 #[cfg(test)]

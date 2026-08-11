@@ -35,3 +35,42 @@ pub enum PinError {
         found: String,
     },
 }
+
+impl PinError {
+    /// The status plex.tv answered with, when it answered at all.
+    ///
+    /// [`Self::Transport`] carries both halves of "the call did not work", and
+    /// they are different facts to whoever is signing in: no answer means an
+    /// outage and the only move is to wait, while a refusal means plex.tv is up
+    /// and the pin the operator is holding may still be good on the next poll.
+    /// Reported as one, a 429 or a 503 on the account lookup was rendered to the
+    /// operator as "plex.tv did not respond" and threw away a live attempt.
+    ///
+    /// Answered here rather than matched at the call site so the HTTP surface
+    /// need not depend on the outbound crate to tell the two apart.
+    #[must_use]
+    pub fn refused_status(&self) -> Option<u16> {
+        match self {
+            Self::Transport(OutboundError::Status { status, .. }) => Some(*status),
+            _ => None,
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn an_answered_refusal_is_told_apart_from_an_outage() {
+        let refused = PinError::Transport(OutboundError::Status {
+            host: "plex.tv".to_owned(),
+            status: 429,
+            body: String::new(),
+        });
+        assert_eq!(refused.refused_status(), Some(429));
+
+        // No answer arrived, and nothing else here is a status either.
+        assert_eq!(PinError::NoIdentifier.refused_status(), None);
+    }
+}

@@ -485,6 +485,7 @@
           "health"
         ],
         "summary": "Reports that the instance is up.",
+        "description": "The 429 is declared because the group carries a rate limit, and a layer\nanswering on a route's behalf must be in that route's own annotations: the\ngenerated client is built from them and nothing else, so an undeclared answer\nis one the interface simply does not handle (§24.5).",
         "operationId": "health",
         "responses": {
           "200": {
@@ -493,6 +494,16 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/Health"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Too many requests",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
                 }
               }
             }

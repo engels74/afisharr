@@ -3,8 +3,6 @@
 
 //! `rust-embed` over `frontend/build`.
 
-use std::borrow::Cow;
-
 use afisharr_api::interface::{Asset, AssetSource};
 use rust_embed::Embed;
 
@@ -49,7 +47,12 @@ impl AssetSource for EmbeddedInterface {
         }
         let file = BuiltSpa::get(path)?;
         Some(Asset {
-            bytes: Cow::Owned(file.data.into_owned()),
+            // `file.data` is already `Cow<'static, [u8]>`, borrowed straight
+            // from the binary's image. `into_owned` copied the whole file out
+            // of it on every request, and the route then cloned that copy — so
+            // the ~300 KB entry bundle allocated and memcpy'd ~600 KB per
+            // answer, on a fallback that sits outside every rate limit.
+            bytes: file.data,
             content_type: content_type_of(path),
             immutable: path.starts_with(FINGERPRINTED),
         })
@@ -58,7 +61,7 @@ impl AssetSource for EmbeddedInterface {
     fn shell(&self) -> Option<Asset> {
         let file = BuiltSpa::get(SHELL)?;
         Some(Asset {
-            bytes: Cow::Owned(file.data.into_owned()),
+            bytes: file.data,
             content_type: "text/html; charset=utf-8".to_owned(),
             // Never: an upgraded binary ships new bundle names, and a cached
             // shell would go on asking for the ones it no longer carries.

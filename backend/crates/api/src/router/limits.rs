@@ -84,9 +84,22 @@ pub(super) async fn every_call(
 
 /// The answer for a method a guarded route does not serve.
 ///
-/// It counts itself, [`every_call`]'s rule and not [`anonymous`]'s: nothing
-/// runs after this, so there is no guard to defer a credentialled request to,
-/// and waiving one here would be the same unmetered path stated a second time.
+/// It counts the half [`anonymous`] waived, and only that half. This sits
+/// *inside* that layer, so a request presenting no credential has already been
+/// counted by it on the way in; counting again here spent two attempts for one
+/// request, and the module's own rule — every request through `/api` counted
+/// exactly once — was false for this path. A scanner probing wrong methods
+/// therefore drained the shared 300-per-minute allowance at twice the rate,
+/// and the operator's own sign-in answered 429 inside a window it still had
+/// budget in.
+///
+/// What is left to count is the credentialled request, which is where the
+/// waiver has no keeper: axum answers 405 from the method router before any
+/// extractor runs, so no `Authenticated` is ever constructed.
+/// `presents_credential` reads a header and validates nothing, so
+/// `Cookie: afisharr_session=x` against `GET /api/auth/logout`, looped, was
+/// answered as fast as the instance accepts connections with `Bucket::Anonymous`
+/// and `Bucket::Api` both reading zero.
 ///
 /// Without it, [`anonymous`]'s waiver had no keeper on a wrong-method request.
 /// Axum answers 405 from the method router, before any handler extractor runs,
@@ -104,7 +117,12 @@ pub(super) async fn every_call(
 pub(super) async fn guarded_method_not_allowed(
     State(state): State<ApiState>,
     client: ClientContext,
+    headers: axum::http::HeaderMap,
 ) -> Response {
+    if !crate::authentication::presents_credential(&headers) {
+        // Already counted by the layer this sits inside.
+        return axum::http::StatusCode::METHOD_NOT_ALLOWED.into_response();
+    }
     match spend_anonymous_budget(&state, client) {
         Some(refusal) => refusal.into_response(),
         None => axum::http::StatusCode::METHOD_NOT_ALLOWED.into_response(),

@@ -58,8 +58,13 @@ impl TrustedProxies {
     }
 
     /// Whether `peer` is a proxy this instance takes forwarded headers from.
+    ///
+    /// The address is canonicalised first. See [`canonical`]: an IPv4 peer on a
+    /// dual-stack listener arrives as `::ffff:a.b.c.d`, and an IPv4 range never
+    /// contains a V6 address however the two are spelled.
     #[must_use]
     pub fn trusts(&self, peer: IpAddr) -> bool {
+        let peer = canonical(peer);
         self.ranges.iter().any(|range| range.contains(&peer))
     }
 
@@ -67,6 +72,32 @@ impl TrustedProxies {
     #[must_use]
     pub fn is_empty(&self) -> bool {
         self.ranges.is_empty()
+    }
+}
+
+/// The address as the family that owns it names it.
+///
+/// One rule, applied to every address this module compares or records, because
+/// two spellings of one host are two of everything downstream (P7).
+///
+/// A dual-stack listener is what makes this necessary. `bind_address: "::"` is
+/// how an instance serves IPv6, and it is what an IPv6-enabled Docker network
+/// produces; Linux then accepts IPv4 connections on that socket and reports the
+/// peer as `::ffff:172.18.0.2`. An IPv4 CIDR does not contain that address —
+/// `IpNet::contains` compares families first — so `trustProxy: ["172.16.0.0/12"]`
+/// matched nothing, every forwarded header was discarded, and every client on
+/// the internet was counted and recorded as the proxy's one address, with
+/// nothing anywhere saying the setting had not taken.
+///
+/// The same normalisation is owed to the addresses that *are* recorded. A client
+/// resolved as `::ffff:1.2.3.4` on one request and `1.2.3.4` on the next is two
+/// rate-limit counters and two rows in the operator's session list for one
+/// caller.
+#[must_use]
+pub fn canonical(address: IpAddr) -> IpAddr {
+    match address {
+        IpAddr::V6(v6) => v6.to_ipv4_mapped().map_or(address, IpAddr::V4),
+        IpAddr::V4(_) => address,
     }
 }
 
@@ -104,6 +135,25 @@ mod tests {
         let proxies = TrustedProxies::parse(&["fd00::/8"]).expect("parses");
         assert!(proxies.trusts(address("fd00::1")));
         assert!(!proxies.trusts(address("fe80::1")));
+    }
+
+    #[test]
+    fn an_ipv4_range_trusts_the_mapped_peer_a_dual_stack_socket_reports() {
+        // `bind_address: "::"` accepts IPv4 connections and reports them as
+        // `::ffff:a.b.c.d`. Compared raw, the operator's `trustProxy` matched
+        // nothing: every forwarded header was discarded and every client behind
+        // the proxy shared one address, one rate-limit counter, and one row in
+        // the session list.
+        let proxies = TrustedProxies::parse(&["172.16.0.0/12"]).expect("parses");
+        assert!(proxies.trusts(address("::ffff:172.18.0.2")));
+        assert!(!proxies.trusts(address("::ffff:192.0.2.1")));
+    }
+
+    #[test]
+    fn canonicalising_leaves_every_other_address_alone() {
+        assert_eq!(canonical(address("10.1.2.3")), address("10.1.2.3"));
+        assert_eq!(canonical(address("2001:db8::1")), address("2001:db8::1"));
+        assert_eq!(canonical(address("::ffff:10.1.2.3")), address("10.1.2.3"));
     }
 
     #[test]

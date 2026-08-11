@@ -8,8 +8,8 @@ use std::net::IpAddr;
 use axum::http::HeaderMap;
 
 use crate::proxy::{
-    Scheme, TrustedProxies,
-    forwarded::{entries, is_https, parse_entry, stated_scheme},
+    TrustedProxies,
+    forwarded::{Claim, entries, parse_entry},
     peer::FORWARDED_FOR,
 };
 
@@ -33,6 +33,16 @@ pub(super) struct Edge {
     /// many entries the client prepended, which is why every forwarded header
     /// is indexed from the right and none of them from the left.
     pub(super) hops: usize,
+    /// Whether the walk actually found the client, or gave up and said so.
+    ///
+    /// [`Self::hops`] is a position, and on an unprovable walk it is a floor
+    /// rather than a measurement — one, the peer's own entry, because that is
+    /// all this instance can attribute to anybody. Reading a *scheme* at a
+    /// floor is not conservative: it picks the nearest hop's claim, which is
+    /// the one entry an unprovable chain gives no reason to prefer. So the two
+    /// facts are carried apart and [`Self::scheme`] reads each on its own
+    /// terms.
+    pub(super) proven: bool,
 }
 
 impl Edge {
@@ -53,6 +63,7 @@ impl Edge {
             // The immediate peer is trusted — that is why this code is running
             // — and it wrote the last entry of every header it forwarded.
             hops: 1,
+            proven: false,
         };
         if chain.is_empty() {
             return unprovable;
@@ -69,6 +80,7 @@ impl Edge {
                     // of it; everything to its right came from a hop this
                     // instance trusts.
                     hops: chain.len() - index,
+                    proven: true,
                 };
             }
         }
@@ -119,12 +131,26 @@ impl Edge {
     /// (`security::headers`). A forged `Secure` on the session cookie is the
     /// remainder, and it is self-correcting: the browser simply withholds a
     /// cookie it was told to keep for TLS.
-    pub(super) fn scheme(&self, headers: &HeaderMap) -> Scheme {
-        if stated_scheme(headers, self.hops).is_some_and(is_https) {
-            Scheme::Https
-        } else {
-            Scheme::Http
-        }
+    ///
+    /// An unprovable walk is read differently, and it has to be. There the hop
+    /// count is a floor of one rather than a position, so indexing by it reads
+    /// the *nearest* hop's entry — the reinstatement of the plaintext-edge
+    /// upgrade this whole module removed for the provable case. An operator
+    /// whose clients share a range with their proxy (`trustProxy: 10.0.0.0/8`,
+    /// LAN clients in 10/8) has every walk end unprovable, so a browser reaching
+    /// a plaintext edge that appends `http` and an internal hop that appends
+    /// `https` was answered `Set-Cookie: …; Secure` — discarded by that browser,
+    /// 401 on the next request, a sign-in loop — plus a year of HSTS on the
+    /// apex and every subdomain, with nothing to click through.
+    ///
+    /// So an unprovable chain takes the weakest claim in it: TLS only when
+    /// *every* entry says TLS ([`Claim::of`]). That keeps the two readings that
+    /// were never in doubt — the single-entry chain a proxy overwrites, and an
+    /// all-`https` chain — and refuses the upgrade the moment any hop in it says
+    /// plaintext. It cannot be forged upward either: a caller can prepend
+    /// entries, and prepending anything but `https` only weakens the answer.
+    pub(super) fn claim(&self, headers: &HeaderMap) -> Claim {
+        Claim::of(headers, self.proven.then_some(self.hops))
     }
 }
 
@@ -233,9 +259,50 @@ mod tests {
     }
 
     #[test]
+    fn an_all_trusted_chain_does_not_upgrade_on_the_nearest_hops_entry() {
+        // The deployment: `trustProxy` names the range the operator's own LAN
+        // clients sit in, so every walk ends unprovable. A browser reaches an
+        // edge still listening on plain `:80`, which appends `http`, and an
+        // internal hop re-encrypts and appends `https`. Reading the rightmost
+        // entry answered TLS, so the sign-in set `Secure` on a cookie that
+        // browser discards — 401 on the next request, a login loop — and HSTS
+        // pinned the name and every subdomain for a year.
+        let trusted = TrustedProxies::parse(&["10.0.0.0/8"]).expect("parses");
+        let context = ClientContext::resolve(
+            peer("10.0.0.5"),
+            &headers(&[
+                (FORWARDED_FOR, "10.1.2.3, 10.0.0.9"),
+                (FORWARDED_PROTO, "http, https"),
+            ]),
+            &trusted,
+        );
+        assert_eq!(context.address.to_string(), "10.0.0.5");
+        assert_eq!(context.scheme, Scheme::Http);
+    }
+
+    #[test]
+    fn an_all_trusted_chain_that_says_tls_throughout_is_still_read_as_tls() {
+        // The bound on the rule above. The single-entry chain a proxy overwrites
+        // is the overwhelmingly common configuration, and refusing it would
+        // strip `Secure` from every cookie on a working TLS deployment.
+        let trusted = TrustedProxies::parse(&["10.0.0.0/8"]).expect("parses");
+        for chain in ["https", "https, https"] {
+            let context = ClientContext::resolve(
+                peer("10.0.0.5"),
+                &headers(&[
+                    (FORWARDED_FOR, "10.1.2.3, 10.0.0.9"),
+                    (FORWARDED_PROTO, chain),
+                ]),
+                &trusted,
+            );
+            assert_eq!(context.scheme, Scheme::Https, "chain {chain:?}");
+        }
+    }
+
+    #[test]
     fn a_chain_that_cannot_be_walked_reads_the_scheme_from_the_peer_s_own_entry() {
-        // "unknown" ends the walk, so the only hop this instance can attribute
-        // anything to is the peer — and the peer wrote the last entry.
+        // "unknown" ends the walk, so nothing in the chain is attributable and
+        // the weakest claim in it is the answer: one entry says plaintext.
         let trusted = TrustedProxies::parse(&["10.0.0.0/8"]).expect("parses");
         let context = ClientContext::resolve(
             peer("10.0.0.5"),

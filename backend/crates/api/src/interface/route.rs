@@ -4,7 +4,7 @@
 //! The fallback that serves the SPA.
 
 use axum::{
-    body::Body,
+    body::{Body, Bytes},
     extract::State,
     http::{
         HeaderValue, Request, StatusCode,
@@ -36,11 +36,11 @@ pub async fn spa(State(state): State<ApiState>, request: Request<Body>) -> Respo
     let assets = state.assets();
 
     if let Some(asset) = assets.get(&path) {
-        return serve(&asset);
+        return serve(asset);
     }
 
     match assets.shell() {
-        Some(shell) => serve(&shell),
+        Some(shell) => serve(shell),
         // Not a 404: the route is right and the page is missing because this
         // binary was built without an interface. Saying so names the actual
         // problem instead of sending someone to look for a typo in the URL.
@@ -74,8 +74,20 @@ fn asset_path(target: &str) -> String {
         .map_or_else(|_| raw.to_owned(), std::borrow::Cow::into_owned)
 }
 
-fn serve(asset: &Asset) -> Response {
-    let mut response = Response::new(Body::from(asset.bytes.clone().into_owned()));
+/// Writes one asset out, without copying it.
+///
+/// By value, and matched rather than `into_owned`: [`Asset::bytes`] is borrowed
+/// from the binary's own image for every embedded file, and `Bytes::from_static`
+/// keeps it that way. Cloning the `Cow` and then owning it copied the whole file
+/// per request — the ~300 KB entry bundle twice over, on a route that sits
+/// outside every rate limit, so an unauthenticated caller could drive that churn
+/// at line rate with no counter moving.
+fn serve(asset: Asset) -> Response {
+    let body = match asset.bytes {
+        std::borrow::Cow::Borrowed(bytes) => Body::from(Bytes::from_static(bytes)),
+        std::borrow::Cow::Owned(bytes) => Body::from(bytes),
+    };
+    let mut response = Response::new(body);
     *response.status_mut() = StatusCode::OK;
     if let Ok(content_type) = HeaderValue::from_str(&asset.content_type) {
         response.headers_mut().insert(CONTENT_TYPE, content_type);
@@ -107,7 +119,7 @@ mod tests {
 
     #[test]
     fn a_fingerprinted_asset_is_cacheable_for_a_year() {
-        let response = serve(&asset(true));
+        let response = serve(asset(true));
         assert_eq!(response.headers().get(CACHE_CONTROL), Some(&IMMUTABLE));
     }
 
@@ -115,7 +127,7 @@ mod tests {
     fn the_shell_is_revalidated_on_every_load() {
         // An upgraded binary ships new bundle names; a cached shell would go on
         // asking for the ones it no longer carries.
-        let response = serve(&asset(false));
+        let response = serve(asset(false));
         assert_eq!(response.headers().get(CACHE_CONTROL), Some(&REVALIDATE));
     }
 
@@ -145,7 +157,7 @@ mod tests {
 
     #[test]
     fn the_content_type_the_embedder_decided_is_the_one_sent() {
-        let response = serve(&asset(false));
+        let response = serve(asset(false));
         assert_eq!(
             response
                 .headers()

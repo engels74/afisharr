@@ -9,6 +9,7 @@
 	import { SourceFooter } from '$lib/shared/provenance';
 	import type { StreamStatus } from '$lib/shared/stream';
 	import { DisconnectionIndicator } from '$lib/shared/stream';
+	import SignOutButton from '../auth/sign-out-button.svelte';
 	import { isActive, PRIMARY, SETTINGS } from './destinations';
 
 	interface Props {
@@ -46,6 +47,15 @@
 			>
 				{t(SETTINGS.label)}
 			</a>
+			<!--
+				The administrator's way out. Without it the only caller of
+				`signOut()` was the panel shown to non-administrators, so an
+				administrator who signed in on a shared or public machine had no
+				way to end that session from the interface at all: the cookie
+				stayed valid for its full 30-day absolute lifetime, and the only
+				remedy was clearing browser cookies.
+			-->
+			<SignOutButton />
 		</div>
 	</header>
 

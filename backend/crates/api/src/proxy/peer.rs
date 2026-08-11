@@ -7,7 +7,7 @@ use std::net::{IpAddr, SocketAddr};
 
 use axum::http::HeaderMap;
 
-use crate::proxy::{TrustedProxies, edge::Edge};
+use crate::proxy::{Claim, TrustedProxies, edge::Edge, trusted::canonical};
 
 /// `X-Forwarded-For`, honoured only from a trusted peer.
 pub(super) const FORWARDED_FOR: &str = "x-forwarded-for";
@@ -63,21 +63,17 @@ pub struct ClientContext {
     /// cannot be clicked through. So the inferred reading sets the cookie flag
     /// and never the header (`security::headers`).
     pub scheme_inferred: bool,
-    /// How many entries at the right of a forwarded header this instance can
-    /// attribute to hops it trusts.
+    /// What the forwarded chain said about the scheme.
     ///
-    /// Carried rather than recomputed, because
-    /// [`ClientContext::at_configured_origin`] asks a second question of the
-    /// same `X-Forwarded-Proto` chain — "did any hop state a scheme at all?" —
-    /// and it has to ask it of the entry [`Edge::scheme`] already read. Without
-    /// this it indexed from the right instead, so a two-hop chain arriving as
-    /// `http, https` answered "the hop stated TLS" while the client-facing hop
-    /// had said plaintext.
-    ///
-    /// One for a peer this instance does not trust: nothing forwarded is
-    /// honoured there, and the rightmost entry is the only one any reading of
-    /// that header can rest on.
-    pub(crate) forwarded_hops: usize,
+    /// Carried as the resolved claim rather than as a position to re-read from,
+    /// because [`ClientContext::at_configured_origin`] asks a second question of
+    /// the same `X-Forwarded-Proto` chain — "did any hop state a scheme at
+    /// all?" — and it must ask it of the value [`Self::scheme`] already came
+    /// from. Two readers indexing the header for themselves is two chances to
+    /// disagree about one chain (P7), and they did: a two-hop chain arriving as
+    /// `http, https` answered "the hop stated TLS" there while the
+    /// client-facing hop had said plaintext.
+    pub(crate) stated: Claim,
 }
 
 impl ClientContext {
@@ -89,26 +85,40 @@ impl ClientContext {
     /// against.
     #[must_use]
     pub fn resolve(peer: SocketAddr, headers: &HeaderMap, trusted: &TrustedProxies) -> Self {
-        let peer_address = peer.ip();
+        // Canonical from here on. A dual-stack listener reports an IPv4 peer as
+        // `::ffff:a.b.c.d`, and carrying that spelling forward makes one caller
+        // two rate-limit counters and two rows in the session list.
+        let peer_address = canonical(peer.ip());
         if !trusted.trusts(peer_address) {
             return Self {
                 address: peer_address,
                 scheme: Scheme::Http,
                 scheme_inferred: false,
-                forwarded_hops: 1,
+                // Nothing here is honoured for the scheme — that is what the
+                // `Http` above says — but the claim is still recorded, because
+                // [`Self::at_configured_origin`] is written for exactly this
+                // deployment: `trustProxy` empty, a real TLS proxy in front. It
+                // is read at its weakest for the same reason, since no walk
+                // proved anything about which hop wrote what.
+                stated: Claim::of(headers, None),
             };
         }
 
-        // One walk, two facts. The chain says who the client is *and* how much
-        // of every forwarded header the trusted edge wrote; deriving the
-        // scheme from a second, independent rule would be two chances to
-        // disagree about one chain (P7).
+        // One walk, two facts. The chain says who the client is *and* what it
+        // claims about the scheme; deriving the scheme from a second,
+        // independent rule would be two chances to disagree about one chain
+        // (P7).
         let edge = Edge::resolve(headers, trusted);
+        let stated = edge.claim(headers);
         Self {
             address: edge.address.unwrap_or(peer_address),
-            scheme: edge.scheme(headers),
+            scheme: if stated.is_tls() {
+                Scheme::Https
+            } else {
+                Scheme::Http
+            },
             scheme_inferred: false,
-            forwarded_hops: edge.hops,
+            stated,
         }
     }
 }
@@ -266,6 +276,31 @@ mod tests {
             &trusted,
         );
         assert_eq!(context.address.to_string(), "10.0.0.5");
+    }
+
+    #[test]
+    fn a_dual_stack_listener_honours_the_operators_ipv4_trust_proxy() {
+        // What `bind_address: "::"` reports for an IPv4 proxy. Compared raw,
+        // the range matched nothing and the forwarded address was discarded, so
+        // every client on the internet was counted as the proxy.
+        let trusted = TrustedProxies::parse(&["172.16.0.0/12"]).expect("parses");
+        let context = ClientContext::resolve(
+            peer("[::ffff:172.18.0.2]"),
+            &headers(&[(FORWARDED_FOR, "1.2.3.4"), (FORWARDED_PROTO, "https")]),
+            &trusted,
+        );
+        assert_eq!(context.address.to_string(), "1.2.3.4");
+        assert_eq!(context.scheme, Scheme::Https);
+    }
+
+    #[test]
+    fn a_mapped_peer_is_recorded_under_one_spelling() {
+        let context = ClientContext::resolve(
+            peer("[::ffff:203.0.113.9]"),
+            &HeaderMap::new(),
+            &TrustedProxies::default(),
+        );
+        assert_eq!(context.address.to_string(), "203.0.113.9");
     }
 
     #[test]

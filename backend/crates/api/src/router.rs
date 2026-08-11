@@ -62,8 +62,24 @@ pub fn build(state: ApiState) -> Router {
 /// Exactly one, and it is named in `I-SEC-8`'s statement: health. Anything
 /// added here is a hole in the first-run rule, which is why the list is short
 /// enough to read.
-fn open_routes(_state: &ApiState) -> Router<ApiState> {
-    Router::new().route("/health", get(health::health))
+///
+/// It carries a limit like every other group. Answering without a credential is
+/// not the same as answering without being counted, and this was the one `/api`
+/// path metered by nothing — against a module whose opening rule is that every
+/// request through `/api` is counted exactly once. An unauthenticated caller
+/// looping it was answered as fast as the instance accepts connections while
+/// `Bucket::Anonymous` read zero for their address, so the budget was untouched
+/// when they moved to a metered route and an operator investigating a saturated
+/// box found every counter reporting no traffic at all.
+///
+/// [`limits::every_call`], for the reason [`setup_routes`] gives: no handler
+/// here constructs [`crate::authentication::Authenticated`], so
+/// [`limits::anonymous`]'s waiver would have no keeper. The allowance is 300 a
+/// minute per address, which no orchestrator's liveness probe comes near.
+fn open_routes(state: &ApiState) -> Router<ApiState> {
+    Router::new()
+        .route("/health", get(health::health))
+        .layer(from_fn_with_state(state.clone(), limits::every_call))
 }
 
 /// The wizard, behind the claim gate.
@@ -179,7 +195,9 @@ fn guarded_routes(state: &ApiState) -> Router<ApiState> {
         // Called after the last route and before the layer, which is what makes
         // it work at all: it attaches to every method router registered so far,
         // and it sits *inside* the limit so the request it answers is one the
-        // limit has already seen.
+        // limit has already seen. That is also why it counts only the
+        // credentialled half — the other half the layer already counted, and
+        // counting it twice made one wrong-method request spend two attempts.
         //
         // Without it, [`limits::anonymous`]'s waiver had no keeper on a
         // wrong-method request. Axum answers 405 from the method router, before

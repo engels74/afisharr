@@ -15,7 +15,78 @@ use std::net::{IpAddr, SocketAddr};
 
 use axum::http::HeaderMap;
 
-use crate::proxy::peer::FORWARDED_PROTO;
+use crate::proxy::{peer::FORWARDED_PROTO, trusted::canonical};
+
+/// What the forwarded chain said about the scheme, resolved once.
+///
+/// One value rather than two readings of one header. [`super::edge::Edge`]
+/// turns it into the request's scheme and
+/// [`crate::proxy::ClientContext::at_configured_origin`] asks it whether any hop
+/// stated anything at all — and the two asking the header separately is two
+/// chances to disagree about one chain (P7). It is what
+/// [`crate::proxy::ClientContext`] carries, in place of the hop count that used
+/// to be re-read there.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Claim {
+    /// No hop stated a scheme. Not the same as a hop stating plaintext.
+    Silent,
+    /// The chain states the client was served over plaintext.
+    Plaintext,
+    /// The chain states the client was served over TLS.
+    Tls,
+}
+
+impl Claim {
+    /// The weakest claim the whole `X-Forwarded-Proto` chain supports.
+    ///
+    /// The reading for a chain no walk could pin a client in: an untrusted peer,
+    /// whose header is worth nothing on its own, and a trusted walk that reached
+    /// the left end without finding a client. Neither gives a reason to prefer
+    /// one entry, and indexing anyway lands on the *nearest* hop — the entry a
+    /// plaintext edge behind an internal TLS hop leaves last, which is exactly
+    /// the upgrade that must not happen.
+    ///
+    /// So TLS is answered only when every entry says TLS. The chain a proxy
+    /// overwrites is one entry and reads as it always did; prepending anything
+    /// only weakens the answer, so nothing here can be forged upward.
+    fn weakest(headers: &HeaderMap) -> Self {
+        let chain = entries(headers, FORWARDED_PROTO);
+        if chain.is_empty() {
+            Self::Silent
+        } else if chain.iter().copied().all(is_https) {
+            Self::Tls
+        } else {
+            Self::Plaintext
+        }
+    }
+
+    /// The claim of the entry `hops` from the right, which a proven walk found.
+    fn at(headers: &HeaderMap, hops: usize) -> Self {
+        match stated_scheme(headers, hops) {
+            None => Self::Silent,
+            Some(entry) if is_https(entry) => Self::Tls,
+            Some(_) => Self::Plaintext,
+        }
+    }
+
+    /// The claim a chain makes, given whether its walk proved anything.
+    pub(super) fn of(headers: &HeaderMap, proven: Option<usize>) -> Self {
+        proven.map_or_else(|| Self::weakest(headers), |hops| Self::at(headers, hops))
+    }
+
+    /// Whether the chain states the client was served over TLS.
+    pub(crate) fn is_tls(self) -> bool {
+        matches!(self, Self::Tls)
+    }
+
+    /// Whether the chain states the client was served over plaintext.
+    ///
+    /// Not the negation of [`Self::is_tls`]: [`Self::Silent`] is neither, and
+    /// the whole of `at_configured_origin` turns on that difference.
+    pub(crate) fn is_plaintext(self) -> bool {
+        matches!(self, Self::Plaintext)
+    }
+}
 
 /// The `X-Forwarded-Proto` entry the client-facing hop wrote, if it wrote one.
 ///
@@ -34,7 +105,7 @@ use crate::proxy::peer::FORWARDED_PROTO;
 /// When the header is shorter than the chain — the common case of a proxy that
 /// overwrites rather than appends — the rightmost entry is the only one this
 /// instance can attribute to anybody, and it is the immediate peer's.
-pub(super) fn stated_scheme(headers: &HeaderMap, hops: usize) -> Option<&str> {
+fn stated_scheme(headers: &HeaderMap, hops: usize) -> Option<&str> {
     let chain = entries(headers, FORWARDED_PROTO);
     chain
         .len()
@@ -45,7 +116,7 @@ pub(super) fn stated_scheme(headers: &HeaderMap, hops: usize) -> Option<&str> {
 }
 
 /// Whether one forwarded entry names TLS.
-pub(super) fn is_https(claimed: &str) -> bool {
+fn is_https(claimed: &str) -> bool {
     claimed.eq_ignore_ascii_case("https")
 }
 
@@ -65,19 +136,25 @@ pub(super) fn is_https(claimed: &str) -> bool {
 /// A value that names no address at all — `unknown`, an obfuscated identifier —
 /// still ends the walk. That is the honest answer: the chain cannot be shown to
 /// be trusted past a value that cannot be compared against the trusted list.
+///
+/// The address is canonicalised on the way out, so a proxy that writes
+/// `::ffff:1.2.3.4` and one that writes `1.2.3.4` name the same client to every
+/// reader — the trusted-list test, the rate-limit key, and the session row
+/// (see [`crate::proxy::canonical`]).
 pub(super) fn parse_entry(entry: &str) -> Option<IpAddr> {
     if let Ok(address) = entry.parse::<IpAddr>() {
-        return Some(address);
+        return Some(canonical(address));
     }
     // `1.2.3.4:51234` and `[2001:db8::1]:51234`, which `SocketAddr` reads whole.
     if let Ok(socket) = entry.parse::<SocketAddr>() {
-        return Some(socket.ip());
+        return Some(canonical(socket.ip()));
     }
     // `[2001:db8::1]`, a bracketed literal carrying no port.
     entry
         .strip_prefix('[')
         .and_then(|rest| rest.strip_suffix(']'))
         .and_then(|inner| inner.parse::<IpAddr>().ok())
+        .map(canonical)
 }
 
 /// Every value of `name`, in order.
@@ -132,6 +209,19 @@ mod tests {
     }
 
     #[test]
+    fn a_mapped_entry_names_the_same_client_as_its_plain_spelling() {
+        // Otherwise one caller is two rate-limit counters and two rows in the
+        // operator's session list, depending on which spelling the hop wrote.
+        for entry in ["::ffff:203.0.113.9", "[::ffff:203.0.113.9]:51234"] {
+            assert_eq!(
+                parse_entry(entry).expect("an address").to_string(),
+                "203.0.113.9",
+                "entry {entry:?}"
+            );
+        }
+    }
+
+    #[test]
     fn a_value_that_names_no_address_is_not_one() {
         // The bound on the tolerance above: these cannot be compared against
         // the trusted list, so nothing past them is provable (P2).
@@ -169,6 +259,44 @@ mod tests {
 
         // Absent is not a claim, and it is not plaintext either.
         assert_eq!(stated_scheme(&HeaderMap::new(), 1), None);
+    }
+
+    #[test]
+    fn a_proven_walk_reads_the_entry_at_its_own_hop() {
+        let chain = headers(&[(FORWARDED_PROTO, "http, https")]);
+        assert_eq!(Claim::of(&chain, Some(1)), Claim::Tls);
+        assert_eq!(Claim::of(&chain, Some(2)), Claim::Plaintext);
+        assert_eq!(Claim::of(&HeaderMap::new(), Some(1)), Claim::Silent);
+    }
+
+    #[test]
+    fn an_unproven_walk_takes_the_weakest_claim_in_the_chain() {
+        // The hop count is a floor of one there, so indexing by it reads the
+        // nearest hop — a plaintext edge behind an internal TLS hop then set a
+        // `Secure` cookie the browser discards and a year of HSTS with nothing
+        // to click through.
+        for (chain, expected) in [
+            ("http, https", Claim::Plaintext),
+            ("https, http", Claim::Plaintext),
+            ("https", Claim::Tls),
+            ("https, https", Claim::Tls),
+            ("http", Claim::Plaintext),
+        ] {
+            assert_eq!(
+                Claim::of(&headers(&[(FORWARDED_PROTO, chain)]), None),
+                expected,
+                "chain {chain:?}"
+            );
+        }
+        assert_eq!(Claim::of(&HeaderMap::new(), None), Claim::Silent);
+    }
+
+    #[test]
+    fn silence_is_neither_tls_nor_plaintext() {
+        assert!(!Claim::Silent.is_tls());
+        assert!(!Claim::Silent.is_plaintext());
+        assert!(Claim::Tls.is_tls());
+        assert!(Claim::Plaintext.is_plaintext());
     }
 
     #[test]
