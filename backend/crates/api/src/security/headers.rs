@@ -10,7 +10,7 @@ use axum::http::{
     },
 };
 
-use crate::proxy::{PublicOrigin, Scheme};
+use crate::proxy::{ClientContext, PublicOrigin};
 
 /// `Permissions-Policy` has no constant in the `http` crate.
 const PERMISSIONS_POLICY: HeaderName = HeaderName::from_static("permissions-policy");
@@ -101,7 +101,7 @@ impl Default for ContentSecurityPolicy {
 pub fn apply_security_headers(
     headers: &mut HeaderMap,
     policy: &ContentSecurityPolicy,
-    scheme: Scheme,
+    client: ClientContext,
     configured: Option<&PublicOrigin>,
 ) {
     headers.insert(CONTENT_SECURITY_POLICY, policy.value().clone());
@@ -109,7 +109,7 @@ pub fn apply_security_headers(
     headers.insert(REFERRER_POLICY, NO_REFERRER);
     headers.insert(PERMISSIONS_POLICY, PERMISSIONS);
 
-    if emits_hsts(scheme, configured) {
+    if emits_hsts(client, configured) {
         headers.insert(STRICT_TRANSPORT_SECURITY, HSTS);
     } else {
         headers.remove(STRICT_TRANSPORT_SECURITY);
@@ -135,26 +135,62 @@ pub fn apply_security_headers(
 /// The scheme condition stays because it is the reverse mistake: sending HSTS
 /// over plaintext asks a browser to refuse the only scheme an operator on the
 /// LAN can currently reach the instance on.
-fn emits_hsts(scheme: Scheme, configured: Option<&PublicOrigin>) -> bool {
-    scheme.is_secure() && configured.is_some_and(PublicOrigin::is_secure)
+///
+/// There is a third condition, and it is the same argument applied to the
+/// answer `publicOrigin` itself produces. `ClientContext::at_configured_origin`
+/// reads a forwarded request as HTTPS when it arrived at the `https` address
+/// the operator declared *and no hop said anything about the scheme* — which is
+/// a real TLS proxy that omitted `X-Forwarded-Proto` and a proxy still
+/// listening on `:80`, wearing the same headers. Nothing can separate them, so
+/// the durable half is withheld from both: an inferred reading sets `Secure` on
+/// the cookie, which a plaintext browser discards and which comes back when the
+/// deployment is corrected, and never asks that browser to remember the name
+/// for a year.
+fn emits_hsts(client: ClientContext, configured: Option<&PublicOrigin>) -> bool {
+    client.scheme.is_secure()
+        && !client.scheme_inferred
+        && configured.is_some_and(PublicOrigin::is_secure)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
+    use crate::proxy::Scheme;
+
     fn secure_origin() -> PublicOrigin {
         PublicOrigin::parse("https://afisharr.example").expect("a valid origin")
     }
 
+    /// A request the chain itself said arrived over `scheme`.
+    fn stated(scheme: Scheme) -> ClientContext {
+        ClientContext {
+            address: "203.0.113.9".parse().expect("a valid address"),
+            scheme,
+            scheme_inferred: false,
+        }
+    }
+
+    /// A request read as HTTPS from `publicOrigin` alone.
+    fn inferred() -> ClientContext {
+        ClientContext {
+            scheme_inferred: true,
+            ..stated(Scheme::Https)
+        }
+    }
+
     /// The header set for a deployment whose `publicOrigin` names HTTPS.
     fn applied(scheme: Scheme) -> HeaderMap {
+        applied_for(stated(scheme), Some(&secure_origin()))
+    }
+
+    fn applied_for(client: ClientContext, configured: Option<&PublicOrigin>) -> HeaderMap {
         let mut headers = HeaderMap::new();
         apply_security_headers(
             &mut headers,
             &ContentSecurityPolicy::default(),
-            scheme,
-            Some(&secure_origin()),
+            client,
+            configured,
         );
         headers
     }
@@ -223,29 +259,41 @@ mod tests {
         // header cannot say which of the two wrote it. Resting HSTS on that
         // alone lets a caller pin the whole registrable domain in the
         // operator's browser for a year, with no way to click through it.
-        let mut headers = HeaderMap::new();
-        apply_security_headers(
-            &mut headers,
-            &ContentSecurityPolicy::default(),
-            Scheme::Https,
-            None,
-        );
         assert!(
-            headers.get(STRICT_TRANSPORT_SECURITY).is_none(),
+            applied_for(stated(Scheme::Https), None)
+                .get(STRICT_TRANSPORT_SECURITY)
+                .is_none(),
             "an unconfigured instance must not emit HSTS on a claimed scheme"
         );
 
         let plaintext = PublicOrigin::parse("http://192.168.1.10:8484").expect("a valid origin");
-        let mut headers = HeaderMap::new();
-        apply_security_headers(
-            &mut headers,
-            &ContentSecurityPolicy::default(),
-            Scheme::Https,
-            Some(&plaintext),
+        assert!(
+            applied_for(stated(Scheme::Https), Some(&plaintext))
+                .get(STRICT_TRANSPORT_SECURITY)
+                .is_none(),
+            "an operator who configured a plaintext origin has not asked for HSTS"
+        );
+    }
+
+    #[test]
+    fn a_scheme_inferred_from_the_configured_origin_pins_nothing() {
+        // The deployment this closes: a proxy listening on `:80` that forwards
+        // `X-Forwarded-For` and sets no `X-Forwarded-Proto`, at the `https`
+        // name the operator configured. It is indistinguishable from a TLS
+        // proxy that omitted the header, so the reading stands for the cookie
+        // flag — discarded by the browser, and back the moment the proxy is
+        // corrected — and never for the year the browser would remember.
+        assert!(
+            applied_for(inferred(), Some(&secure_origin()))
+                .get(STRICT_TRANSPORT_SECURITY)
+                .is_none(),
+            "an inferred scheme must not pin the name for a year"
         );
         assert!(
-            headers.get(STRICT_TRANSPORT_SECURITY).is_none(),
-            "an operator who configured a plaintext origin has not asked for HSTS"
+            applied_for(stated(Scheme::Https), Some(&secure_origin()))
+                .get(STRICT_TRANSPORT_SECURITY)
+                .is_some(),
+            "a hop that stated https is still the case HSTS exists for"
         );
     }
 
@@ -254,8 +302,8 @@ mod tests {
         let mut headers = HeaderMap::new();
         let policy = ContentSecurityPolicy::default();
         let origin = secure_origin();
-        apply_security_headers(&mut headers, &policy, Scheme::Https, Some(&origin));
-        apply_security_headers(&mut headers, &policy, Scheme::Https, Some(&origin));
+        apply_security_headers(&mut headers, &policy, stated(Scheme::Https), Some(&origin));
+        apply_security_headers(&mut headers, &policy, stated(Scheme::Https), Some(&origin));
         assert_eq!(
             headers.get_all(CONTENT_SECURITY_POLICY).iter().count(),
             1,
@@ -268,8 +316,8 @@ mod tests {
         let mut headers = HeaderMap::new();
         let policy = ContentSecurityPolicy::default();
         let origin = secure_origin();
-        apply_security_headers(&mut headers, &policy, Scheme::Https, Some(&origin));
-        apply_security_headers(&mut headers, &policy, Scheme::Http, Some(&origin));
+        apply_security_headers(&mut headers, &policy, stated(Scheme::Https), Some(&origin));
+        apply_security_headers(&mut headers, &policy, stated(Scheme::Http), Some(&origin));
         assert!(headers.get(STRICT_TRANSPORT_SECURITY).is_none());
     }
 }

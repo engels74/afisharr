@@ -72,6 +72,47 @@ api.use({
 });
 
 /**
+ * Reads a refusal as the shape every route documents, whatever arrived.
+ *
+ * The middleware above covers one failure only: a `fetch` the browser rejected.
+ * A response that arrived and was refused takes a different path, and
+ * `openapi-fetch` hands its body back unnarrowed — it reads the body as text
+ * and parses it as JSON *if it can*, so a non-JSON refusal stays a bare string,
+ * and a refusal carrying no body at all — axum's own 405 for a method the route
+ * does not serve, and every 204 — arrives as `undefined`. Neither is a
+ * {@link Problem}, and every wrapper used to assert that it was.
+ *
+ * What the assertion cost is not a type-level complaint. Put the instance
+ * behind nginx or Cloudflare and restart the container mid-request: the proxy
+ * answers its own HTML 502 page, `problem.message` is `undefined`, and the
+ * operator is shown an alert box with a heading and nothing in it. The
+ * unguarded `problem.code` reads on the same values are worse — the session
+ * refresh and the setup form both dereference it before anything has narrowed
+ * it, so the shell waits on a skeleton that never resolves and the form clears
+ * `submitting` and then throws past the code that would have shown why.
+ *
+ * The synthesised refusal says the instance answered with something this
+ * interface could not read, which is the true account: the call was made, an
+ * answer came back, and nothing in it named a failure.
+ */
+export function asProblem(refusal: unknown): Problem {
+	return isProblem(refusal)
+		? refusal
+		: { code: 'upstream', message: t('api.unreadable') };
+}
+
+/** Whether a value carries the two fields every {@link Problem} declares. */
+function isProblem(value: unknown): value is Problem {
+	if (typeof value !== 'object' || value === null) {
+		return false;
+	}
+	const candidate = value as Partial<Problem>;
+	return (
+		typeof candidate.code === 'string' && typeof candidate.message === 'string'
+	);
+}
+
+/**
  * The cookie the API sets for the double-submit CSRF check.
  *
  * Readable by script on purpose: the check needs the page to echo it, and a

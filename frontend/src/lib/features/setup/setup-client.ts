@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2026 Afisharr contributors
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-import { api, csrfHeaders, type Problem } from '$lib/api/client';
+import { api, asProblem, csrfHeaders, type Problem } from '$lib/api/client';
 
 /** Where the wizard is, as the server derives it. */
 export interface SetupStatus {
@@ -52,7 +52,7 @@ export async function readStatus(): Promise<SetupResult<SetupStatus>> {
 	const { data, error } = await api.GET('/api/setup/status');
 	return data
 		? { outcome: 'ok', value: data as SetupStatus }
-		: { outcome: 'refused', problem: error as Problem };
+		: { outcome: 'refused', problem: asProblem(error) };
 }
 
 /**
@@ -65,7 +65,7 @@ export async function readClaimStatus(): Promise<SetupResult<ClaimStatus>> {
 	const { data, error } = await api.GET('/api/setup/claim');
 	return data
 		? { outcome: 'ok', value: data as ClaimStatus }
-		: { outcome: 'refused', problem: error as Problem };
+		: { outcome: 'refused', problem: asProblem(error) };
 }
 
 /** Claims the wizard with the token printed on the console. */
@@ -78,7 +78,7 @@ export async function claim(
 	});
 	return data
 		? { outcome: 'ok', value: data }
-		: { outcome: 'refused', problem: error as Problem };
+		: { outcome: 'refused', problem: asProblem(error) };
 }
 
 /** Claims the wizard with administrator credentials, once one exists. */
@@ -92,7 +92,7 @@ export async function recover(
 	});
 	return data
 		? { outcome: 'ok', value: data }
-		: { outcome: 'refused', problem: error as Problem };
+		: { outcome: 'refused', problem: asProblem(error) };
 }
 
 /** Creates the first-run administrator. */
@@ -106,7 +106,7 @@ export async function createAdmin(
 	});
 	return data
 		? { outcome: 'ok', value: data }
-		: { outcome: 'refused', problem: error as Problem };
+		: { outcome: 'refused', problem: asProblem(error) };
 }
 
 /**
@@ -124,5 +124,5 @@ export async function completeSetup(): Promise<SetupResult<SetupStatus>> {
 	});
 	return data
 		? { outcome: 'ok', value: data as SetupStatus }
-		: { outcome: 'refused', problem: error as Problem };
+		: { outcome: 'refused', problem: asProblem(error) };
 }

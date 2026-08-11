@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2026 Afisharr contributors
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-import { api, csrfHeaders, type Problem } from '$lib/api/client';
+import { api, asProblem, csrfHeaders, type Problem } from '$lib/api/client';
 
 /** The signed-in account. */
 export interface SignedIn {
@@ -27,7 +27,7 @@ export async function signIn(
 	});
 	return data
 		? { outcome: 'ok', value: data as SignedIn }
-		: { outcome: 'refused', problem: error as Problem };
+		: { outcome: 'refused', problem: asProblem(error) };
 }
 
 /** Signs out, revoking the session that made the request. */
@@ -40,7 +40,7 @@ export async function readSession(): Promise<AuthResult<SignedIn>> {
 	const { data, error } = await api.GET('/api/auth/session');
 	return data
 		? { outcome: 'ok', value: data as SignedIn }
-		: { outcome: 'refused', problem: error as Problem };
+		: { outcome: 'refused', problem: asProblem(error) };
 }
 
 /** A started Plex sign-in. */
@@ -72,7 +72,7 @@ export async function startPlexPin(
 	});
 	return data
 		? { outcome: 'ok', value: data as PinStarted }
-		: { outcome: 'refused', problem: error as Problem };
+		: { outcome: 'refused', problem: asProblem(error) };
 }
 
 /**
@@ -91,5 +91,5 @@ export async function pollPlexPin(id: string): Promise<AuthResult<PinState>> {
 	});
 	return data
 		? { outcome: 'ok', value: data as PinState }
-		: { outcome: 'refused', problem: error as Problem };
+		: { outcome: 'refused', problem: asProblem(error) };
 }

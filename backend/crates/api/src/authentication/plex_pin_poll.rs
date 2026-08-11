@@ -37,7 +37,7 @@ use crate::{
     },
     error::{AppError, AppResult, ErrorCode, Problem},
     proxy::ClientContext,
-    ratelimit::{Bucket, Decision},
+    ratelimit::Bucket,
     security::{PLEX_PIN_COOKIE, PLEX_PIN_COOKIE_PATH, expire},
     state::ApiState,
 };
@@ -226,21 +226,11 @@ pub(super) fn forget_attempt(jar: CookieJar, client: ClientContext) -> CookieJar
 
 /// Spends one provider attempt, or refuses.
 fn spend_provider_budget(state: &ApiState, client: ClientContext) -> AppResult<()> {
-    match state
-        .limiter()
-        .record(&Bucket::Provider, Some(client.address))
-    {
-        Decision::Allowed => Ok(()),
-        Decision::Refused {
-            retry_after_seconds,
-        } => Err(AppError::new(
-            Problem::new(
-                ErrorCode::RateLimited,
-                "Too many calls to Plex from this address. Try again shortly.",
-            )
-            .retry_after(retry_after_seconds),
-        )),
-    }
+    state.limiter().spend(
+        &Bucket::Provider,
+        Some(client.address),
+        "Too many calls to Plex from this address. Try again shortly.",
+    )
 }
 
 pub(super) async fn close(

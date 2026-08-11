@@ -5,9 +5,7 @@
 
 use std::sync::{Arc, atomic::AtomicBool, atomic::Ordering};
 
-use afisharr_core::{
-    filesystem::Root, secrets::SecretKey, setup::TokenStore, storage::Database, time::Clock,
-};
+use afisharr_core::{secrets::SecretKey, setup::TokenStore, storage::Database, time::Clock};
 use afisharr_plex::pin::PlexTvClient;
 
 use crate::{
@@ -54,7 +52,6 @@ struct Inner {
     limiter: RateLimiter,
     trusted_proxies: TrustedProxies,
     public_origin: Option<PublicOrigin>,
-    asset_roots: Vec<Root>,
     stream: StreamHub,
     assets: Arc<dyn AssetSource>,
     policy: ContentSecurityPolicy,
@@ -82,8 +79,6 @@ pub struct ApiStateParts {
     pub trusted_proxies: TrustedProxies,
     /// The origin operators reach this instance at, when one is configured.
     pub public_origin: Option<PublicOrigin>,
-    /// Roots the filesystem browser may walk.
-    pub asset_roots: Vec<Root>,
     /// The embedded interface.
     pub assets: Arc<dyn AssetSource>,
 }
@@ -109,7 +104,6 @@ impl ApiState {
                 limiter,
                 trusted_proxies: parts.trusted_proxies,
                 public_origin: parts.public_origin,
-                asset_roots: parts.asset_roots,
                 stream: StreamHub::new(),
                 assets: parts.assets,
                 policy,
@@ -173,12 +167,6 @@ impl ApiState {
     #[must_use]
     pub fn public_origin(&self) -> Option<&PublicOrigin> {
         self.inner.public_origin.as_ref()
-    }
-
-    /// The roots the filesystem browser may walk.
-    #[must_use]
-    pub fn asset_roots(&self) -> &[Root] {
-        &self.inner.asset_roots
     }
 
     /// The event stream.

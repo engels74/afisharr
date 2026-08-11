@@ -196,6 +196,17 @@ async fn migrate(
 /// these fields has to show which of them the environment is currently holding
 /// — the same obligation `logging` and `backup.retainedPreMigration` already
 /// carry (`configuration::load`).
+///
+/// `apply_deployment_environment` and not the whole override list, because "in
+/// memory" only held for the fields nothing writes back. [`ensure_instance`]
+/// UPSERTs `instance.timezone`, `instance.locale` and `instance.device_name`
+/// from this document into a persisted row on every start, so laying those
+/// three over the stored settings *was* the silent edit this promises not to
+/// make: an `AFISHARR_TIMEZONE=UTC` left in a compose template reverted the
+/// operator's saved zone at every restart, the engine's day-aligned operators
+/// then ran in it, and the settings page went on showing the value they chose.
+/// Those three seed a first start through `configuration::load` and are the
+/// operator's afterwards.
 async fn ensure_settings(
     database: &Database,
     configured: SettingsBody,
@@ -205,7 +216,7 @@ async fn ensure_settings(
         .await
         .context("reading settings")?
     {
-        crate::configuration::apply_environment(&mut stored.body)
+        crate::configuration::apply_deployment_environment(&mut stored.body)
             .context("applying the environment over the stored settings")?;
         return Ok(stored);
     }

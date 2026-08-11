@@ -24,7 +24,7 @@ use crate::{
     authentication::session::csrf_cookie,
     error::{AppError, AppResult, ErrorCode, Problem},
     proxy::ClientContext,
-    ratelimit::{Bucket, Decision},
+    ratelimit::Bucket,
     security::{CSRF_COOKIE, set},
     state::ApiState,
 };
@@ -89,21 +89,11 @@ pub(super) async fn grant(
 }
 
 pub(super) fn spend_attempt(state: &ApiState, client: ClientContext) -> AppResult<()> {
-    match state
-        .limiter()
-        .record(&Bucket::SetupAttempt, Some(client.address))
-    {
-        Decision::Allowed => Ok(()),
-        Decision::Refused {
-            retry_after_seconds,
-        } => Err(AppError::new(
-            Problem::new(
-                ErrorCode::RateLimited,
-                "Too many setup attempts from this address. Try again later.",
-            )
-            .retry_after(retry_after_seconds),
-        )),
-    }
+    state.limiter().spend(
+        &Bucket::SetupAttempt,
+        Some(client.address),
+        "Too many setup attempts from this address. Try again later.",
+    )
 }
 
 /// Refuses when `bucket` is already spent, without spending it again.
@@ -112,18 +102,11 @@ pub(super) fn refuse_if_limited(
     bucket: &Bucket,
     client: ClientContext,
 ) -> AppResult<()> {
-    match state.limiter().check(bucket, Some(client.address)) {
-        Decision::Allowed => Ok(()),
-        Decision::Refused {
-            retry_after_seconds,
-        } => Err(AppError::new(
-            Problem::new(
-                ErrorCode::RateLimited,
-                "Too many attempts against that account. Try again later.",
-            )
-            .retry_after(retry_after_seconds),
-        )),
-    }
+    state.limiter().refuse_if_spent(
+        bucket,
+        Some(client.address),
+        "Too many attempts against that account. Try again later.",
+    )
 }
 
 /// A fresh, unguessable cookie value for a new claim.

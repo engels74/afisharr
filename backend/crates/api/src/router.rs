@@ -118,11 +118,31 @@ fn setup_routes(state: &ApiState) -> Router<ApiState> {
 /// The refusal is a layer over the whole group rather than a check inside each
 /// handler: an unconfigured instance grants nothing, and a route added later
 /// inherits that without anybody remembering to (`I-SEC-8`).
+///
+/// Two groups under that one gate, and the split is the rate limit's rather
+/// than the setup gate's: [`anonymous_rate_limit`]'s waiver is only sound over
+/// routes that construct [`crate::authentication::Authenticated`], and the
+/// sign-in routes construct none.
 fn protected_routes(state: &ApiState) -> Router<ApiState> {
     Router::new()
+        .merge(sign_in_routes(state))
+        .merge(guarded_routes(state))
+        .layer(from_fn_with_state(state.clone(), require_setup_completed))
+}
+
+/// The routes that hand a credential out rather than presenting one.
+///
+/// [`every_call_rate_limit`] and not [`anonymous_rate_limit`], for the reason
+/// [`setup_routes`] gives: no handler here takes
+/// [`crate::authentication::Authenticated`], so there is no guard behind the
+/// waiver to keep its promise. Each of the three also has an early return that
+/// reaches no bucket of its own — a body `JsonBody` refuses, a `forwardUrl`
+/// this instance will not stand behind, an attempt cookie that does not name
+/// the identifier in the path — so `Authorization: Bearer x` was answered as
+/// fast as the instance accepts connections while every counter read zero.
+fn sign_in_routes(state: &ApiState) -> Router<ApiState> {
+    Router::new()
         .route("/auth/login", post(authentication::log_in))
-        .route("/auth/logout", post(authentication::log_out))
-        .route("/auth/session", get(authentication::whoami))
         .route("/auth/plex/pin", post(authentication::start_plex_pin))
         // `post`, not `get`: completing a pin consumes the attempt, stores a
         // token, and sets a session cookie. A `GET` is what a cross-site
@@ -130,6 +150,19 @@ fn protected_routes(state: &ApiState) -> Router<ApiState> {
         // every safe method — so a read-shaped route here is a login state
         // change with no protection over it.
         .route("/auth/plex/pin/{id}", post(authentication::poll_plex_pin))
+        .layer(from_fn_with_state(state.clone(), every_call_rate_limit))
+}
+
+/// The routes a credential guard stands behind.
+///
+/// Every handler here takes [`crate::authentication::Authenticated`] or
+/// [`crate::authentication::Administrator`], which is what makes
+/// [`anonymous_rate_limit`]'s waiver sound: a credentialled request is counted
+/// by the extractor that judges it, and one presenting none is counted here.
+fn guarded_routes(state: &ApiState) -> Router<ApiState> {
+    Router::new()
+        .route("/auth/logout", post(authentication::log_out))
+        .route("/auth/session", get(authentication::whoami))
         .route("/files", get(files::browse))
         .route("/files/roots", get(files::roots))
         .route("/settings/password", post(authentication::change_password))
@@ -141,13 +174,10 @@ fn protected_routes(state: &ApiState) -> Router<ApiState> {
         .route("/settings/api-keys", get(keys::list).post(keys::create))
         .route("/settings/api-keys/{id}", delete(keys::revoke))
         .route("/stream", get(stream::stream))
-        // Read outside-in: setup first, so an unconfigured instance refuses
-        // before it spends anybody's budget, then the anonymous limit over
-        // everything that survives. The limit is a layer and not a per-handler
-        // call for the same reason the setup gate is — a route added later
-        // inherits it without anybody remembering to (PRD §21.4.3).
+        // The limit is a layer and not a per-handler call for the same reason
+        // the setup gate is — a route added later inherits it without anybody
+        // remembering to (PRD §21.4.3).
         .layer(from_fn_with_state(state.clone(), anonymous_rate_limit))
-        .layer(from_fn_with_state(state.clone(), require_setup_completed))
 }
 
 /// Counts a call that carries no credential against its address's budget.
@@ -169,7 +199,8 @@ fn protected_routes(state: &ApiState) -> Router<ApiState> {
 /// The waiver is only sound where that other half actually runs. A group whose
 /// routes take no [`crate::authentication::Authenticated`] must use
 /// [`every_call_rate_limit`], or a header is all it takes to opt out of the
-/// limit.
+/// limit. [`guarded_routes`] is the one group this belongs over; a route added
+/// to it that takes no credential guard belongs in [`sign_in_routes`] instead.
 async fn anonymous_rate_limit(
     State(state): State<ApiState>,
     request: Request<Body>,
@@ -185,11 +216,13 @@ async fn anonymous_rate_limit(
 /// Counts every call in a group against its address's budget, credential or not.
 ///
 /// [`anonymous_rate_limit`] with the waiver removed, for the groups that have
-/// nothing to waive it to. `setup_routes` is the one: its handlers take a
-/// `CookieJar` and a `ClientContext` and never the credential guard, so the
-/// promise "a request that presents a credential is counted by the guard that
-/// judges it" has no keeper there, and an unauthenticated caller who sent an
-/// invented `Authorization` header was counted by nothing at all.
+/// nothing to waive it to. There are two: [`setup_routes`], whose handlers take
+/// a `CookieJar` and a `ClientContext` and never the credential guard, and
+/// [`sign_in_routes`], whose handlers are how a caller obtains a credential in
+/// the first place. In both, the promise "a request that presents a credential
+/// is counted by the guard that judges it" has no keeper, and an
+/// unauthenticated caller who sent an invented `Authorization` header was
+/// counted by nothing at all.
 ///
 /// A credential is not a thing this group has any use for, so counting one
 /// against its address costs a real caller nothing: the operator claiming their
@@ -271,7 +304,7 @@ async fn envelope(
     security::apply_security_headers(
         response.headers_mut(),
         state.policy(),
-        client.scheme,
+        client,
         state.public_origin(),
     );
     response
@@ -329,9 +362,10 @@ async fn csrf(
 /// documentation gap: the interface is written against the contract, so the
 /// case simply goes unhandled, and `contract-check` stays green while it does,
 /// because it checks the client against the annotations and never the
-/// annotations against the router. Every route in `protected_routes` therefore
-/// declares this 403 and the 429 from [`anonymous_rate_limit`], and a route
-/// added to the group owes both.
+/// annotations against the router. Every route in [`protected_routes`]
+/// therefore declares this 403 and the 429 its group's rate limit produces —
+/// [`anonymous_rate_limit`] for [`guarded_routes`], [`every_call_rate_limit`]
+/// for [`sign_in_routes`] — and a route added to either owes both.
 async fn require_setup_completed(
     State(state): State<ApiState>,
     request: Request<Body>,

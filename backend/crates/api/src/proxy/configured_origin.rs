@@ -64,6 +64,18 @@ impl ClientContext {
     /// upstream's own name — `proxy_pass` with no `proxy_set_header Host` —
     /// leaves nothing here to match, and that instance still has to name its
     /// proxy in `trustProxy` for the forwarded scheme to be honoured at all.
+    ///
+    /// The reading it produces is marked as inferred, and that mark is what
+    /// bounds the second case above. A hop that forwards the address and says
+    /// nothing about the scheme is genuinely indistinguishable from a proxy
+    /// that terminates plaintext at the same name — `publicOrigin` is the
+    /// operator's statement, not the hop's, and an operator whose proxy still
+    /// listens on `:80` has made a statement their deployment does not keep. On
+    /// that instance the `Secure` cookie is discarded by the browser, which is
+    /// a broken sign-in that comes back the moment the proxy is fixed. HSTS is
+    /// not: it pins the name and every subdomain for a year with nothing to
+    /// click through. So an inferred reading carries the cookie flag and never
+    /// the header (`security::headers::emits_hsts`).
     #[must_use]
     pub fn at_configured_origin(
         mut self,
@@ -82,6 +94,7 @@ impl ClientContext {
             .is_some_and(|host| origin.matches_host(host));
         if arrived_at_it {
             self.scheme = Scheme::Https;
+            self.scheme_inferred = !claims_https(headers);
         }
         self
     }
@@ -100,6 +113,17 @@ fn claims_plaintext(headers: &HeaderMap) -> bool {
     edge::entries(headers, FORWARDED_PROTO)
         .last()
         .is_some_and(|claimed| !claimed.eq_ignore_ascii_case("https"))
+}
+
+/// Whether the nearest hop states it served the client over TLS.
+///
+/// The other side of [`claims_plaintext`], and not its negation: absent is
+/// neither. This is what separates a reading the chain vouched for from one
+/// resting on `publicOrigin` alone.
+fn claims_https(headers: &HeaderMap) -> bool {
+    edge::entries(headers, FORWARDED_PROTO)
+        .last()
+        .is_some_and(|claimed| claimed.eq_ignore_ascii_case("https"))
 }
 
 #[cfg(test)]
@@ -126,6 +150,10 @@ mod tests {
     /// The stock deployment this whole upgrade exists for: TLS terminates at a
     /// proxy, and `trustProxy` is empty, so nothing forwarded is honoured.
     fn resolved_at(entries: &[(&'static str, &str)], configured: &str) -> Scheme {
+        context_at(entries, configured).scheme
+    }
+
+    fn context_at(entries: &[(&'static str, &str)], configured: &str) -> ClientContext {
         let origin = PublicOrigin::parse(configured).expect("a valid origin");
         ClientContext::resolve(
             peer("10.0.0.5"),
@@ -133,7 +161,6 @@ mod tests {
             &TrustedProxies::default(),
         )
         .at_configured_origin(&headers(entries), Some(&origin))
-        .scheme
     }
 
     #[test]
@@ -214,6 +241,34 @@ mod tests {
                 "{entries:?}"
             );
         }
+    }
+
+    #[test]
+    fn a_reading_that_rests_on_the_origin_alone_is_marked_as_inferred() {
+        // A hop that forwards the address and says nothing about the scheme is
+        // a TLS proxy missing `proxy_set_header X-Forwarded-Proto` and a proxy
+        // still listening on `:80`, wearing the same headers. The mark is what
+        // keeps `Strict-Transport-Security` — the one effect a browser holds
+        // for a year — off the second one.
+        let inferred = context_at(
+            &[("host", "media.example"), (FORWARDED_FOR, "1.2.3.4")],
+            "https://media.example",
+        );
+        assert_eq!(inferred.scheme, Scheme::Https);
+        assert!(inferred.scheme_inferred);
+
+        // The hop stated it, so the chain vouched for the reading and nothing
+        // is being inferred from the operator's statement.
+        let stated = context_at(
+            &[
+                ("host", "media.example"),
+                (FORWARDED_FOR, "1.2.3.4"),
+                (FORWARDED_PROTO, "https"),
+            ],
+            "https://media.example",
+        );
+        assert_eq!(stated.scheme, Scheme::Https);
+        assert!(!stated.scheme_inferred);
     }
 
     #[test]

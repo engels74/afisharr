@@ -11,7 +11,6 @@ use afisharr_api::{
     state::{ApiState, ApiStateParts, InstanceIdentity},
 };
 use afisharr_core::{
-    filesystem::enabled_roots,
     locale::LocaleTag,
     setup::TokenStore,
     time::{Clock, SystemClock},
@@ -36,8 +35,7 @@ fn user_agent(version: &str) -> String {
 /// # Errors
 /// Returns an error when the configured `trustProxy` list holds an entry that
 /// is not an address or a range, when the instance's own values cannot be sent
-/// as HTTP headers, when the outbound transport cannot be constructed, or when
-/// the enabled asset roots cannot be read.
+/// as HTTP headers, or when the outbound transport cannot be constructed.
 pub async fn build_state(booted: &Booted, bootstrap: Arc<TokenStore>) -> Result<ApiState> {
     build_state_against(booted, bootstrap, None).await
 }
@@ -89,12 +87,11 @@ pub async fn build_state_against(
 
     let assets: Arc<dyn AssetSource> = Arc::new(EmbeddedInterface);
 
-    // Read from `asset_roots` rather than from a constant: the operator adds
-    // roots from the interface, and a browser whose list came from anywhere
-    // else would reach somewhere they did not allow.
-    let asset_roots = enabled_roots(booted.database.readers())
-        .await
-        .context("reading the enabled asset roots")?;
+    // The enabled asset roots are not read here. They come from `asset_roots`
+    // — the operator adds and removes them from the interface — so a list taken
+    // once at boot goes stale the moment they do, and a stale list refused a
+    // root the database said was enabled while going on offering one they had
+    // just disabled. `files::browse` reads the table per call instead.
 
     Ok(ApiState::new(ApiStateParts {
         database: Arc::clone(&booted.database),
@@ -114,7 +111,6 @@ pub async fn build_state_against(
         },
         trusted_proxies,
         public_origin,
-        asset_roots,
         assets,
     }))
 }

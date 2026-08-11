@@ -21,6 +21,8 @@ export const en = {
 
 	'api.unreachable':
 		'Afisharr did not answer. It may be restarting, or the connection to it is down.',
+	'api.unreadable':
+		'Something answered for Afisharr, and this page could not read what it said. A proxy in front of the instance may be answering in its place.',
 
 	'landing.unreachable':
 		'Until this instance answers, Afisharr cannot tell whether it has been set up, so it will not guess where to send you.',

@@ -42,7 +42,9 @@ impl Edge {
     /// An entry that is not an address at all ends the walk with nothing — the
     /// chain cannot be shown to be trusted past a value that cannot be
     /// compared, and the peer's own address, with the peer's own hop, is the
-    /// safe answer (P2).
+    /// safe answer (P2). A walk that reaches the left end without finding an
+    /// untrusted entry ends the same way, and for the same reason: it has not
+    /// found a client, and the leftmost entry is whatever the caller prepended.
     pub(super) fn resolve(headers: &HeaderMap, trusted: &TrustedProxies) -> Self {
         let chain = entries(headers, FORWARDED_FOR);
         let unprovable = Self {
@@ -55,7 +57,6 @@ impl Edge {
             return unprovable;
         }
 
-        let mut leftmost = None;
         for (index, entry) in chain.iter().enumerate().rev() {
             let Some(address) = parse_entry(entry) else {
                 return unprovable;
@@ -69,15 +70,27 @@ impl Edge {
                     hops: chain.len() - index,
                 };
             }
-            leftmost = Some(address);
         }
-        // Every hop in the chain is a proxy this instance trusts, so the
-        // leftmost of them is as close to the client as the header goes, and
-        // the whole chain was written by the edge.
-        Self {
-            address: leftmost,
-            hops: chain.len(),
-        }
+        // Every entry is a trusted address and the walk found no client, which
+        // is not the same as the leftmost entry *being* the client. Returning
+        // it was the hole: a caller inside the trusted range — a second
+        // container on the same bridge network, a sidecar, the proxy host —
+        // prepends `X-Forwarded-For: 10.1.2.3`, the edge appends the trusted
+        // address it saw, and every entry passes. That caller then picks the
+        // address every limit is counted against, so rotating one octet buys a
+        // fresh `Bucket::Anonymous` counter per request and the anonymous
+        // allowance bounds nothing at all, while `sessions.ip` and every audit
+        // line record a value the caller chose (`I-SEC-1`).
+        //
+        // Nothing here can separate that from an operator whose client LAN is
+        // itself inside `trustProxy`, so the answer is the same one an entry
+        // that will not parse gets: the chain is not provable, and the peer's
+        // own address is the safe reading (P2). The cost is stated rather than
+        // hidden — an operator who trusts a whole `/8` because their proxy
+        // lives in it has every client behind that proxy counted as one, which
+        // is the state an instance with no `trustProxy` at all is already in,
+        // and the fix is to name the proxy rather than the range it sits in.
+        unprovable
     }
 
     /// The scheme the client-facing hop of the trusted chain observed.

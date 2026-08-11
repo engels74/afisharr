@@ -59,12 +59,17 @@ pub fn load(config_file: &Path) -> Result<SettingsBody> {
 /// reintroduce the partial, unvalidated writes that PRD §19.5 rejects a
 /// key-value settings table for.
 ///
-/// Called twice over a start, and the second call is what makes these variables
-/// mean anything after the first boot: once by [`load`] to build the document a
-/// first start seeds `settings` with, and once by `startup::sequence` over the
-/// stored row. Only fields whose variable is actually set are touched, so the
-/// same function does both jobs and there is no second list of names to keep in
-/// step (P7).
+/// Called by [`load`] alone, and therefore only over the document a *first*
+/// start seeds `settings` with. The three instance fields it adds to
+/// [`apply_deployment_environment`] are seeds and not standing statements:
+/// `startup::sequence` writes `instance.timezone`, `instance.locale` and
+/// `instance.device_name` into a persisted row on every start, so re-applying
+/// them over the stored settings turned a compose variable into a silent edit
+/// of the operator's saved document — an `AFISHARR_TIMEZONE=UTC` left in a
+/// template reverted their saved `Europe/Copenhagen` at every restart, and the
+/// instance renamed itself in their plex.tv device list while it was there.
+/// After the first start those fields are the operator's, and they change them
+/// where they can see them.
 ///
 /// # Errors
 /// Returns an error naming the variable when it is set to nothing, to something
@@ -79,6 +84,28 @@ pub fn apply_environment(body: &mut SettingsBody) -> Result<()> {
     if let Some(value) = override_value("DEVICE_NAME")? {
         body.instance.device_name = value;
     }
+    apply_deployment_environment(body)
+}
+
+/// The overrides that describe how *this* deployment is reached.
+///
+/// The subset `startup::sequence` lays back over the stored row on every start,
+/// and the reason the two functions are not one: these four say where the
+/// container is and how it is fronted, which is not something a row written the
+/// day it first booted can know, and none of them is written back anywhere. An
+/// operator states them in their compose file on every single start, so an
+/// instance that returned the row verbatim made `AFISHARR_PUBLIC_ORIGIN` dead
+/// on every instance that had started once.
+///
+/// `logging.level` rides with them because it is read the same way — before the
+/// database is open — and is likewise never persisted.
+///
+/// A settings surface offering any of these fields has to show which of them
+/// the environment is currently holding.
+///
+/// # Errors
+/// As [`apply_environment`].
+pub fn apply_deployment_environment(body: &mut SettingsBody) -> Result<()> {
     if let Some(value) = override_value("BIND_ADDRESS")? {
         body.http.bind_address = value;
     }

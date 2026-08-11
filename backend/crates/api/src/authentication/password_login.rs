@@ -23,7 +23,7 @@ use crate::{
     authentication::{Authenticated, session},
     error::{AppError, AppResult, ErrorCode, JsonBody, Problem},
     proxy::ClientContext,
-    ratelimit::{Bucket, Decision},
+    ratelimit::Bucket,
     state::ApiState,
 };
 
@@ -239,18 +239,11 @@ async fn verify(user: Option<&User>, password: String) -> AppResult<bool> {
 }
 
 fn refuse_if_limited(state: &ApiState, bucket: &Bucket, client: ClientContext) -> AppResult<()> {
-    match state.limiter().check(bucket, Some(client.address)) {
-        Decision::Allowed => Ok(()),
-        Decision::Refused {
-            retry_after_seconds,
-        } => Err(AppError::new(
-            Problem::new(
-                ErrorCode::RateLimited,
-                "Too many sign-in attempts. Try again later.",
-            )
-            .retry_after(retry_after_seconds),
-        )),
-    }
+    state.limiter().refuse_if_spent(
+        bucket,
+        Some(client.address),
+        "Too many sign-in attempts. Try again later.",
+    )
 }
 
 fn record_failure(state: &ApiState, bucket: &Bucket, client: ClientContext) {

@@ -19,6 +19,27 @@ use crate::{bootstrap::print_setup_banner, configuration::DataPaths, interface, 
 pub async fn run(paths: &DataPaths, configured: SettingsBody) -> Result<()> {
     let booted = startup::boot(paths, configured).await?;
 
+    // Everything after the database is open runs inside `serve`, and its
+    // outcome is held rather than propagated, because the close below has to
+    // happen on the failing paths too. Three of the steps in there are fallible
+    // — the state the configuration is judged in, the listener, and the server
+    // itself — and the port being held by the container that has not finished
+    // stopping is the failure `serve` names as almost always the cause. Each of
+    // those returned before the close, so the read pool was dropped and the
+    // write actor's queued commands went with it, leaving the WAL
+    // uncheckpointed for the next start to replay.
+    let outcome = serve_until_stopped(&booted).await;
+
+    info!("shutting down");
+    booted.database.close().await;
+    outcome
+}
+
+/// Serves until the process is asked to stop.
+///
+/// Split from [`run`] so that every way out of it — including the ones that
+/// never reach the server — passes through one close.
+async fn serve_until_stopped(booted: &startup::Booted) -> Result<()> {
     // The token exists only while setup is incomplete, and minting it here —
     // once, on the start that prints it — is what makes a restart invalidate
     // the previous one (PRD §19.6.1).
@@ -35,16 +56,12 @@ pub async fn run(paths: &DataPaths, configured: SettingsBody) -> Result<()> {
         );
     }
 
-    let state = server::build_state(&booted, Arc::clone(&bootstrap)).await?;
+    let state = server::build_state(booted, Arc::clone(&bootstrap)).await?;
     let http = &booted.settings.body.http;
     let serving = server::serve(&http.bind_address, http.port).await?;
     info!(address = %serving.address, "afisharr is listening");
 
-    serving.run(state, shutdown_signal()).await?;
-
-    info!("shutting down");
-    booted.database.close().await;
-    Ok(())
+    serving.run(state, shutdown_signal()).await
 }
 
 /// Completes when the process is asked to stop.

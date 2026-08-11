@@ -109,18 +109,32 @@ impl Database {
 
     /// Closes both halves, waiting for the write actor to finish its queue.
     ///
-    /// Idempotent: a second call finds the task already taken and returns.
+    /// Takes `&self` and not `self`, because the database is shared through an
+    /// `Arc` — the HTTP surface holds one and so does the boot sequence — and
+    /// no holder can consume what the others still reference. That gives up a
+    /// guarantee the old signature made for free: with `self`, "a query after
+    /// close" was unrepresentable. Here it is a rule instead, and the rule is
+    /// that the server drains first. `cli::start` is the one place that keeps
+    /// it — `serving.run` returns only once every in-flight request has
+    /// finished, and nothing calls this before then. A call made while requests
+    /// are still running answers them `PoolClosed`, which the operator reads as
+    /// a 500 on their last request before the container stops.
+    ///
+    /// Take-once rather than merely harmless to repeat: the first caller takes
+    /// the write actor's handle and does the work, and a second returns without
+    /// closing a pool the first is still draining.
     pub async fn close(&self) {
-        self.readers.close().await;
-        self.writer.shutdown().await;
         let task = self
             .writer_task
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .take();
-        if let Some(task) = task {
-            drop(task.await);
-        }
+        let Some(task) = task else {
+            return;
+        };
+        self.readers.close().await;
+        self.writer.shutdown().await;
+        drop(task.await);
     }
 }
 

@@ -52,6 +52,17 @@ pub struct ClientContext {
     pub address: IpAddr,
     /// Whether the request arrived over TLS.
     pub scheme: Scheme,
+    /// Whether that scheme rests on the operator's `publicOrigin` alone.
+    ///
+    /// False for every scheme the chain itself stated, and true only where
+    /// [`ClientContext::at_configured_origin`] read a request as HTTPS that no
+    /// hop said anything about. The two are not interchangeable, and the
+    /// difference decides `Strict-Transport-Security`: a `Secure` cookie set on
+    /// a wrong reading is discarded by the browser and corrects itself the
+    /// moment the deployment is fixed, while HSTS is remembered for a year and
+    /// cannot be clicked through. So the inferred reading sets the cookie flag
+    /// and never the header (`security::headers`).
+    pub scheme_inferred: bool,
 }
 
 impl ClientContext {
@@ -68,6 +79,7 @@ impl ClientContext {
             return Self {
                 address: peer_address,
                 scheme: Scheme::Http,
+                scheme_inferred: false,
             };
         }
 
@@ -79,6 +91,7 @@ impl ClientContext {
         Self {
             address: edge.address.unwrap_or(peer_address),
             scheme: edge.scheme(headers),
+            scheme_inferred: false,
         }
     }
 }
@@ -155,16 +168,63 @@ mod tests {
     }
 
     #[test]
-    fn a_chain_of_trusted_hops_falls_back_to_the_client_most_of_them() {
-        // Two proxies of the operator's own, and nothing beyond them: the
-        // leftmost is as close to the client as the header goes.
+    fn a_chain_of_nothing_but_trusted_hops_falls_back_to_the_peer() {
+        // The walk reached the left end without finding a client, which is not
+        // the same as the leftmost entry being one. A caller inside the trusted
+        // range prepends whatever it likes and every entry passes, so reading
+        // the leftmost hands it the address every limit is counted against.
         let trusted = TrustedProxies::parse(&["10.0.0.0/8"]).expect("parses");
         let context = ClientContext::resolve(
             peer("10.0.0.5"),
             &headers(&[(FORWARDED_FOR, "10.0.0.9, 10.0.0.5")]),
             &trusted,
         );
-        assert_eq!(context.address.to_string(), "10.0.0.9");
+        assert_eq!(context.address.to_string(), "10.0.0.5");
+    }
+
+    #[test]
+    fn a_caller_inside_the_trusted_range_cannot_choose_what_it_is_counted_as() {
+        // The containerised deployment this closes: `trustProxy` names the
+        // bridge network, so a second container on it is trusted, and the edge
+        // appends its address behind whatever it prepended. Rotating the
+        // prepended value bought a fresh rate-limit counter every request.
+        let trusted = TrustedProxies::parse(&["10.0.0.0/8"]).expect("parses");
+        let attributed: Vec<String> = (0..5)
+            .map(|n| {
+                ClientContext::resolve(
+                    peer("10.0.0.5"),
+                    &headers(&[(FORWARDED_FOR, &format!("198.51.100.{n}, 10.0.0.9"))]),
+                    &trusted,
+                )
+                .address
+                .to_string()
+            })
+            .collect();
+        // 198.51.100.x is outside the trusted range, so the walk stops there
+        // and the value is the client the edge really saw.
+        assert_eq!(
+            attributed,
+            (0..5)
+                .map(|n| format!("198.51.100.{n}"))
+                .collect::<Vec<_>>()
+        );
+
+        let inside: Vec<String> = (0..5)
+            .map(|n| {
+                ClientContext::resolve(
+                    peer("10.0.0.5"),
+                    &headers(&[(FORWARDED_FOR, &format!("10.1.2.{n}, 10.0.0.9"))]),
+                    &trusted,
+                )
+                .address
+                .to_string()
+            })
+            .collect();
+        assert_eq!(
+            inside,
+            vec!["10.0.0.5"; 5],
+            "a prepended entry the trusted list happens to cover must not be believed"
+        );
     }
 
     #[test]

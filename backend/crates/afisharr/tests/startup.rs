@@ -400,6 +400,69 @@ async fn an_environment_override_is_honoured_on_every_start_and_not_only_the_fir
     );
 }
 
+/// A deployment variable may not edit what the operator saved.
+///
+/// The other half of the rule above, and the half that made the promise false.
+/// `ensure_settings` laid the *whole* override list back over the stored row,
+/// and three of those overrides are not deployment shape at all: `timezone`,
+/// `locale` and `device_name` are written into the persisted `instance` row by
+/// `ensure_instance` on every start. So an `AFISHARR_TIMEZONE=UTC` left in a
+/// compose template — a common default — reverted the operator's saved zone at
+/// every restart, the engine's day-aligned date operators then ran in it, and
+/// the settings page went on showing the value they had chosen. The same path
+/// renamed the instance in their plex.tv device list.
+///
+/// Driven through the real binary, because the claim is about what a restart
+/// with that variable still set actually leaves behind in the database.
+#[tokio::test]
+async fn an_environment_seed_does_not_revert_an_instance_field_the_operator_saved() {
+    let instance = TempInstance::new();
+
+    // The saved state: a first start seeds `settings` and `instance` with a
+    // zone that is not the default, standing in for the operator choosing one.
+    let mut saved = SettingsBody::default();
+    saved.instance.timezone = "Europe/Copenhagen".to_owned();
+    let booted = instance.boot_with(saved).await;
+    assert_eq!(booted.instance.timezone, "Europe/Copenhagen");
+    booted.database.close().await;
+
+    let port = free_port();
+    let mut child = std::process::Command::new(env!("CARGO_BIN_EXE_afisharr"))
+        .arg("start")
+        .env("AFISHARR_DATA_DIR", instance.paths().root())
+        .env("AFISHARR_BIND_ADDRESS", "127.0.0.1")
+        .env("AFISHARR_PORT", port.to_string())
+        .env("AFISHARR_TIMEZONE", "UTC")
+        .spawn()
+        .expect("the afisharr binary must start");
+
+    let answered = wait_for_health(port).await;
+
+    let _ = child.kill();
+    let _ = child.wait();
+    assert!(answered, "nothing answered on port {port}");
+
+    // Read out of the file rather than through another boot. A boot rewrites
+    // the `instance` row from the stored settings, so it would repair exactly
+    // the damage this is looking for and the assertion could never fail.
+    let opened = sqlx::SqlitePool::connect(&format!(
+        "sqlite://{}?mode=ro",
+        instance.paths().database().display()
+    ))
+    .await
+    .expect("the database must open");
+    let timezone: String = sqlx::query_scalar("SELECT timezone FROM instance WHERE id = 1")
+        .fetch_one(&opened)
+        .await
+        .expect("the instance row must exist");
+    opened.close().await;
+
+    assert_eq!(
+        timezone, "Europe/Copenhagen",
+        "a compose variable overwrote a persisted field the operator saved"
+    );
+}
+
 /// A port nothing is listening on, as far as the operating system knows.
 fn free_port() -> u16 {
     let listener =

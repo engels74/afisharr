@@ -226,6 +226,52 @@ async fn an_unauthenticated_flood_does_not_spend_the_operators_budget() {
 }
 
 #[tokio::test]
+async fn a_bearer_header_does_not_waive_the_limit_on_a_route_with_no_guard() {
+    // The remainder of the gap above, and the wider one. The anonymous layer
+    // steps aside for a request that presents a credential, on the promise that
+    // the guard behind it counts that request instead — and the sign-in routes
+    // have no guard, because they are how a caller *obtains* a credential.
+    //
+    // `POST /api/auth/plex/pin/{id}` is the sharpest case: it refuses at the
+    // attempt cookie, before the provider bucket it would otherwise spend, so
+    // under the waiver an unauthenticated caller looping it behind one invented
+    // header was counted by no bucket at all — answered as fast as the instance
+    // accepts connections, while every limiter read zero.
+    let instance = TempInstance::new();
+    let running = RunningInstance::start(&instance).await;
+    let _wizard = Wizard::set_up(&running, "operator", PASSWORD).await;
+
+    let stranger = client();
+    let mut bounded = false;
+    for n in 0..=ANONYMOUS_ALLOWANCE {
+        let response = stranger
+            .post(format!(
+                "{}/api/auth/plex/pin/00000000000000000000000000",
+                running.base_url
+            ))
+            .header("authorization", format!("Bearer invented-{n}"))
+            .send()
+            .await
+            .expect("the poll route must answer");
+        if response.status() == StatusCode::TOO_MANY_REQUESTS {
+            bounded = true;
+            break;
+        }
+        assert_eq!(
+            response.status(),
+            StatusCode::FORBIDDEN,
+            "attempt {n} should have been refused for its missing attempt cookie"
+        );
+    }
+    assert!(
+        bounded,
+        "a route that constructs no credential must be counted whatever header it is sent"
+    );
+
+    running.stop().await;
+}
+
+#[tokio::test]
 async fn an_invented_credential_is_bounded_rather_than_refused_for_ever() {
     // The gap left by counting anonymous traffic on "presents no credential":
     // a caller who attaches a junk bearer token presents one, so the layer

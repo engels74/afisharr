@@ -23,7 +23,9 @@ let transport: () => Promise<Response> = answering;
 // biome-ignore lint/suspicious/noExplicitAny: substituting a browser global
 (globalThis as any).fetch = () => transport();
 
-const { api, CSRF_HEADER, csrfHeaders, readCookie } = await import('./client');
+const { api, asProblem, CSRF_HEADER, csrfHeaders, readCookie } = await import(
+	'./client'
+);
 
 describe('reaching the instance', () => {
 	test('an answer is returned as data', async () => {
@@ -60,6 +62,68 @@ describe('reaching the instance', () => {
 
 		expect(data).toBeUndefined();
 		expect(error?.code).toBe('upstream');
+	});
+});
+
+describe('reading a refusal that is not the documented shape', () => {
+	/** What a proxy answers with when the instance behind it is down. */
+	const proxyPage = () =>
+		Promise.resolve(
+			new Response('<html><body><h1>502 Bad Gateway</h1></body></html>', {
+				status: 502,
+				headers: { 'content-type': 'text/html' },
+			}),
+		);
+
+	/** What axum answers with for a method a route does not serve. */
+	const bodiless = () => Promise.resolve(new Response(null, { status: 405 }));
+
+	test("a proxy's own HTML error page is read as a refusal with a sentence", async () => {
+		// The failure this closes. `openapi-fetch` reads the body as text and
+		// parses it as JSON only if it can, so this arrives as a bare string.
+		// Asserted to be a `Problem`, its `message` is `undefined`, and the
+		// operator is shown an alert box with a heading and nothing in it.
+		transport = proxyPage;
+
+		const { error } = await api.GET('/api/auth/session');
+		const problem = asProblem(error);
+
+		expect(typeof error).toBe('string');
+		expect(problem.code).toBe('upstream');
+		expect(problem.message.length).toBeGreaterThan(0);
+	});
+
+	test('a refusal carrying no body at all is read the same way', async () => {
+		// axum's own answer for a method a route does not serve. `openapi-fetch`
+		// hands back whatever reading the body produced — an empty string here,
+		// `undefined` where the runtime gives it nothing to read — and the
+		// unguarded `problem.code` reads behind this are what left the shell on
+		// a skeleton that never resolved.
+		transport = bodiless;
+
+		const { error } = await api.POST('/api/auth/logout');
+		const problem = asProblem(error);
+
+		expect(typeof error).not.toBe('object');
+		expect(problem.code).toBe('upstream');
+		expect(problem.message.length).toBeGreaterThan(0);
+	});
+
+	test('a refusal the API really sent is passed through unchanged', () => {
+		const refusal = {
+			code: 'unauthenticated' as const,
+			message: 'That username and password were not accepted.',
+		};
+
+		expect(asProblem(refusal)).toBe(refusal);
+	});
+
+	test('a JSON body that is not a problem is not mistaken for one', () => {
+		// Anything can answer on this origin. A shape with no `code` and no
+		// `message` narrows to nothing, and every caller narrows on `code`.
+		for (const value of [null, 42, [], {}, { code: 7 }, { message: 'x' }]) {
+			expect(asProblem(value).code).toBe('upstream');
+		}
 	});
 });
 

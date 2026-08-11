@@ -21,8 +21,8 @@ use crate::{
     authentication::session,
     error::{AppError, AppResult, ErrorCode, JsonBody, Problem},
     proxy::{ClientContext, PublicOrigin},
-    ratelimit::{Bucket, Decision},
-    security::{PLEX_PIN_COOKIE, PLEX_PIN_COOKIE_PATH, set},
+    ratelimit::Bucket,
+    security::{CSRF_COOKIE, PLEX_PIN_COOKIE, PLEX_PIN_COOKIE_PATH, set},
     state::ApiState,
 };
 
@@ -120,20 +120,11 @@ pub async fn start_plex_pin(
 
     // A pin creation reaches plex.tv on the caller's behalf, so it counts
     // against the provider bucket rather than the general API one (§21.4.3).
-    if let Decision::Refused {
-        retry_after_seconds,
-    } = state
-        .limiter()
-        .record(&Bucket::Provider, Some(client.address))
-    {
-        return Err(AppError::new(
-            Problem::new(
-                ErrorCode::RateLimited,
-                "Too many sign-in attempts against Plex. Try again shortly.",
-            )
-            .retry_after(retry_after_seconds),
-        ));
-    }
+    state.limiter().spend(
+        &Bucket::Provider,
+        Some(client.address),
+        "Too many sign-in attempts against Plex. Try again shortly.",
+    )?;
 
     let resource = state
         .plex()
@@ -179,16 +170,26 @@ pub async fn start_plex_pin(
     // is then shown a live code whose every poll answers that the sign-in was
     // started somewhere else. A second is enough to keep that shape impossible
     // here, whatever arrives from upstream.
-    let jar = jar
-        .add(set(
-            PLEX_PIN_COOKIE,
-            stored.id.clone(),
-            PLEX_PIN_COOKIE_PATH,
-            (now.millis_until(stored.expires_at) / 1000).max(1),
-            client.scheme,
-            true,
-        ))
-        .add(session::csrf_cookie(client.scheme));
+    //
+    // The CSRF token only when the browser does not already hold one, which is
+    // `claim_lease::grant`'s rule and holds for the same reason: minting a
+    // fresh value invalidates the one a form read a moment ago, so a submission
+    // already composed against it — an in-flight retry, or a submit queued
+    // while this answer was still on the wire — is refused for its missing
+    // cross-site token, which the operator sees as a sign-in that failed for no
+    // stated reason.
+    let mut jar = jar;
+    if jar.get(CSRF_COOKIE).is_none() {
+        jar = jar.add(session::csrf_cookie(client.scheme));
+    }
+    let jar = jar.add(set(
+        PLEX_PIN_COOKIE,
+        stored.id.clone(),
+        PLEX_PIN_COOKIE_PATH,
+        (now.millis_until(stored.expires_at) / 1000).max(1),
+        client.scheme,
+        true,
+    ));
 
     Ok((
         jar,

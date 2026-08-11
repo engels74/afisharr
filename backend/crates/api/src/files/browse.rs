@@ -10,7 +10,7 @@
 // free to drift, with nothing checking it (§24.5).
 #![allow(clippy::missing_errors_doc)]
 
-use afisharr_core::filesystem::{ContainmentError, Entry, EntryKind, list};
+use afisharr_core::filesystem::{ContainmentError, Entry, EntryKind, Root, enabled_roots, list};
 use axum::{Json, extract::State};
 use serde::{Deserialize, Serialize};
 use utoipa::{IntoParams, ToSchema};
@@ -99,17 +99,20 @@ pub struct DirectoryListing {
         (status = 429, description = "Too many requests", body = Problem),
     ),
 )]
-pub async fn roots(State(state): State<ApiState>, _caller: Administrator) -> Json<Vec<RootView>> {
-    Json(
-        state
-            .asset_roots()
-            .iter()
+pub async fn roots(
+    State(state): State<ApiState>,
+    _caller: Administrator,
+) -> AppResult<Json<Vec<RootView>>> {
+    Ok(Json(
+        enabled(&state)
+            .await?
+            .into_iter()
             .map(|root| RootView {
-                id: root.id.clone(),
-                label: root.label.clone(),
+                id: root.id,
+                label: root.label,
             })
             .collect(),
-    )
+    ))
 }
 
 /// Lists one directory inside one root.
@@ -134,9 +137,9 @@ pub async fn browse(
     _caller: Administrator,
     QueryParams(query): QueryParams<BrowseQuery>,
 ) -> AppResult<Json<DirectoryListing>> {
-    let root = state
-        .asset_roots()
-        .iter()
+    let root = enabled(&state)
+        .await?
+        .into_iter()
         .find(|root| root.id == query.root)
         .ok_or_else(|| {
             AppError::new(
@@ -148,13 +151,27 @@ pub async fn browse(
             )
         })?;
 
-    let entries = list(root, &query.path).await.map_err(refusal)?;
+    let entries = list(&root, &query.path).await.map_err(refusal)?;
 
     Ok(Json(DirectoryListing {
         root: query.root,
         path: query.path,
         entries: entries.into_iter().map(EntryView::from).collect(),
     }))
+}
+
+/// The roots the operator has enabled, read on every call.
+///
+/// From the table and never from a snapshot taken when the process started: the
+/// operator adds and removes roots from the interface, and a list fixed at boot
+/// answered `404 No such filesystem root is configured` for a root the database
+/// said was enabled, while going on offering one they had just disabled — until
+/// the container was restarted. Two reader-pool queries a browse is the price,
+/// and the browser is an administrator-only surface behind a rate limit.
+async fn enabled(state: &ApiState) -> AppResult<Vec<Root>> {
+    enabled_roots(state.database().readers())
+        .await
+        .map_err(AppError::internal)
 }
 
 /// Turns a containment refusal into the one shape this surface answers with.
