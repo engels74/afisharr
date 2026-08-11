@@ -19,8 +19,21 @@
 
 	let { onsignedin }: Props = $props();
 
-	/** How often to ask plex.tv whether the operator has finished. */
-	const POLL_INTERVAL_MS = 2000;
+	/**
+	 * How often to ask plex.tv whether the operator has finished.
+	 *
+	 * Chosen against the budget it spends, not against how fast a code can be
+	 * typed. Every poll reaches plex.tv, so every poll costs one of the sixty
+	 * provider attempts an address gets each minute — and `trustProxy` is empty
+	 * by default, so behind the reverse proxy nearly every deployment runs,
+	 * every caller resolves to the proxy's one address and shares that counter.
+	 * At two seconds a single panel spent thirty of the sixty, so two operators
+	 * signing in at once — or one operator with the page open in two tabs —
+	 * refused each other. At five it is twelve, which leaves room for five
+	 * concurrent sign-ins and still notices a finished exchange within a few
+	 * seconds of the operator finishing it (PRD §21.4.3).
+	 */
+	const POLL_INTERVAL_MS = 5000;
 
 	/**
 	 * Where an in-flight attempt is kept across the hosted sign-in.
@@ -131,18 +144,33 @@
 			inFlight = false;
 			if (result.outcome === 'refused') {
 				refusal = result.problem;
+				// A spent budget is not a dead attempt. The pin is still open
+				// at plex.tv and the operator may already have finished with
+				// it, so the timer keeps running and the next poll asks again
+				// once the window rolls over — a shared per-address counter
+				// makes this the refusal two concurrent sign-ins produce for
+				// each other, and throwing the attempt away over it cost both
+				// of them a code that was still good (`I-UX-2`).
+				if (result.problem.code === 'rateLimited') {
+					return;
+				}
 				clearInterval(timer);
 				// And the attempt goes with it. The timer is torn down here and
 				// nothing restarts it — `refusal` is not read by this effect —
 				// so leaving `started` set renders the "waiting for Plex"
 				// branch forever, with the start controls hidden in its
 				// `{:else}` and no control anywhere to try again. One transient
-				// refusal, a 502 from plex.tv or the provider limit, and the
-				// operator's only move is to reload the page (`I-UX-2`).
+				// refusal, a 502 from plex.tv, and the operator's only move is
+				// to reload the page (`I-UX-2`).
 				started = undefined;
 				sessionStorage.removeItem(RESUME_KEY);
 				return;
 			}
+			// The poll that got through clears the refusal the last one showed:
+			// a limit that has rolled over is not a fault still in force, and
+			// leaving the sentence up would have the operator reading an error
+			// beside a sign-in that is working.
+			refusal = undefined;
 			if (result.value.state === 'authorized') {
 				clearInterval(timer);
 				// The privilege the session actually carries, and never an

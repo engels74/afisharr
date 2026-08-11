@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: 2026 Afisharr contributors
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
+import type { Problem } from '$lib/api/client';
 import { readSession, type SignedIn } from './auth-client';
 
 /** What the interface knows about who is signed in. */
@@ -18,7 +19,23 @@ export type SessionState =
 	 * `instance.setup_completed_at` is `NULL` — the exact case a bookmarked
 	 * `/dashboard` on a freshly deployed container lands in.
 	 */
-	| { readonly kind: 'setupRequired' };
+	| { readonly kind: 'setupRequired' }
+	/**
+	 * The instance was asked and did not answer usefully.
+	 *
+	 * Not `unknown`, and not `signedOut`. `unknown` means nothing has been
+	 * asked yet, which the shell renders as a loading skeleton with no error
+	 * and no control on it — so recording a 500, a proxy's 502, a 429, or the
+	 * client's own `upstream` 503 as `unknown` left the operator on "Still
+	 * working…" for ever, with no navigation rendered to leave by and nothing
+	 * on screen to retry (`I-UX-2`). `signedOut` is worse: none of those says
+	 * anything about the cookie, and acting on them signs out an operator
+	 * mid-task over a container restart.
+	 *
+	 * The refusal is carried, because the sentence the instance sent is the
+	 * only true account of what happened.
+	 */
+	| { readonly kind: 'unreachable'; readonly problem: Problem };
 
 /**
  * Who is signed in, as one value the shell reads.
@@ -43,8 +60,12 @@ export interface Session {
 	/**
 	 * Asks the API who is signed in.
 	 *
-	 * Records an answer, and only an answer: a refused credential is a
-	 * sign-out, and every other failure leaves what is known where it was.
+	 * A refused credential is a sign-out; a setup gate is a setup gate. Any
+	 * other failure is recorded as `unreachable`, and only over a state that
+	 * knows nothing: a session already known to be signed in survives a fault,
+	 * because the cookie is not what failed, while a first ask that fails stops
+	 * leaving `unknown` behind — the one state the shell can neither render nor
+	 * leave.
 	 */
 	refresh(): Promise<void>;
 	/** Records a sign-in that just happened, without a second round trip. */
@@ -104,10 +125,26 @@ export function createSession(): Session {
 				// operator opening a bookmarked shell route on a container that
 				// has not been set up watched it wait for ever, with no
 				// redirect and no error (`I-UX-2`).
+				//
+				// Every remaining refusal is recorded too, but only over a state
+				// that knows nothing. The two cases are different failures:
+				//
+				// - Already signed in, and a background refresh hits a 500.
+				//   Keep it. The cookie is not what failed, and tearing the
+				//   shell down over a five-second restart takes an operator off
+				//   the page they were working on.
+				// - Nothing known, and the first ask fails. `unknown` is the
+				//   state the shell draws a skeleton for — no navigation, no
+				//   sign-in link, no retry — so leaving it standing turned one
+				//   502 into a wait with no end and nothing on screen to act on
+				//   (`I-UX-2`). `unreachable` carries the instance's own
+				//   sentence and the layout gives it a retry.
 				if (result.problem.code === 'unauthenticated') {
 					state = { kind: 'signedOut' };
 				} else if (result.problem.code === 'setupRequired') {
 					state = { kind: 'setupRequired' };
+				} else if (state.kind === 'unknown' || state.kind === 'unreachable') {
+					state = { kind: 'unreachable', problem: result.problem };
 				}
 			} finally {
 				inFlight -= 1;

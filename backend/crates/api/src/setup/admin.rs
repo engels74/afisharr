@@ -60,6 +60,7 @@ pub struct CreateAdmin {
         (status = 400, description = "The username or password was refused", body = Problem),
         (status = 403, description = "The claim on this wizard has expired", body = Problem),
         (status = 409, description = "An administrator already exists", body = Problem),
+        (status = 429, description = "Too many requests", body = Problem),
     ),
 )]
 pub async fn create_admin(

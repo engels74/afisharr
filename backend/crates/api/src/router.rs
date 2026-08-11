@@ -80,6 +80,24 @@ fn setup_routes(state: &ApiState) -> Router<ApiState> {
         .route("/setup/claim", get(setup::claim_status).post(setup::claim))
         .route("/setup/recover", post(setup::recover))
         .merge(gated)
+        // Read outside-in, exactly as `protected_routes` reads: the setup gate
+        // first, so a configured instance refuses before it spends anybody's
+        // budget, then the anonymous limit over everything that survives.
+        //
+        // Nothing in this group carries a credential — the claim is a cookie,
+        // and `GET /setup/claim` is answered before one exists — so without the
+        // limit here the whole surface a freshly deployed container leaves open
+        // was uncounted. Each of those calls runs two reader-pool queries, so a
+        // caller looping one path held the reader pool against the operator's
+        // own claim page and the instance could not be claimed at all
+        // (PRD §21.4.3).
+        //
+        // Every route in this group therefore declares the 429, for the reason
+        // spelled out on [`require_setup_completed`]: a layer answers on behalf
+        // of routes whose annotations are the sole contract the interface is
+        // written against, and an answer no annotation declares is one the
+        // interface simply does not handle.
+        .layer(from_fn_with_state(state.clone(), anonymous_rate_limit))
         .layer(from_fn_with_state(
             state.clone(),
             setup::require_setup_incomplete,
@@ -165,7 +183,28 @@ async fn anonymous_rate_limit(
 }
 
 /// The answer for a path under `/api` that no route claims.
-async fn unmatched_api_route() -> AppError {
+///
+/// It counts, and it has to count itself: a fallback sits under no route group,
+/// so neither `protected_routes`' limit nor `setup_routes`' reaches it, and an
+/// unmatched path was the one `/api` surface on every instance — configured or
+/// not — that answered without being counted at all. The rule is
+/// [`anonymous_rate_limit`]'s, applied by hand rather than restated: a request
+/// that presents a credential is counted by the guard that judges it, and
+/// everything else is counted here.
+async fn unmatched_api_route(
+    State(state): State<ApiState>,
+    client: ClientContext,
+    headers: HeaderMap,
+) -> AppError {
+    if !crate::authentication::presents_credential(&headers)
+        && let Decision::Refused {
+            retry_after_seconds,
+        } = state
+            .limiter()
+            .record(&Bucket::Anonymous, Some(client.address))
+    {
+        return crate::ratelimit::too_many_requests(retry_after_seconds);
+    }
     AppError::of(
         crate::error::ErrorCode::NotFound,
         "No such endpoint on this instance.",

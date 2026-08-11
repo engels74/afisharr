@@ -72,6 +72,7 @@ pub struct ClaimStatus {
     responses(
         (status = 200, description = "What the claim page renders", body = ClaimStatus),
         (status = 404, description = "Setup has already been completed", body = Problem),
+        (status = 429, description = "Too many requests", body = Problem),
     ),
 )]
 pub async fn claim_status(

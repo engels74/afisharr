@@ -112,8 +112,16 @@ export function landingFor(setupCompleted: boolean, signedIn: boolean): string {
  * - `waiting` — nothing has been answered yet, or the answer was "nobody" or
  *   "this instance is not set up" and the redirect is on its way.
  * - `notPermitted` — signed in, and not an administrator.
+ * - `unreachable` — the instance was asked and could not say. The one view
+ *   that is an error: `waiting` renders a skeleton with no control on it, and
+ *   a failure shown as a wait is a wait that never ends.
  */
-export type ShellView = 'bare' | 'shell' | 'waiting' | 'notPermitted';
+export type ShellView =
+	| 'bare'
+	| 'shell'
+	| 'waiting'
+	| 'notPermitted'
+	| 'unreachable';
 
 /**
  * What `state` is allowed to see, on a route that is `bare` or is not.
@@ -135,6 +143,13 @@ export function shellFor(bare: boolean, state: SessionState): ShellView {
 	}
 	if (state.kind === 'signedIn') {
 		return state.account.isAdmin ? 'shell' : 'notPermitted';
+	}
+	// A failure is not a wait. `waiting` is the skeleton, and the skeleton has
+	// no navigation, no sign-in link, and no retry on it — so an instance that
+	// answered 502 during a restart held the operator there until they thought
+	// to reload the page themselves (`I-UX-2`).
+	if (state.kind === 'unreachable') {
+		return 'unreachable';
 	}
 	return 'waiting';
 }

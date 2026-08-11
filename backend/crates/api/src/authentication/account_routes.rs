@@ -154,7 +154,7 @@ pub async fn change_password(
     // three writes are the rotation guarantee: a password that changed while
     // the identifiers it protected stayed valid has ended nothing, including
     // the theft the operator performed it to end (PRD §21.4.2).
-    let replacement = SessionToken::generate();
+    let replacement = replacement_for(&caller);
     let rotated = state
         .database()
         .writer()
@@ -163,7 +163,7 @@ pub async fn change_password(
             expected_hash: stored,
             password_hash: hashed,
             current_session: caller.session_digest().map(str::to_owned),
-            replacement_digest: replacement.digest().to_owned(),
+            replacement_digest: replacement.as_ref().map(|token| token.digest().to_owned()),
             user_agent: headers
                 .get(USER_AGENT)
                 .and_then(|value| value.to_str().ok())
@@ -199,8 +199,10 @@ pub async fn change_password(
     };
 
     let mut jar = jar;
-    for cookie in session::cookies_for(&replacement, client.scheme) {
-        jar = jar.add(cookie);
+    if let Some(replacement) = replacement.as_ref() {
+        for cookie in session::cookies_for(replacement, client.scheme) {
+            jar = jar.add(cookie);
+        }
     }
     Ok((
         jar,
@@ -211,6 +213,20 @@ pub async fn change_password(
             sessions_revoked: others_revoked,
         }),
     ))
+}
+
+/// The session to issue in place of the one this change revokes.
+///
+/// `None` for an API-key caller, and that is the point. Rotation replaces the
+/// credential the caller presented; a bearer key is not one of the credentials
+/// this change touches, so there is nothing to replace. Minting a session
+/// anyway wrote a 30-day administrator credential nobody asked for and returned
+/// its plaintext cookie in the body of an API call — into the response log of
+/// whatever script rotated the password, and into any proxy log along the way —
+/// leaving an orphan row that the sessions page shows as somebody else's device
+/// and that no operator has a reason to revoke (`I-SEC-8`).
+fn replacement_for(caller: &Authenticated) -> Option<SessionToken> {
+    caller.session_digest().map(|_| SessionToken::generate())
 }
 
 /// Lists the signed-in account's sessions.
@@ -327,6 +343,38 @@ mod tests {
     #[test]
     fn an_api_key_caller_marks_no_session_as_current() {
         assert!(!view(session("a"), None).is_current);
+    }
+
+    fn caller(credential: crate::authentication::Credential) -> Authenticated {
+        Authenticated {
+            user_id: "U".to_owned(),
+            is_admin: true,
+            credential,
+        }
+    }
+
+    #[test]
+    fn a_browser_gets_the_session_that_replaces_the_one_it_lost() {
+        let replacement = replacement_for(&caller(crate::authentication::Credential::Session {
+            digest: "d".to_owned(),
+        }));
+        assert!(
+            replacement.is_some(),
+            "the browser that asked is signed out by the rotation and must be signed back in"
+        );
+    }
+
+    #[test]
+    fn an_api_key_caller_is_handed_no_session_at_all() {
+        // The failure this closes: a script rotating the password over a bearer
+        // key was answered with `Set-Cookie: afisharr_session=<plaintext>`, so
+        // a 30-day administrator credential landed in its response log.
+        assert!(
+            replacement_for(&caller(crate::authentication::Credential::ApiKey {
+                id: "k".to_owned()
+            }))
+            .is_none()
+        );
     }
 
     #[test]

@@ -10,7 +10,7 @@
 	import { goto } from '$app/navigation';
 	import { page } from '$app/state';
 	import { api } from '$lib/api/client';
-	import { BlockedState, LoadingState } from '$lib/components/state';
+	import { BlockedState, ErrorState, LoadingState } from '$lib/components/state';
 	import { session, signOut } from '$lib/features/auth';
 	import {
 		isBareRoute,
@@ -42,6 +42,11 @@
 	 * admin-only, and so is the stream it opens.
 	 */
 	const view = $derived(shellFor(bare, session.state));
+
+	/** The instance's own account of why it could not say who is signed in. */
+	const unreachable = $derived(
+		session.state.kind === 'unreachable' ? session.state.problem : undefined,
+	);
 
 	const stream = new StreamConnection();
 
@@ -185,6 +190,23 @@
 				</button>
 			{/snippet}
 		</BlockedState>
+	</main>
+{:else if view === 'unreachable' && unreachable}
+	<!--
+		Asked, and the instance could not say. The retry is the whole point: the
+		skeleton below has no navigation on it and renders no children, so a
+		restart that answered 502 once left the operator with nothing on screen
+		to act on and no page to reach that would have offered one (`I-UX-2`).
+	-->
+	<main class="min-h-screen px-4 py-10">
+		<ErrorState
+			state={{
+				kind: 'error',
+				summary: unreachable.message,
+				consequence: t('auth.sessionUnreachable'),
+			}}
+			onretry={() => session.refresh()}
+		/>
 	</main>
 {:else}
 	<!--

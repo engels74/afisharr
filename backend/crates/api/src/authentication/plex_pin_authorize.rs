@@ -14,7 +14,6 @@ use axum_extra::extract::CookieJar;
 use crate::{
     authentication::{
         plex_pin_poll::{PinState, close, forget_attempt},
-        plex_pin_start::plex_failure,
         session,
     },
     error::{AppError, AppResult, ErrorCode},
@@ -24,6 +23,18 @@ use crate::{
 
 /// The secret the Plex server token is stored under.
 const PLEX_TOKEN_SECRET: &str = "plex.token";
+
+/// What a finished plex.tv exchange yielded, and whose it is.
+///
+/// One value because the two halves are one answer: the token is only ever
+/// used on behalf of the account that `/user` resolved it to, and passing them
+/// separately invites a call site that has one without the other.
+pub(super) struct PlexIdentity {
+    /// The token plex.tv issued for the completed pin.
+    pub token: String,
+    /// The account plex.tv says it belongs to.
+    pub account: PlexAccount,
+}
 
 /// Verifies whose token arrived, then mints the session.
 ///
@@ -36,20 +47,24 @@ const PLEX_TOKEN_SECRET: &str = "plex.token";
 /// Reached only by the request that claimed the attempt, so everything below
 /// happens once. The `close` calls record how it ended on a row that is already
 /// consumed.
+///
+/// `identity` is resolved by the caller, before the claim. Resolving it is the
+/// one step that reaches plex.tv, and a transient failure inside a consumed
+/// attempt is a completed sign-in the operator can never finish — so the call
+/// that can fail happens while the attempt is still open (see `plex_pin_poll`).
 pub(super) async fn authorize(
     state: &ApiState,
     attempt_id: &str,
-    auth_token: String,
+    identity: PlexIdentity,
     client: ClientContext,
     headers: &axum::http::HeaderMap,
     jar: CookieJar,
     now: Timestamp,
 ) -> AppResult<(CookieJar, Json<PinState>)> {
-    let account = state
-        .plex()
-        .account(&auth_token)
-        .await
-        .map_err(plex_failure)?;
+    let PlexIdentity {
+        token: auth_token,
+        account,
+    } = identity;
 
     let Some(user) = linked_account(state, &account).await? else {
         // Nothing is stored and no session is minted. The attempt is already

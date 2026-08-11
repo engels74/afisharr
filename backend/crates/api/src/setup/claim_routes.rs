@@ -1,7 +1,11 @@
 // SPDX-FileCopyrightText: 2026 Afisharr contributors
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-//! `POST /api/setup/claim` and `POST /api/setup/recover`.
+//! `POST /api/setup/claim`.
+//!
+//! The first door onto the claim: the token the container printed to its
+//! console, which is what proves console access (PRD §19.6.1). The second is
+//! `recover_routes`, and what either one opens is `claim_lease`.
 
 // Route handlers in this file document their failures in their
 // `#[utoipa::path(responses(...))]` block: that block is the contract the
@@ -10,24 +14,19 @@
 // free to drift, with nothing checking it (§24.5).
 #![allow(clippy::missing_errors_doc)]
 
-use afisharr_core::{
-    accounts::{self, User},
-    entropy,
-    setup::{CLAIM_COOKIE, CLAIM_TTL_MILLIS, ClaimOutcome, ClaimState, MintClaim, inspect},
-    time::Timestamp,
-};
+use afisharr_core::setup::{CLAIM_COOKIE, ClaimState, inspect};
 use axum::{Json, extract::State};
 use axum_extra::extract::CookieJar;
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 use utoipa::ToSchema;
 
 use crate::{
-    authentication::session::csrf_cookie,
     error::{AppError, AppResult, ErrorCode, JsonBody, Problem},
     proxy::ClientContext,
-    ratelimit::{Bucket, Decision},
-    security::{CSRF_COOKIE, set},
-    setup::events::record_step,
+    setup::{
+        claim_lease::{ClaimGranted, grant, held_elsewhere, mint_cookie_value, spend_attempt},
+        events::record_step,
+    },
     state::ApiState,
 };
 
@@ -37,24 +36,6 @@ use crate::{
 pub struct ClaimRequest {
     /// The three four-character segments, as printed.
     pub token: String,
-}
-
-/// The administrator credentials that recover an interrupted setup.
-#[derive(Debug, Deserialize, ToSchema)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub struct RecoverRequest {
-    /// The administrator's account name.
-    pub username: String,
-    /// The administrator's password.
-    pub password: String,
-}
-
-/// A claim now held by this browser.
-#[derive(Debug, Serialize, ToSchema)]
-#[serde(rename_all = "camelCase")]
-pub struct ClaimGranted {
-    /// When the hold lapses if nothing renews it, in epoch milliseconds.
-    pub expires_at: i64,
 }
 
 /// Takes the wizard for this browser, on the strength of the console token.
@@ -105,8 +86,12 @@ pub async fn claim(
     spend_attempt(&state, client)?;
 
     // 4. And only then the comparison, which is constant-time and does not
-    //    consume the token (PRD §19.6.1).
-    if !state.bootstrap().accepts(&request.token, now) {
+    //    consume the token (PRD §19.6.1). Normalised first: see
+    //    [`normalize_token`].
+    if !state
+        .bootstrap()
+        .accepts(&normalize_token(&request.token), now)
+    {
         return Err(token_refused());
     }
 
@@ -117,226 +102,24 @@ pub async fn claim(
     granted
 }
 
-/// Takes the wizard on administrator credentials, once an account exists.
+/// The token as the operator meant it, before it is compared.
 ///
-/// The recovery path (PRD §19.6.1): the token dies with the process, the
-/// account does not, so an interrupted setup survives a restart.
-#[utoipa::path(
-    post,
-    path = "/api/setup/recover",
-    tag = "setup",
-    request_body = RecoverRequest,
-    responses(
-        (status = 200, description = "The wizard is now held by this browser", body = ClaimGranted),
-        (status = 400, description = "The request body was not readable", body = Problem),
-        (status = 401, description = "The credentials were not accepted", body = Problem),
-        (status = 409, description = "Another browser holds the wizard", body = Problem),
-        (status = 429, description = "Too many attempts", body = Problem),
-    ),
-)]
-pub async fn recover(
-    State(state): State<ApiState>,
-    client: ClientContext,
-    jar: CookieJar,
-    JsonBody(request): JsonBody<RecoverRequest>,
-) -> AppResult<(CookieJar, Json<ClaimGranted>)> {
-    let now = state.clock().now();
-    // The caller's own cookie, exactly as `claim` reads it. Passing `None` here
-    // would classify a claim *this* browser holds as held by another and refuse
-    // it — which is the one case recovery exists for: the container restarted,
-    // so the console token died with the process, while the lease row and this
-    // browser's cookie both survived. Both doors would then be shut, and the
-    // operator would wait out a claim that is already theirs.
-    let existing = jar
-        .get(CLAIM_COOKIE)
-        .map(|cookie| cookie.value().to_owned());
-
-    let held = inspect(state.database().readers(), existing.as_deref(), now)
-        .await
-        .map_err(AppError::internal)?;
-    if let ClaimState::HeldByAnother { expires_at } = held {
-        return Err(held_elsewhere(now, expires_at));
-    }
-
-    // Two limits, because this route verifies an administrator's password and
-    // so is the sign-in route wearing another name. `SetupAttempt` is counted
-    // per address and carries no lockout, which is all a claim token needs —
-    // the token dies with the process. A password does not: an attacker who
-    // can vary their address gets the whole per-address allowance again from
-    // every address they can reach the instance from, and rotating addresses
-    // is a residential proxy away. `LoginAccount` is the bucket that does not
-    // move with them, and its escalating lockout is why `log_in` spends it for
-    // the identical check (PRD §21.4.3).
-    let account_bucket = Bucket::login_account(&request.username);
-    refuse_if_limited(&state, &account_bucket, client)?;
-    spend_attempt(&state, client)?;
-
-    let account = accounts::find_by_username(state.database().readers(), &request.username)
-        .await
-        .map_err(AppError::internal)?
-        .filter(|user| user.is_admin && user.is_active());
-
-    if !verify_admin(account.as_ref(), request.password).await? {
-        // Recorded on failure only, for the reason `log_in` records it that
-        // way: a limit that counted successes would lock an operator out of
-        // their own interrupted setup for signing in twice.
-        let _ = state
-            .limiter()
-            .record(&account_bucket, Some(client.address));
-        // The same refusal for an unknown username and a wrong password: a
-        // different one tells a guesser which of the two they achieved.
-        return Err(credentials_refused());
-    }
-    state
-        .limiter()
-        .forget(&account_bucket, Some(client.address));
-
-    // The holder's own value when they already hold the lease, exactly as
-    // `claim` renews. A fresh value would hash to a different lease owner, so
-    // `MintClaim` would neither renew nor take and would report the operator's
-    // own claim as blocking them.
-    let cookie_value = match held {
-        ClaimState::HeldByCaller { .. } => existing.unwrap_or_else(mint_cookie_value),
-        ClaimState::Unclaimed | ClaimState::HeldByAnother { .. } => mint_cookie_value(),
-    };
-
-    let granted = grant(&state, client, jar, cookie_value, now).await;
-    if granted.is_ok() {
-        record_step(
-            &state,
-            "claim",
-            "The setup wizard was recovered with administrator credentials.",
-        )
-        .await;
-    }
-    granted
-}
-
-/// Mints or renews the claim and attaches the cookies.
+/// Surrounding whitespace and letter case are transport damage, not a wrong
+/// token. The value is copied off a container console, and a terminal that
+/// takes the trailing newline with it — or an operator who types the printed
+/// lower-case alphabet with a capital — produced a length mismatch or a byte
+/// mismatch, one refusal that blames the token, and one spent attempt out of
+/// the five this address gets every fifteen minutes. Five of those and the only
+/// door into a brand-new instance is shut for a quarter of an hour, with the
+/// message telling the operator to restart the container over a stray space.
 ///
-/// Two cookies, not one, and for the same reason signing in sets two: the claim
-/// is an ambient credential a browser attaches to any request another origin
-/// can cause, so the CSRF check applies to it, and the check needs a token the
-/// page can echo (PRD §21.4.2).
-async fn grant(
-    state: &ApiState,
-    client: ClientContext,
-    jar: CookieJar,
-    cookie_value: String,
-    now: Timestamp,
-) -> AppResult<(CookieJar, Json<ClaimGranted>)> {
-    let outcome = state
-        .database()
-        .writer()
-        .submit(MintClaim {
-            cookie_value: cookie_value.clone(),
-            at: now,
-        })
-        .await
-        .map_err(AppError::internal)?;
-
-    let expires_at = match outcome {
-        ClaimOutcome::Granted { expires_at } => expires_at,
-        ClaimOutcome::Blocked { expires_at } => return Err(held_elsewhere(now, expires_at)),
-    };
-
-    // Only when the browser does not already hold one: a renewal that rotated
-    // the token would invalidate the value a form read a moment ago and refuse
-    // the submission that follows.
-    let mut jar = jar;
-    if jar.get(CSRF_COOKIE).is_none() {
-        jar = jar.add(csrf_cookie(client.scheme));
-    }
-    let jar = jar.add(set(
-        CLAIM_COOKIE,
-        cookie_value,
-        "/api/setup",
-        CLAIM_TTL_MILLIS / 1000,
-        client.scheme,
-        true,
-    ));
-    Ok((
-        jar,
-        Json(ClaimGranted {
-            expires_at: expires_at.as_millis(),
-        }),
-    ))
-}
-
-/// Verifies an administrator's password, at constant cost either way.
-async fn verify_admin(account: Option<&User>, password: String) -> AppResult<bool> {
-    let Some(stored) = account.and_then(|user| user.password_hash.clone()) else {
-        // No account, or a Plex account with no password: still spend the time,
-        // so "no administrator by that name" and "wrong password" are
-        // indistinguishable from the outside.
-        return Ok(accounts::verify(password, absent_hash())
-            .await
-            .unwrap_or(false));
-    };
-    accounts::verify(password, stored)
-        .await
-        .map_err(AppError::internal)
-}
-
-fn absent_hash() -> String {
-    crate::authentication::ABSENT_ACCOUNT_HASH.to_owned()
-}
-
-fn spend_attempt(state: &ApiState, client: ClientContext) -> AppResult<()> {
-    match state
-        .limiter()
-        .record(&Bucket::SetupAttempt, Some(client.address))
-    {
-        Decision::Allowed => Ok(()),
-        Decision::Refused {
-            retry_after_seconds,
-        } => Err(AppError::new(
-            Problem::new(
-                ErrorCode::RateLimited,
-                "Too many setup attempts from this address. Try again later.",
-            )
-            .retry_after(retry_after_seconds),
-        )),
-    }
-}
-
-/// Refuses when `bucket` is already spent, without spending it again.
-fn refuse_if_limited(state: &ApiState, bucket: &Bucket, client: ClientContext) -> AppResult<()> {
-    match state.limiter().check(bucket, Some(client.address)) {
-        Decision::Allowed => Ok(()),
-        Decision::Refused {
-            retry_after_seconds,
-        } => Err(AppError::new(
-            Problem::new(
-                ErrorCode::RateLimited,
-                "Too many attempts against that account. Try again later.",
-            )
-            .retry_after(retry_after_seconds),
-        )),
-    }
-}
-
-/// A fresh, unguessable cookie value for a new claim.
-fn mint_cookie_value() -> String {
-    let bytes = entropy::bytes::<32>();
-    let mut out = String::with_capacity(64);
-    for byte in bytes {
-        const HEX: &[u8; 16] = b"0123456789abcdef";
-        out.push(char::from(HEX[usize::from(byte >> 4)]));
-        out.push(char::from(HEX[usize::from(byte & 0x0f)]));
-    }
-    out
-}
-
-fn held_elsewhere(now: Timestamp, expires_at: Timestamp) -> AppError {
-    let seconds = u64::try_from(now.millis_until(expires_at).max(1000) / 1000).unwrap_or(1);
-    AppError::new(
-        Problem::new(
-            ErrorCode::Blocked,
-            "Another browser is holding the setup wizard.",
-        )
-        .retry_after(seconds),
-    )
+/// It narrows nothing an attacker can use: the alphabet is `a`–`z0-9`, so
+/// case folding maps no two distinct tokens onto one, and the guess space is
+/// the 62 bits PRD §19.6.1 claims either way. The comparison after it is still
+/// constant-time, and this runs on the caller's own copy of a value it already
+/// holds.
+fn normalize_token(token: &str) -> String {
+    token.trim().to_ascii_lowercase()
 }
 
 /// One refusal for wrong, expired, malformed, and empty.
@@ -351,23 +134,28 @@ fn token_refused() -> AppError {
     )
 }
 
-fn credentials_refused() -> AppError {
-    AppError::of(
-        ErrorCode::Unauthenticated,
-        "Those administrator credentials were not accepted.",
-    )
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
-    fn a_claim_cookie_value_is_sixty_four_hex_characters() {
-        let value = mint_cookie_value();
-        assert_eq!(value.len(), 64);
-        assert!(value.chars().all(|c| c.is_ascii_hexdigit()));
-        assert_ne!(value, mint_cookie_value());
+    fn a_pasted_token_survives_the_whitespace_the_terminal_added() {
+        // The exact shapes a console copy produces. Each of these was a spent
+        // attempt out of five, and five of them locked the operator out of a
+        // brand-new instance for fifteen minutes.
+        assert_eq!(normalize_token("abcd-efgh-ijkl\n"), "abcd-efgh-ijkl");
+        assert_eq!(normalize_token("  abcd-efgh-ijkl  "), "abcd-efgh-ijkl");
+        assert_eq!(normalize_token("ABCD-EFGH-IJKL"), "abcd-efgh-ijkl");
+    }
+
+    #[test]
+    fn normalizing_merges_no_two_tokens_this_instance_can_mint() {
+        // The alphabet is `a`-`z0-9`, so case folding is a no-op on anything
+        // `BootstrapToken::mint` produces and the 62-bit guess space stands.
+        for byte in afisharr_core::setup::TOKEN_SHAPE.alphabet {
+            let character = String::from(char::from(*byte));
+            assert_eq!(normalize_token(&character), character);
+        }
     }
 
     #[test]
@@ -379,21 +167,10 @@ mod tests {
     }
 
     #[test]
-    fn a_held_claim_reports_when_it_lapses_and_nothing_about_who_holds_it() {
-        let error = held_elsewhere(Timestamp::EPOCH, Timestamp::from_millis(600_000));
-        assert_eq!(error.problem().code, ErrorCode::Blocked);
-        assert_eq!(error.problem().retry_after_seconds, Some(600));
-    }
-
-    #[test]
-    fn the_request_bodies_reject_fields_they_do_not_know() {
+    fn the_request_body_rejects_a_field_it_does_not_know() {
         assert!(
             serde_json::from_str::<ClaimRequest>(r#"{"token":"a","step":8}"#).is_err(),
             "a client must not be able to name a step"
-        );
-        assert!(
-            serde_json::from_str::<RecoverRequest>(r#"{"username":"a","password":"b","admin":1}"#)
-                .is_err()
         );
     }
 }

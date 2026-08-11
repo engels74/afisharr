@@ -63,7 +63,13 @@ pub struct RotatePassword {
     /// leaves nothing of its own to rotate away.
     pub current_session: Option<String>,
     /// SHA-256 of the replacement session's cookie value. Never the value.
-    pub replacement_digest: String,
+    ///
+    /// `None` when there is no session to replace. A caller that presented an
+    /// API key asked to change a password and nothing else: minting a browser
+    /// session for it writes a 30-day admin credential nobody asked for, hands
+    /// its plaintext cookie back in a response an automation logs, and leaves a
+    /// row on the account that no operator has a reason to revoke.
+    pub replacement_digest: Option<String>,
     /// The user agent that asked for the change.
     pub user_agent: Option<String>,
     /// The address it was asked from.
@@ -141,19 +147,24 @@ impl WriteOperation for RotatePassword {
         .execute(&mut *transaction)
         .await?;
 
-        sqlx::query!(
-            "INSERT INTO sessions (id, user_id, created_at, expires_at, last_seen_at,
+        // Only for a caller that had one. The revocations above are
+        // unconditional, so an API-key caller still ends every browser session
+        // on the account — it simply is not handed one of its own in exchange.
+        if let Some(replacement_digest) = self.replacement_digest {
+            sqlx::query!(
+                "INSERT INTO sessions (id, user_id, created_at, expires_at, last_seen_at,
                                    user_agent, ip)
              VALUES (?1, ?2, ?3, ?4, ?3, ?5, ?6)",
-            self.replacement_digest,
-            self.user_id,
-            at,
-            expires_at,
-            self.user_agent,
-            self.ip
-        )
-        .execute(&mut *transaction)
-        .await?;
+                replacement_digest,
+                self.user_id,
+                at,
+                expires_at,
+                self.user_agent,
+                self.ip
+            )
+            .execute(&mut *transaction)
+            .await?;
+        }
 
         transaction.commit().await?;
         Ok(PasswordRotation::Rotated { others_revoked })

@@ -23,8 +23,17 @@
 	let refusal = $state<string | undefined>(undefined);
 	/** Whether `finish()` is in flight, so its wait is not read as its failure. */
 	let finishing = $state(false);
-	let startedAt = Date.now();
 	let elapsed = $state(0);
+
+	/**
+	 * Whether a skeleton is what this page is rendering right now.
+	 *
+	 * The same condition the template branches on, stated once so the timer
+	 * that feeds the skeleton cannot outlive it (P7).
+	 */
+	const loading = $derived(
+		!blocked && (!status || (status.step !== 'admin' && !finishing && !refusal)),
+	);
 
 	async function load() {
 		const result = await readStatus();
@@ -84,8 +93,23 @@
 	}
 
 	$effect(() => {
-		startedAt = Date.now();
 		void load();
+	});
+
+	/**
+	 * The elapsed counter runs only while the skeleton it feeds is on screen.
+	 *
+	 * `loading` is reactive, so the effect re-runs when the answer lands and
+	 * its cleanup stops the timer. Ungated, the effect read nothing reactive,
+	 * ran once, and left a 100 ms tick writing `$state` for the whole life of
+	 * the page — including the time the operator spends filling in the form.
+	 */
+	$effect(() => {
+		if (!loading) {
+			return;
+		}
+		const startedAt = Date.now();
+		elapsed = 0;
 		const ticker = setInterval(() => {
 			elapsed = Date.now() - startedAt;
 		}, 100);

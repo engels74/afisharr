@@ -119,12 +119,22 @@ export class StreamConnection {
 		}
 	}
 
-	/** Closes the connection and stops reconnecting. */
+	/**
+	 * Closes the connection and stops reconnecting.
+	 *
+	 * The attempt count goes with it. `close()` and `open()` bracket a whole
+	 * visit to the shell, so the failures of the last one say nothing about the
+	 * next: a counter left standing made `open()` label a brand-new connection
+	 * `reconnecting`, and made the first drop after it wait out a fully
+	 * backed-off delay — half a minute of dead stream after a one-second blip
+	 * (`I-UX-9`).
+	 */
 	close(): void {
 		this.#stopped = true;
 		this.#clearTimers();
 		this.#source?.close();
 		this.#source = undefined;
+		this.#attempt = 0;
 		this.status = 'disconnected';
 	}
 

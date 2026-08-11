@@ -110,11 +110,15 @@ describe('what the interface knows about who is signed in', () => {
 		expect(session.state).toEqual({ kind: 'signedIn', account: OPERATOR });
 	});
 
-	test('a transport failure on the first ask leaves the state unknown', async () => {
-		// Nothing has been asked and answered, so nothing is known. Recording
-		// `signedOut` here would send every visitor to the sign-in page for as
-		// long as the instance was restarting, including the ones holding a
-		// perfectly good cookie.
+	test('a transport failure on the first ask is recorded as unreachable', async () => {
+		// Not `signedOut`: that would send every visitor to the sign-in page for
+		// as long as the instance was restarting, including the ones holding a
+		// perfectly good cookie. And not `unknown` either, which is what this
+		// used to leave behind — `unknown` is the state the shell draws a
+		// skeleton for, with no navigation, no sign-in link and no retry on it,
+		// so one 502 during a container restart held the operator on "Still
+		// working…" until they thought to reload the page themselves
+		// (`I-UX-2`).
 		answer = {
 			outcome: 'refused',
 			problem: { code: 'upstream', message: 'Afisharr did not answer.' },
@@ -123,7 +127,48 @@ describe('what the interface knows about who is signed in', () => {
 		const session = createSession();
 		await session.refresh();
 
-		expect(session.state.kind).toBe('unknown');
+		expect(session.state).toEqual({
+			kind: 'unreachable',
+			problem: { code: 'upstream', message: 'Afisharr did not answer.' },
+		});
+	});
+
+	test('the sentence shown is the one the last attempt got back', async () => {
+		// The retry the layout offers calls `refresh()` again. A second failure
+		// must replace the first one's message, or the operator reads an
+		// account of a fault that is no longer the one in force.
+		answer = {
+			outcome: 'refused',
+			problem: { code: 'upstream', message: 'Afisharr did not answer.' },
+		} as AuthResult<SignedIn>;
+		const session = createSession();
+		await session.refresh();
+
+		answer = {
+			outcome: 'refused',
+			problem: { code: 'internal', message: 'Afisharr could not do that.' },
+		} as AuthResult<SignedIn>;
+		await session.refresh();
+
+		expect(session.state).toEqual({
+			kind: 'unreachable',
+			problem: { code: 'internal', message: 'Afisharr could not do that.' },
+		});
+	});
+
+	test('a retry that succeeds replaces the failure it was offered for', async () => {
+		answer = {
+			outcome: 'refused',
+			problem: { code: 'upstream', message: 'Afisharr did not answer.' },
+		} as AuthResult<SignedIn>;
+		const session = createSession();
+		await session.refresh();
+		expect(session.state.kind).toBe('unreachable');
+
+		answer = { outcome: 'ok', value: OPERATOR };
+		await session.refresh();
+
+		expect(session.state).toEqual({ kind: 'signedIn', account: OPERATOR });
 	});
 
 	test('a refusal after a fault still signs the session out', async () => {

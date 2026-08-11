@@ -45,6 +45,12 @@ getrandom = "0.4"
 hex = "0.4"
 ipnet = "2.12.1"
 mime_guess = "2.0.5"
+# `Uri::path()` hands back the target as the browser wrote it, still
+# percent-encoded, and the embedded bundle is keyed on the literal filenames
+# `adapter-static` wrote. Decoding is the only thing that makes the two agree.
+# Already in the graph under `url` and `reqwest`; named here so the one place
+# that depends on it says so.
+percent-encoding = "2.3.2"
 # rustls rather than the platform's TLS: PRD §21.5 supports Linux, macOS, and
 # Windows from one build, and a native-tls dependency makes the container image
 # carry an OpenSSL the base layer may not ship.

@@ -15,7 +15,6 @@
 
 	let status = $state<ClaimStatus | undefined>(undefined);
 	let refusal = $state<string | undefined>(undefined);
-	let startedAt = Date.now();
 	let elapsed = $state(0);
 
 	/**
@@ -44,8 +43,24 @@
 	}
 
 	$effect(() => {
-		startedAt = Date.now();
 		void load();
+	});
+
+	/**
+	 * The elapsed counter runs only while the skeleton it feeds is on screen.
+	 *
+	 * Gated on the state the template branches on, so the effect re-runs when
+	 * the answer lands and its cleanup stops the timer. Without the gate the
+	 * effect read nothing reactive, ran once, and left a 100 ms tick writing
+	 * `$state` for the whole life of the page — and this is the page an
+	 * operator leaves open while they go and read the console for the token.
+	 */
+	$effect(() => {
+		if (status || refusal) {
+			return;
+		}
+		const startedAt = Date.now();
+		elapsed = 0;
 		const ticker = setInterval(() => {
 			elapsed = Date.now() - startedAt;
 		}, 100);

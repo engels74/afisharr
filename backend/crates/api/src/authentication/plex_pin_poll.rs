@@ -31,7 +31,10 @@ use serde::Serialize;
 use utoipa::ToSchema;
 
 use crate::{
-    authentication::{plex_pin_authorize::authorize, plex_pin_start::plex_failure},
+    authentication::{
+        plex_pin_authorize::{PlexIdentity, authorize},
+        plex_pin_start::plex_failure,
+    },
     error::{AppError, AppResult, ErrorCode, Problem},
     proxy::ClientContext,
     ratelimit::{Bucket, Decision},
@@ -147,6 +150,25 @@ pub async fn poll_plex_pin(
             Ok((forget_attempt(jar, client), Json(PinState::Expired)))
         }
         PinPoll::Authorized { auth_token } => {
+            // Whose token it is, asked before the attempt is consumed.
+            //
+            // This call reaches plex.tv, so it is the step that fails on a
+            // timeout or a 5xx, and consuming the attempt first made one such
+            // failure permanent: the row was stamped `consumed_at` with no
+            // result, every later poll read it as closed, and the operator was
+            // told a sign-in they had just completed had expired — with the
+            // whole plex.tv exchange to start again (`I-UX-2`). Asked first, a
+            // transient failure costs one 502 and the next poll retries.
+            //
+            // Two overlapping polls now both ask, which is one extra call to
+            // plex.tv already counted against the provider budget above. What
+            // must still happen once is everything after the claim.
+            let account = state
+                .plex()
+                .account(&auth_token)
+                .await
+                .map_err(plex_failure)?;
+
             // Claimed before anything is stored and before a session exists.
             // Two overlapping polls are both told `Authorized` by plex.tv, and
             // without this both would store the token, refresh the account, and
@@ -168,7 +190,19 @@ pub async fn poll_plex_pin(
                     "That sign-in attempt has already been completed.",
                 ));
             }
-            authorize(&state, &attempt.id, auth_token, client, &headers, jar, now).await
+            authorize(
+                &state,
+                &attempt.id,
+                PlexIdentity {
+                    token: auth_token,
+                    account,
+                },
+                client,
+                &headers,
+                jar,
+                now,
+            )
+            .await
         }
     }
 }

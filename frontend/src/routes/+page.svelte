@@ -10,7 +10,6 @@
 	import { landingFor } from '$lib/features/navigation';
 	import { t } from '$lib/shared/i18n';
 
-	let startedAt = Date.now();
 	let elapsed = $state(0);
 	let refusal = $state<Problem | undefined>(undefined);
 
@@ -53,14 +52,28 @@
 	/** Asks again, from the state the first attempt started in. */
 	function retry() {
 		refusal = undefined;
-		startedAt = Date.now();
-		elapsed = 0;
 		void route();
 	}
 
 	$effect(() => {
-		startedAt = Date.now();
 		void route();
+	});
+
+	/**
+	 * The elapsed counter runs only while the skeleton it feeds is on screen.
+	 *
+	 * Gated on `refusal`, which is what the template branches on, so the effect
+	 * re-runs when the failure lands and its cleanup stops the timer — and runs
+	 * again from zero when {@link retry} clears it. Ungated, the effect read
+	 * nothing reactive, ran once, and left a 100 ms tick writing `$state` for
+	 * the whole life of a page that had already finished deciding.
+	 */
+	$effect(() => {
+		if (refusal) {
+			return;
+		}
+		const startedAt = Date.now();
+		elapsed = 0;
 		const ticker = setInterval(() => {
 			elapsed = Date.now() - startedAt;
 		}, 100);

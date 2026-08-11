@@ -50,6 +50,7 @@ dependencies = [
  "axum-extra",
  "cookie",
  "ipnet",
+ "percent-encoding",
  "serde",
  "serde_json",
  "serde_urlencoded",

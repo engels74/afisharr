@@ -3,68 +3,15 @@
 
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { StreamConnection } from './connection.svelte';
+import {
+	FakeEventSource,
+	installFakeEventSource,
+	latest,
+	restoreEventSource,
+} from './fake-event-source';
 
-/**
- * A stand-in for the browser's `EventSource`.
- *
- * The connection's contract is about what it does when the stream stops, lags,
- * and comes back — none of which a real server can be asked to do on demand.
- */
-class FakeEventSource {
-	static instances: FakeEventSource[] = [];
-
-	readonly url: string;
-	#listeners = new Map<string, Set<(event: Event) => void>>();
-	closed = false;
-
-	constructor(url: string) {
-		this.url = url;
-		FakeEventSource.instances.push(this);
-	}
-
-	addEventListener(type: string, listener: (event: Event) => void): void {
-		const set = this.#listeners.get(type) ?? new Set();
-		set.add(listener);
-		this.#listeners.set(type, set);
-	}
-
-	close(): void {
-		this.closed = true;
-	}
-
-	/** Drives an event, as the server would. */
-	emit(type: string, data?: unknown): void {
-		const event =
-			data === undefined
-				? new Event(type)
-				: new MessageEvent(type, { data: JSON.stringify(data) });
-		for (const listener of this.#listeners.get(type) ?? []) {
-			listener(event);
-		}
-	}
-}
-
-const realEventSource = globalThis.EventSource;
-
-beforeEach(() => {
-	FakeEventSource.instances = [];
-	// biome-ignore lint/suspicious/noExplicitAny: substituting a browser global
-	(globalThis as any).EventSource = FakeEventSource;
-});
-
-afterEach(() => {
-	// biome-ignore lint/suspicious/noExplicitAny: restoring a browser global
-	(globalThis as any).EventSource = realEventSource;
-});
-
-/** The most recently constructed fake. */
-function latest(): FakeEventSource {
-	const source = FakeEventSource.instances.at(-1);
-	if (!source) {
-		throw new Error('no connection was opened');
-	}
-	return source;
-}
+beforeEach(installFakeEventSource);
+afterEach(restoreEventSource);
 
 describe('opening', () => {
 	test('a fresh connection reports connecting until the stream opens', () => {
@@ -280,6 +227,31 @@ describe('closing', () => {
 		expect(FakeEventSource.instances.length).toBe(opened + 1);
 		latest().emit('open');
 		expect(stream.status).toBe('live');
+		stream.close();
+	});
+
+	test('a reopened connection is a first attempt and not a continued one', async () => {
+		// The failures of the last visit say nothing about this one. A counter
+		// left standing across `close()` labelled this `reconnecting` on a
+		// connection that had never failed, and made the first drop after it
+		// wait out a fully backed-off delay (`I-UX-9`).
+		const stream = new StreamConnection();
+		stream.open();
+		latest().emit('open');
+		for (let drop = 0; drop < 5; drop += 1) {
+			latest().emit('error');
+		}
+		stream.close();
+
+		stream.open();
+		expect(stream.status).toBe('connecting');
+		latest().emit('open');
+		const opened = FakeEventSource.instances.length;
+		latest().emit('error');
+
+		// A first attempt retries inside a second; a sixth waits 16 to 32.
+		await Bun.sleep(1500);
+		expect(FakeEventSource.instances.length).toBeGreaterThan(opened);
 		stream.close();
 	});
 });

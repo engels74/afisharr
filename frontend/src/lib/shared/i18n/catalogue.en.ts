@@ -100,6 +100,8 @@ export const en = {
 	'auth.plexCode': 'Enter this code at plex.tv/link: {code}',
 	'auth.plexWaiting': 'Waiting for Plex…',
 	'auth.plexExpired': 'That Plex sign-in expired. Start it again.',
+	'auth.sessionUnreachable':
+		'Until this instance answers, Afisharr cannot tell who is signed in, so it will not show you a page that would only fail.',
 	'auth.notAdministrator':
 		'This account does not administer this instance, and Afisharr’s interface is administrator-only. Ask whoever runs it for administrator rights, or sign out and use another account.',
 

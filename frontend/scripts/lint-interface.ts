@@ -24,8 +24,24 @@
 
 import { Glob } from 'bun';
 
-/** Where product code lives. Generated output and tests are not product code. */
-const ROOTS = ['src/routes', 'src/lib/features', 'src/lib/components'];
+/**
+ * Where product code lives. Generated output and tests are not product code.
+ *
+ * `src/lib/shared` is one of them, and leaving it out was an exclusion nothing
+ * argued for: it already ships a rendered, screen-reader-announced component
+ * (`stream/disconnection-indicator.svelte`), and nothing structurally
+ * distinguishes it from `src/lib/components`. A sentence typed into a file
+ * there passed every gate — the local run, the `interface-rules` hook, and the
+ * CI job — and then rendered in English for every operator whose locale is not,
+ * while a hand-written `fetch` beside it sat outside the generated-client
+ * contract where `contract-check` could not see it drift (§24.5).
+ */
+const ROOTS = [
+	'src/routes',
+	'src/lib/features',
+	'src/lib/components',
+	'src/lib/shared',
+];
 
 /** One rule violation, as the report prints it. */
 interface Finding {

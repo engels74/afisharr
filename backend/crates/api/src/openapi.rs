@@ -31,7 +31,7 @@ use utoipa::OpenApi;
         crate::health::route::health,
         crate::setup::claim_status::claim_status,
         crate::setup::claim_routes::claim,
-        crate::setup::claim_routes::recover,
+        crate::setup::recover_routes::recover,
         crate::setup::status::status,
         crate::setup::admin::create_admin,
         crate::setup::status::complete,

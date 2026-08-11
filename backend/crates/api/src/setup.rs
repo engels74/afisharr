@@ -17,17 +17,21 @@
 //! in, so an interrupted setup survives the restart that destroys the token.
 
 pub(crate) mod admin;
+mod claim_lease;
 pub(crate) mod claim_routes;
 pub(crate) mod claim_status;
 mod events;
 mod gate;
+pub(crate) mod recover_routes;
 pub(crate) mod status;
 mod step_view;
 
 pub use admin::{CreateAdmin, create_admin};
-pub use claim_routes::{ClaimGranted, ClaimRequest, RecoverRequest, claim, recover};
+pub use claim_lease::ClaimGranted;
+pub use claim_routes::{ClaimRequest, claim};
 pub use claim_status::{ClaimStatus, claim_status};
 pub use events::{SETUP_JOB_ID, record_step};
 pub use gate::{require_claim, require_setup_incomplete};
+pub use recover_routes::{RecoverRequest, recover};
 pub use status::{SetupStatus, complete, status};
 pub use step_view::StepView;

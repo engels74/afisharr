@@ -168,6 +168,20 @@ describe('what a visit is allowed to see', () => {
 		expect(shellFor(false, { kind: 'setupRequired' })).toBe('waiting');
 	});
 
+	test('an instance that could not answer is an error and not a wait', () => {
+		// The dead end this closes: `/api/auth/session` answers 502 during a
+		// container restart, and `waiting` renders a skeleton with no
+		// navigation, no sign-in link and no retry on it — so the operator sat
+		// on "Still working…" until they thought to reload the page themselves.
+		// A failure has to look like one (`I-UX-2`).
+		expect(
+			shellFor(false, {
+				kind: 'unreachable',
+				problem: { code: 'upstream', message: 'Afisharr did not answer.' },
+			}),
+		).toBe('unreachable');
+	});
+
 	test('a bare route renders itself, whoever is asking', () => {
 		// The sign-in page must render for a viewer and for nobody alike, or
 		// there is no way back in.
@@ -177,6 +191,10 @@ describe('what a visit is allowed to see', () => {
 			{ kind: 'unknown' } as const,
 			{ kind: 'signedOut' } as const,
 			{ kind: 'setupRequired' } as const,
+			{
+				kind: 'unreachable',
+				problem: { code: 'upstream', message: 'Afisharr did not answer.' },
+			} as const,
 		]) {
 			expect(shellFor(true, state)).toBe('bare');
 		}
