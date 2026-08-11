@@ -303,3 +303,44 @@ async fn an_invented_credential_is_bounded_rather_than_refused_for_ever() {
 
     running.stop().await;
 }
+
+#[tokio::test]
+async fn a_wrong_method_on_a_guarded_route_is_counted_like_any_other_call() {
+    // The last unmetered path on the surface. `anonymous_rate_limit` waives a
+    // request that *presents* a credential, on the promise that the guard
+    // behind it counts that request instead — and axum answers 405 from the
+    // method router, before any handler extractor runs, so on a wrong-method
+    // request no guard ever ran and nothing counted it. `presents_credential`
+    // reads a header and validates nothing, so a cookie of literally any value
+    // bought the waiver: `GET /api/auth/logout`, looped, was answered as fast
+    // as the instance accepts connections while every bucket read zero.
+    let instance = TempInstance::new();
+    let running = RunningInstance::start(&instance).await;
+    let _wizard = Wizard::set_up(&running, "operator", PASSWORD).await;
+
+    let stranger = client();
+    let mut bounded = false;
+    for _ in 0..=ANONYMOUS_ALLOWANCE {
+        let response = stranger
+            .get(format!("{}/api/auth/logout", running.base_url))
+            .header("cookie", "afisharr_session=not-a-session")
+            .send()
+            .await
+            .expect("the logout route must answer");
+        if response.status() == StatusCode::TOO_MANY_REQUESTS {
+            bounded = true;
+            break;
+        }
+        assert_eq!(
+            response.status(),
+            StatusCode::METHOD_NOT_ALLOWED,
+            "the route serves POST only"
+        );
+    }
+    assert!(
+        bounded,
+        "a method the route does not serve must still be charged to an allowance"
+    );
+
+    running.stop().await;
+}

@@ -53,13 +53,12 @@ pub struct PinLogin {
     pub result: Option<String>,
 }
 
-impl PinLogin {
-    /// Whether this attempt is still worth polling at `now`.
-    #[must_use]
-    pub fn is_open(&self, now: Timestamp) -> bool {
-        self.consumed_at.is_none() && now < self.expires_at
-    }
-}
+// There is deliberately no `is_open(now)` here. One predicate over
+// `consumed_at.is_none() && now < expires_at` cannot tell a window that shut
+// from an exchange that *succeeded*, and a caller that folded the two answered
+// "that sign-in expired" to an operator whose account had just been linked —
+// with the whole plex.tv exchange to start again. The two facts are separate
+// fields, and the poll route reads them separately.
 
 /// Reads one attempt.
 ///
@@ -229,35 +228,6 @@ impl From<Row> for PinLogin {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    fn login(consumed: Option<i64>, expires_at: i64) -> PinLogin {
-        PinLogin {
-            id: "01J".to_owned(),
-            plex_pin_id: "42".to_owned(),
-            code: "abcd".to_owned(),
-            mode: "Pin".to_owned(),
-            client_identifier: "01JCLIENT".to_owned(),
-            created_at: Timestamp::EPOCH,
-            expires_at: Timestamp::from_millis(expires_at),
-            consumed_at: consumed.map(Timestamp::from_millis),
-            result: None,
-        }
-    }
-
-    #[test]
-    fn an_unconsumed_unexpired_attempt_is_open() {
-        assert!(login(None, 1_000).is_open(Timestamp::from_millis(999)));
-    }
-
-    #[test]
-    fn an_attempt_closes_exactly_at_its_expiry() {
-        assert!(!login(None, 1_000).is_open(Timestamp::from_millis(1_000)));
-    }
-
-    #[test]
-    fn a_consumed_attempt_is_closed_however_much_time_is_left() {
-        assert!(!login(Some(1), 1_000).is_open(Timestamp::from_millis(2)));
-    }
 
     #[test]
     fn every_result_renders_the_text_the_schema_allows() {

@@ -3,13 +3,14 @@
 
 //! Reading the trusted chain, right to left.
 
-use std::net::{IpAddr, SocketAddr};
+use std::net::IpAddr;
 
 use axum::http::HeaderMap;
 
 use crate::proxy::{
     Scheme, TrustedProxies,
-    peer::{FORWARDED_FOR, FORWARDED_PROTO},
+    forwarded::{entries, is_https, parse_entry, stated_scheme},
+    peer::FORWARDED_FOR,
 };
 
 /// What the trusted chain said, and how much of it the chain wrote.
@@ -31,7 +32,7 @@ pub(super) struct Edge {
     /// wrote sits exactly this far from the right — and it sits there however
     /// many entries the client prepended, which is why every forwarded header
     /// is indexed from the right and none of them from the left.
-    hops: usize,
+    pub(super) hops: usize,
 }
 
 impl Edge {
@@ -119,66 +120,12 @@ impl Edge {
     /// remainder, and it is self-correcting: the browser simply withholds a
     /// cookie it was told to keep for TLS.
     pub(super) fn scheme(&self, headers: &HeaderMap) -> Scheme {
-        let chain = entries(headers, FORWARDED_PROTO);
-        let claimed = chain
-            .len()
-            .checked_sub(self.hops)
-            .and_then(|index| chain.get(index))
-            .or_else(|| chain.last())
-            .copied()
-            .unwrap_or_default();
-        if claimed.eq_ignore_ascii_case("https") {
+        if stated_scheme(headers, self.hops).is_some_and(is_https) {
             Scheme::Https
         } else {
             Scheme::Http
         }
     }
-}
-
-/// The address one `X-Forwarded-For` entry names, in the three shapes real
-/// proxies write it.
-///
-/// A bare address is the common one, and it was the only one this understood.
-/// The other two are not exotic: Azure Application Gateway and App Service
-/// append `host:port`, several `HAProxy` configurations do the same, and a proxy
-/// forwarding an IPv6 client commonly brackets the literal. Refusing those ends
-/// the walk, and the walk ending is not a small failure — the whole chain falls
-/// back to the peer, so an operator who configured `trustProxy` correctly still
-/// has every client on the internet attributed to their proxy's one address,
-/// with one rate-limit counter for all of them and one address filling the
-/// session list, and nothing anywhere saying the configuration did not take.
-///
-/// A value that names no address at all — `unknown`, an obfuscated identifier —
-/// still ends the walk. That is the honest answer: the chain cannot be shown to
-/// be trusted past a value that cannot be compared against the trusted list.
-fn parse_entry(entry: &str) -> Option<IpAddr> {
-    if let Ok(address) = entry.parse::<IpAddr>() {
-        return Some(address);
-    }
-    // `1.2.3.4:51234` and `[2001:db8::1]:51234`, which `SocketAddr` reads whole.
-    if let Ok(socket) = entry.parse::<SocketAddr>() {
-        return Some(socket.ip());
-    }
-    // `[2001:db8::1]`, a bracketed literal carrying no port.
-    entry
-        .strip_prefix('[')
-        .and_then(|rest| rest.strip_suffix(']'))
-        .and_then(|inner| inner.parse::<IpAddr>().ok())
-}
-
-/// Every value of `name`, in order.
-///
-/// A chain can arrive as one comma-joined header or as several, and a proxy
-/// that appends a second header line is appending to the same list.
-pub(super) fn entries<'h>(headers: &'h HeaderMap, name: &str) -> Vec<&'h str> {
-    headers
-        .get_all(name)
-        .iter()
-        .filter_map(|value| value.to_str().ok())
-        .flat_map(|value| value.split(','))
-        .map(str::trim)
-        .filter(|entry| !entry.is_empty())
-        .collect()
 }
 
 #[cfg(test)]
@@ -187,7 +134,8 @@ mod tests {
 
     use axum::http::{HeaderMap, HeaderValue};
 
-    use super::{FORWARDED_FOR, FORWARDED_PROTO};
+    use super::FORWARDED_FOR;
+    use crate::proxy::peer::FORWARDED_PROTO;
     use crate::proxy::{ClientContext, Scheme, TrustedProxies};
 
     fn peer(text: &str) -> SocketAddr {

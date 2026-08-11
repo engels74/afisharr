@@ -63,6 +63,21 @@ pub struct ClientContext {
     /// cannot be clicked through. So the inferred reading sets the cookie flag
     /// and never the header (`security::headers`).
     pub scheme_inferred: bool,
+    /// How many entries at the right of a forwarded header this instance can
+    /// attribute to hops it trusts.
+    ///
+    /// Carried rather than recomputed, because
+    /// [`ClientContext::at_configured_origin`] asks a second question of the
+    /// same `X-Forwarded-Proto` chain — "did any hop state a scheme at all?" —
+    /// and it has to ask it of the entry [`Edge::scheme`] already read. Without
+    /// this it indexed from the right instead, so a two-hop chain arriving as
+    /// `http, https` answered "the hop stated TLS" while the client-facing hop
+    /// had said plaintext.
+    ///
+    /// One for a peer this instance does not trust: nothing forwarded is
+    /// honoured there, and the rightmost entry is the only one any reading of
+    /// that header can rest on.
+    pub(crate) forwarded_hops: usize,
 }
 
 impl ClientContext {
@@ -80,6 +95,7 @@ impl ClientContext {
                 address: peer_address,
                 scheme: Scheme::Http,
                 scheme_inferred: false,
+                forwarded_hops: 1,
             };
         }
 
@@ -92,6 +108,7 @@ impl ClientContext {
             address: edge.address.unwrap_or(peer_address),
             scheme: edge.scheme(headers),
             scheme_inferred: false,
+            forwarded_hops: edge.hops,
         }
     }
 }

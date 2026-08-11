@@ -519,3 +519,51 @@ async fn user_id(running: &RunningInstance) -> String {
         .expect("the administrator exists")
         .id
 }
+
+#[tokio::test]
+async fn signing_out_with_an_api_key_is_refused_rather_than_reported_as_done() {
+    // `Authenticated` is populated from a bearer key as readily as from the
+    // cookie, and a key caller has no session to revoke. Answering the
+    // documented 204 to one told an operator who suspects a leaked integration
+    // key that they had just revoked it, while the key stayed valid against
+    // every route on the surface.
+    let instance = TempInstance::new();
+    let running = signed_out_instance(&instance).await;
+    let client = browser();
+    let csrf = sign_in(&client, &running.base_url).await;
+
+    let issued: serde_json::Value = client
+        .post(format!("{}/api/settings/api-keys", running.base_url))
+        .header("x-afisharr-csrf", &csrf)
+        .json(&serde_json::json!({ "name": "Home Assistant" }))
+        .send()
+        .await
+        .expect("the key route must answer")
+        .json()
+        .await
+        .expect("a JSON body");
+    let secret = issued["secret"]
+        .as_str()
+        .expect("a plaintext key")
+        .to_owned();
+
+    let bare = Client::new();
+    let refused = bare
+        .post(format!("{}/api/auth/logout", running.base_url))
+        .bearer_auth(&secret)
+        .send()
+        .await
+        .expect("the logout route must answer");
+    assert_eq!(refused.status(), StatusCode::UNAUTHORIZED);
+
+    // And the key is still the key, which is the fact the 204 had hidden.
+    let accepted = bare
+        .get(format!("{}/api/auth/session", running.base_url))
+        .bearer_auth(&secret)
+        .send()
+        .await
+        .expect("the session route must answer");
+    assert_eq!(accepted.status(), StatusCode::OK);
+
+    running.stop().await;
+}

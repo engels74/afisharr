@@ -59,8 +59,42 @@ interface Finding {
  * line-based: a template scanner that tried to parse Svelte would be a second
  * Svelte parser, and the failure this catches — somebody typing a sentence
  * into markup — is on one line every time.
+ *
+ * The run must close on `<`, which is why {@link withoutInterpolation} runs
+ * first. `<p>Signed in as {account.username}</p>` produced no match at all
+ * before it did: the run `Signed in as ` is followed by `{`, so the gate
+ * reported "nothing to report" over the single shape a mixed prose-and-value
+ * label always takes, and the English shipped untranslated (`I-UX-7`).
  */
 const TEMPLATE_TEXT = />([^<>{}\n]+)</g;
+
+/** A `{...}` expression, innermost first. */
+const INTERPOLATION = /\{[^{}]*\}/g;
+
+/**
+ * One line with its `{...}` expressions removed.
+ *
+ * Removing them rather than loosening {@link TEMPLATE_TEXT} to accept `{` and
+ * `}` as delimiters, because the scanner reads a `.svelte` file's `<script>`
+ * block on the same terms as its markup: a looser pattern read `} catch (error)
+ * {` as a sentence somebody had typed into the interface. A line with an
+ * unbalanced brace — every block opener and closer in that script — is left
+ * exactly as it was, and matches nothing, which is the answer that was already
+ * correct for it.
+ *
+ * Repeated until it settles, so a nested expression collapses whole rather than
+ * leaving its outer brace behind.
+ */
+function withoutInterpolation(line: string): string {
+	let text = line;
+	for (;;) {
+		const stripped = text.replace(INTERPOLATION, '');
+		if (stripped === text) {
+			return text;
+		}
+		text = stripped;
+	}
+}
 
 /** Attributes whose value is read by a person or by a screen reader. */
 const USER_FACING_ATTRIBUTES =
@@ -138,7 +172,8 @@ function check(file: string, contents: string): Finding[] {
 		};
 
 		if (file.endsWith('.svelte')) {
-			for (const match of source.matchAll(TEMPLATE_TEXT)) {
+			const markup = withoutInterpolation(source);
+			for (const match of markup.matchAll(TEMPLATE_TEXT)) {
 				if (isUserFacing(match[1])) {
 					record('no-hardcoded-string', `template text "${match[1].trim()}"`);
 				}

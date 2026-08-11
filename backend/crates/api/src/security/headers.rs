@@ -168,6 +168,7 @@ mod tests {
             address: "203.0.113.9".parse().expect("a valid address"),
             scheme,
             scheme_inferred: false,
+            forwarded_hops: 1,
         }
     }
 

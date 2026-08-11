@@ -71,7 +71,21 @@ async fn serve_until_stopped(booted: &startup::Booted) -> Result<()> {
 /// its grace period every single time.
 async fn shutdown_signal() {
     let interrupt = async {
-        let _ = tokio::signal::ctrl_c().await;
+        match tokio::signal::ctrl_c().await {
+            Ok(()) => {}
+            // The same treatment SIGTERM gets below, and for the same reason.
+            // `ctrl_c()` resolves with `Err` *immediately* when the handler
+            // cannot be installed — a seccomp profile, any environment whose
+            // signal driver refuses registration — so discarding it completed
+            // this arm at once: the server began draining the instant it
+            // started, logged "listening", "interrupted", "shutting down", and
+            // exited 0. The operator saw a container that restart-looped for
+            // ever, never answered a request, and printed no error at all.
+            Err(error) => {
+                warn!(%error, "could not listen for Ctrl-C");
+                std::future::pending::<()>().await;
+            }
+        }
     };
 
     #[cfg(unix)]

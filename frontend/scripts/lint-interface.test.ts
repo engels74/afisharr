@@ -20,6 +20,36 @@ describe('the hard-coded string rule', () => {
 		expect(rules(findings)).toEqual(['no-hardcoded-string']);
 	});
 
+	test('catches prose sitting beside an interpolated value', () => {
+		// The shape every mixed prose-and-value label takes, and the one the
+		// rule was blind to: the run of text closes on `{` rather than on `<`,
+		// so the scanner found nothing and reported success while the English
+		// shipped untranslated.
+		for (const markup of [
+			'<p>Signed in as {account.username}</p>',
+			'<h2>Waiting for {source.label} to answer</h2>',
+			'<button>Retry in {seconds}s</button>',
+		]) {
+			expect(rules(check('a.svelte', markup)), markup).toEqual([
+				'no-hardcoded-string',
+			]);
+		}
+	});
+
+	test('passes a script line whose braces open and close a block', () => {
+		// The reason the interpolation is removed rather than the pattern
+		// loosened: this scanner reads a `.svelte` file's script block on the
+		// same terms as its markup, and a looser pattern read these as
+		// sentences somebody had typed into the interface.
+		for (const line of [
+			'\t} catch (error) {',
+			'\t} else if (session.refreshing) {',
+			'\tlet { children }: Props = $props();',
+		]) {
+			expect(check('a.svelte', line), line).toEqual([]);
+		}
+	});
+
 	test('passes text that came from the catalogue', () => {
 		const findings = check('a.svelte', "<p>{t('page.dashboard.empty')}</p>");
 		expect(findings).toEqual([]);

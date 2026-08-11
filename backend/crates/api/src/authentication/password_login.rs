@@ -144,6 +144,10 @@ pub async fn log_in(
 }
 
 /// Signs out, revoking the session that made the request.
+// Nothing below the summary line: this doc comment is the route's OpenAPI
+// description, so a rationale written here becomes part of the generated
+// client's contract and `check-openapi-contract.sh` fails until it is
+// regenerated. The reasoning lives at the guard it explains (§24.5).
 #[utoipa::path(
     post,
     path = "/api/auth/logout",
@@ -161,11 +165,25 @@ pub async fn log_out(
     caller: Authenticated,
     jar: CookieJar,
 ) -> AppResult<(CookieJar, axum::http::StatusCode)> {
+    // A session, and only a session. `Authenticated` is populated from
+    // `Authorization: Bearer <key>` as readily as from the cookie, and a key
+    // caller has no session to revoke — so answering the documented 204 to one
+    // reported a sign-out that revoked nothing. An operator who suspects a
+    // leaked integration key runs this against it, is told it succeeded, and
+    // walks away while the key is still valid against every route on the
+    // surface. The 401 the annotation above already declares is the honest
+    // answer, and revoking a key is `DELETE /api/settings/api-keys/{id}`.
+    let Some(digest) = caller.session_digest() else {
+        return Err(AppError::of(
+            ErrorCode::Unauthenticated,
+            "That credential is not a session, so there is nothing to sign out of. \
+             Revoke an API key from Settings instead.",
+        ));
+    };
+
     let mut jar = jar;
-    if let Some(digest) = caller.session_digest() {
-        for cookie in session::revoke(&state, digest, client.scheme).await? {
-            jar = jar.add(cookie);
-        }
+    for cookie in session::revoke(&state, digest, client.scheme).await? {
+        jar = jar.add(cookie);
     }
     Ok((jar, axum::http::StatusCode::NO_CONTENT))
 }

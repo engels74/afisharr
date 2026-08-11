@@ -17,6 +17,7 @@
 
 mod configured_origin;
 mod edge;
+mod forwarded;
 mod origin;
 mod peer;
 mod trusted;

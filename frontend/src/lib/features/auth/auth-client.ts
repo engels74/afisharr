@@ -30,9 +30,24 @@ export async function signIn(
 		: { outcome: 'refused', problem: asProblem(error) };
 }
 
-/** Signs out, revoking the session that made the request. */
-export async function signOut(): Promise<void> {
-	await api.POST('/api/auth/logout', { headers: csrfHeaders() });
+/**
+ * Signs out, revoking the session that made the request.
+ *
+ * Returns the answer like every other call here, because this one can be
+ * refused: it sits behind the setup gate, behind the anonymous rate limit, and
+ * behind the cross-site check, which needs a token the browser may no longer
+ * hold. Discarding it let the caller navigate to the sign-in page on a 429 with
+ * the session cookie neither revoked nor expired, so the next person to open
+ * that tab was signed in as the account that thought it had left.
+ */
+export async function signOut(): Promise<AuthResult<null>> {
+	const { error } = await api.POST('/api/auth/logout', {
+		headers: csrfHeaders(),
+	});
+	// 204: there is no body to read, so the absence of a refusal is the answer.
+	return error
+		? { outcome: 'refused', problem: asProblem(error) }
+		: { outcome: 'ok', value: null };
 }
 
 /** Reads the signed-in account, if there is one. */

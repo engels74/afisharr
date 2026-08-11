@@ -114,7 +114,29 @@ pub async fn poll_plex_pin(
         .map_err(AppError::internal)?
         .ok_or_else(|| AppError::of(ErrorCode::NotFound, "That sign-in attempt is not known."))?;
 
-    if !attempt.is_open(now) {
+    // Consumed and expired are two different endings, and `is_open` is false
+    // for both. Answering `Expired` to either told an operator whose
+    // authorising response was lost — a proxy hiccup, a restart between the
+    // commit and the write-out, a backgrounded tab whose fetch was aborted —
+    // that the sign-in they had just completed at plex.tv had expired, while
+    // the account was in fact linked and the session row was on it. So the
+    // ending is read from the recorded result, and only a window that shut is
+    // reported as `Expired`.
+    //
+    // A row claimed but not yet finished carries no result, and it is not
+    // expired either: it is the exchange this instance is in the middle of
+    // authorising, and the caller is told that rather than the opposite.
+    if attempt.consumed_at.is_some() {
+        if attempt.result.as_deref() == Some(plex_pin::PinLoginResult::Expired.as_text()) {
+            return Ok((forget_attempt(jar, client), Json(PinState::Expired)));
+        }
+        return Err(AppError::of(
+            ErrorCode::Conflict,
+            "That sign-in attempt is no longer in progress. Start the sign-in again.",
+        ));
+    }
+
+    if now >= attempt.expires_at {
         close(&state, &attempt.id, plex_pin::PinLoginResult::Expired, now).await;
         return Ok((forget_attempt(jar, client), Json(PinState::Expired)));
     }

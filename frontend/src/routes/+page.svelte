@@ -4,7 +4,7 @@
 -->
 <script lang="ts">
 	import { goto } from '$app/navigation';
-	import { api, type Problem } from '$lib/api/client';
+	import { api, asProblem, type Problem } from '$lib/api/client';
 	import { ErrorState, LoadingState } from '$lib/components/state';
 	import { readSession } from '$lib/features/auth';
 	import { landingFor } from '$lib/features/navigation';
@@ -40,7 +40,14 @@
 		// through — this route runs on a visit to `/` and on nothing else.
 		const { data, error } = await api.GET('/api/health');
 		if (!data) {
-			refusal = error as Problem;
+			// `asProblem`, never a cast. `openapi-fetch` hands back whatever the
+			// body was, and a refusal that is not a JSON Problem is exactly the
+			// one this route meets: a proxy's own HTML 502 during a restart
+			// arrives as a string, and a bodyless refusal arrives as
+			// `undefined`. Cast, the second left `refusal` falsy, so the branch
+			// below stayed on the loading skeleton — no retry, no navigation,
+			// for ever.
+			refusal = asProblem(error);
 			return;
 		}
 		const setupCompleted = data.setupCompleted;

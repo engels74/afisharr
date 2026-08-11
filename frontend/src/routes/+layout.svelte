@@ -10,8 +10,8 @@
 	import { goto } from '$app/navigation';
 	import { page } from '$app/state';
 	import { api } from '$lib/api/client';
-	import { BlockedState, ErrorState, LoadingState } from '$lib/components/state';
-	import { session, signOut } from '$lib/features/auth';
+	import { ErrorState, LoadingState } from '$lib/components/state';
+	import { NotPermittedPanel, session } from '$lib/features/auth';
 	import {
 		isBareRoute,
 		LOGIN,
@@ -20,7 +20,7 @@
 		shellFor,
 	} from '$lib/features/navigation';
 	import { t } from '$lib/shared/i18n';
-	import { recordProvenance, sourceHref } from '$lib/shared/provenance';
+	import { recordProvenance, SourceFooter } from '$lib/shared/provenance';
 	import { StreamConnection } from '$lib/shared/stream';
 
 	interface Props {
@@ -145,60 +145,18 @@
 		return () => stream.close();
 	});
 
-	/**
-	 * Leaves an account this interface has nothing to show.
-	 *
-	 * The one action that unblocks the state below: the session is real, and
-	 * the only way to a shell is a different account.
-	 */
-	async function leave() {
-		await signOut();
-		session.forget();
-		await goto(LOGIN, { replaceState: true });
-	}
 </script>
 
 <!-- ModeWatcher sets the theme before paint, so a dark-mode instance never
      flashes light on the way in. -->
 <ModeWatcher />
 
-{#if view === 'bare'}
-	<main class="min-h-screen px-4 py-10">
-		{@render children?.()}
-	</main>
-{:else if view === 'shell'}
-	<NavShell streamStatus={stream.status} sourceHref={sourceHref()}>
-		{@render children?.()}
-	</NavShell>
-{:else if view === 'notPermitted'}
-	<!--
-		Signed in, and not an administrator. Tier 0 is an admin-only surface
-		(D-007), so there is no shell to render — and this is not a sign-out
-		either: the session is real and the sign-in page would only take them
-		back here. What is owed is the sentence saying so (`I-UX-2`).
-	-->
-	<main class="min-h-screen px-4 py-10">
-		<BlockedState
-			state={{
-				kind: 'blocked',
-				reason: t('auth.notAdministrator'),
-			}}
-		>
-			{#snippet action()}
-				<button class="text-sm underline" type="button" onclick={leave}>
-					{t('auth.signOut')}
-				</button>
-			{/snippet}
-		</BlockedState>
-	</main>
-{:else if view === 'unreachable' && unreachable}
-	<!--
-		Asked, and the instance could not say. The retry is the whole point: the
-		skeleton below has no navigation on it and renders no children, so a
-		restart that answered 502 once left the operator with nothing on screen
-		to act on and no page to reach that would have offered one (`I-UX-2`).
-	-->
-	<main class="min-h-screen px-4 py-10">
+{#snippet notPermitted()}
+	<NotPermittedPanel />
+{/snippet}
+
+{#snippet sessionUnreachable()}
+	{#if unreachable}
 		<ErrorState
 			state={{
 				kind: 'error',
@@ -207,13 +165,65 @@
 			}}
 			onretry={() => session.refresh()}
 		/>
-	</main>
+	{/if}
+{/snippet}
+
+{#snippet waiting()}
+	<LoadingState state={{ kind: 'loading', elapsedMs: elapsed }} rows={3} />
+{/snippet}
+
+{#snippet framed(body?: Snippet)}
+	<!--
+		Every view outside the shell renders through here, so all of them carry
+		the source link. It is an AGPL §13 obligation owed to the people the
+		instance is offered to over a network, and rendering it only inside
+		`NavShell` put it behind a signed-in administrator — the one visitor who
+		does not need it (D-028, PRD §6.4).
+	-->
+	<div class="min-h-screen flex flex-col">
+		<main class="flex-1 px-4 py-10">
+			{@render body?.()}
+		</main>
+		<SourceFooter />
+	</div>
+{/snippet}
+
+{#if view === 'bare'}
+	{@render framed(children)}
+{:else if view === 'shell'}
+	<NavShell streamStatus={stream.status}>
+		{@render children?.()}
+	</NavShell>
+{:else if page.error}
+	<!--
+		SvelteKit renders `+error.svelte` as this layout's children, so a view
+		that does not render children is a view with no error page. Checked here
+		rather than inside each branch: a linked non-admin following a stale
+		bookmark was shown the "not an administrator" panel instead of the 404,
+		and a page-level error thrown before the session answered was shown as a
+		loading skeleton that never resolved.
+	-->
+	{@render framed(children)}
+{:else if view === 'notPermitted'}
+	<!--
+		Signed in, and not an administrator. Tier 0 is an admin-only surface
+		(D-007), so there is no shell to render — and this is not a sign-out
+		either: the session is real and the sign-in page would only take them
+		back here. What is owed is the sentence saying so (`I-UX-2`).
+	-->
+	{@render framed(notPermitted)}
+{:else if view === 'unreachable' && unreachable}
+	<!--
+		Asked, and the instance could not say. The retry is the whole point: the
+		skeleton below has no navigation on it and renders no children, so a
+		restart that answered 502 once left the operator with nothing on screen
+		to act on and no page to reach that would have offered one (`I-UX-2`).
+	-->
+	{@render framed(sessionUnreachable)}
 {:else}
 	<!--
 		Asked and not yet answered, or answered "nobody" and on the way to the
 		sign-in page. Neither is a shell, and neither is an error.
 	-->
-	<main class="min-h-screen px-4 py-10">
-		<LoadingState state={{ kind: 'loading', elapsedMs: elapsed }} rows={3} />
-	</main>
+	{@render framed(waiting)}
 {/if}

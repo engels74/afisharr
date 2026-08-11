@@ -95,6 +95,8 @@ export const en = {
 	'auth.password': 'Password',
 	'auth.signIn': 'Sign in',
 	'auth.signOut': 'Sign out',
+	'auth.signOutRefused':
+		'Afisharr refused the sign-out, so this session is still live. Leaving this page now would leave it signed in for whoever opens this browser next.',
 	'auth.title': 'Sign in',
 	'auth.plexTitle': 'Or sign in with Plex',
 	'auth.plexStart': 'Sign in with a code',

@@ -6,6 +6,7 @@
 	import type { Snippet } from 'svelte';
 	import { page } from '$app/state';
 	import { t } from '$lib/shared/i18n';
+	import { SourceFooter } from '$lib/shared/provenance';
 	import type { StreamStatus } from '$lib/shared/stream';
 	import { DisconnectionIndicator } from '$lib/shared/stream';
 	import { isActive, PRIMARY, SETTINGS } from './destinations';
@@ -13,12 +14,10 @@
 	interface Props {
 		/** What the live stream is doing, for the non-modal indicator. */
 		streamStatus: StreamStatus;
-		/** Where the source for this exact version lives (AGPL §13, PRD §6.4). */
-		sourceHref: string;
 		children?: Snippet;
 	}
 
-	let { streamStatus, sourceHref, children }: Props = $props();
+	let { streamStatus, children }: Props = $props();
 </script>
 
 <div class="min-h-screen flex flex-col">
@@ -54,12 +53,5 @@
 		{@render children?.()}
 	</main>
 
-	<!--
-		The source link is a licence obligation, not a courtesy: AGPL-3.0-or-later
-		section 13 obliges a modified instance offered over a network to make its
-		source available, and the link points at the exact running version.
-	-->
-	<footer class="border-t border-[var(--border)] px-4 py-3 text-xs">
-		<a href={sourceHref} rel="external">{t('app.sourceLink')}</a>
-	</footer>
+	<SourceFooter />
 </div>

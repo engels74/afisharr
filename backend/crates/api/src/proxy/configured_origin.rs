@@ -12,7 +12,7 @@
 use axum::http::{HeaderMap, header::HOST};
 
 use crate::proxy::{
-    ClientContext, PublicOrigin, Scheme, edge,
+    ClientContext, PublicOrigin, Scheme, forwarded,
     peer::{FORWARDED_FOR, FORWARDED_PROTO},
 };
 
@@ -54,10 +54,17 @@ impl ClientContext {
     /// - No forwarded header at all — nothing forwarded this, so it arrived here
     ///   over the plaintext this instance serves. Left alone.
     ///
-    /// The nearest hop's entry is the one read, for the reason
-    /// [`Edge::scheme`] indexes from the right: the leftmost entry is whatever
-    /// the caller prepended. A caller reaching this instance directly can still
-    /// write the whole header, and gains a `Secure` cookie their own plaintext
+    /// The entry read is the *client-facing* hop's, which is the one
+    /// [`Edge::scheme`] already resolved this request's scheme from — indexed
+    /// from the right by [`ClientContext::forwarded_hops`], never the rightmost
+    /// and never the leftmost. Reading the rightmost was a hole: a chain
+    /// arriving as `X-Forwarded-Proto: http, https` from a client-facing proxy
+    /// on plain `:80` answered "the hop stated TLS", so the request was
+    /// upgraded here and marked as vouched for, and the sign-in answered
+    /// `Set-Cookie: …; Secure` plus a year of HSTS over plaintext. The leftmost
+    /// entry is whatever the caller prepended, which is why neither end of the
+    /// header is read. A caller reaching this instance directly can still write
+    /// the whole header, and gains a `Secure` cookie their own plaintext
     /// browser discards and HSTS in their own browser — nobody else's.
     ///
     /// It does not cover every deployment. A proxy that rewrites `Host` to the
@@ -82,7 +89,8 @@ impl ClientContext {
         headers: &HeaderMap,
         configured: Option<&PublicOrigin>,
     ) -> Self {
-        if self.scheme.is_secure() || !crossed_a_proxy(headers) || claims_plaintext(headers) {
+        let stated = forwarded::stated_scheme(headers, self.forwarded_hops);
+        if self.scheme.is_secure() || !crossed_a_proxy(headers) || claims_plaintext(stated) {
             return self;
         }
         let Some(origin) = configured.filter(|origin| origin.is_secure()) else {
@@ -94,7 +102,7 @@ impl ClientContext {
             .is_some_and(|host| origin.matches_host(host));
         if arrived_at_it {
             self.scheme = Scheme::Https;
-            self.scheme_inferred = !claims_https(headers);
+            self.scheme_inferred = !claims_https(stated);
         }
         self
     }
@@ -105,25 +113,21 @@ fn crossed_a_proxy(headers: &HeaderMap) -> bool {
     headers.contains_key(FORWARDED_FOR) || headers.contains_key(FORWARDED_PROTO)
 }
 
-/// Whether the nearest hop states it served the client over plaintext.
+/// Whether the client-facing hop states it served the client over plaintext.
 ///
 /// Absent is not a claim: a proxy that forwards `X-Forwarded-For` and leaves the
 /// scheme alone has said nothing, and this answers `false` for it.
-fn claims_plaintext(headers: &HeaderMap) -> bool {
-    edge::entries(headers, FORWARDED_PROTO)
-        .last()
-        .is_some_and(|claimed| !claimed.eq_ignore_ascii_case("https"))
+fn claims_plaintext(stated: Option<&str>) -> bool {
+    stated.is_some_and(|claimed| !forwarded::is_https(claimed))
 }
 
-/// Whether the nearest hop states it served the client over TLS.
+/// Whether the client-facing hop states it served the client over TLS.
 ///
 /// The other side of [`claims_plaintext`], and not its negation: absent is
 /// neither. This is what separates a reading the chain vouched for from one
 /// resting on `publicOrigin` alone.
-fn claims_https(headers: &HeaderMap) -> bool {
-    edge::entries(headers, FORWARDED_PROTO)
-        .last()
-        .is_some_and(|claimed| claimed.eq_ignore_ascii_case("https"))
+fn claims_https(stated: Option<&str>) -> bool {
+    stated.is_some_and(forwarded::is_https)
 }
 
 #[cfg(test)]
@@ -269,6 +273,50 @@ mod tests {
         );
         assert_eq!(stated.scheme, Scheme::Https);
         assert!(!stated.scheme_inferred);
+    }
+
+    #[test]
+    fn a_client_facing_hop_that_states_plaintext_is_read_past_the_nearer_hops() {
+        // Browser → an edge proxy listening on plain `:80` that appends →
+        // an internal hop inside `trustProxy` that re-encrypts and appends →
+        // here. `Edge::scheme` reads the client-facing entry and answers
+        // plaintext; reading the *rightmost* entry here instead answered
+        // "the hop stated TLS", so the request was upgraded and marked as
+        // vouched for, and the sign-in set `Secure` plus a year of HSTS on a
+        // browser whose connection was plaintext — a login loop with nothing
+        // in either answer explaining it.
+        let origin = PublicOrigin::parse("https://media.example").expect("a valid origin");
+        let trusted = TrustedProxies::parse(&["10.0.0.0/8"]).expect("parses");
+        let entries = headers(&[
+            ("host", "media.example"),
+            (FORWARDED_FOR, "1.2.3.4, 10.0.0.9"),
+            (FORWARDED_PROTO, "http, https"),
+        ]);
+        let context = ClientContext::resolve(peer("10.0.0.5"), &entries, &trusted)
+            .at_configured_origin(&entries, Some(&origin));
+
+        assert_eq!(context.address.to_string(), "1.2.3.4");
+        assert_eq!(context.scheme, Scheme::Http);
+        assert!(!context.scheme_inferred);
+    }
+
+    #[test]
+    fn a_client_facing_hop_that_states_tls_still_vouches_for_the_reading() {
+        // The mirror of the case above, and the reason the entry is chosen by
+        // position rather than by looking for an `http` anywhere in the list.
+        // The reading is the chain's, so `Strict-Transport-Security` is owed.
+        let origin = PublicOrigin::parse("https://media.example").expect("a valid origin");
+        let trusted = TrustedProxies::parse(&["10.0.0.0/8"]).expect("parses");
+        let entries = headers(&[
+            ("host", "media.example"),
+            (FORWARDED_FOR, "1.2.3.4, 10.0.0.9"),
+            (FORWARDED_PROTO, "https, http"),
+        ]);
+        let context = ClientContext::resolve(peer("10.0.0.5"), &entries, &trusted)
+            .at_configured_origin(&entries, Some(&origin));
+
+        assert_eq!(context.scheme, Scheme::Https);
+        assert!(!context.scheme_inferred);
     }
 
     #[test]
