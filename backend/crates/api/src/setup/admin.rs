@@ -58,6 +58,7 @@ pub struct CreateAdmin {
     responses(
         (status = 200, description = "The administrator account now exists", body = SignedIn),
         (status = 400, description = "The username or password was refused", body = Problem),
+        (status = 403, description = "The claim on this wizard has expired", body = Problem),
         (status = 409, description = "An administrator already exists", body = Problem),
     ),
 )]

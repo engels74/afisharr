@@ -156,6 +156,54 @@ async fn the_policy_admits_the_shell_the_binary_actually_serves() {
 }
 
 #[tokio::test]
+async fn the_policy_admits_every_prerendered_page_and_not_only_the_shell() {
+    // The shell is not the only document this binary serves. `adapter-static`
+    // writes one prerendered file per route, and the SPA route answers each of
+    // them by exact path — so a bookmark on `/index.html`, a crawler, or a
+    // proxy configured with `index index.html` gets a document whose bootstrap
+    // carries route-specific data and hashes to something the shell's own
+    // digest does not cover. The browser then blocks the only script on the
+    // page, and the operator sees a permanently blank page with the reason
+    // visible nowhere but the console.
+    if skip_without_spa() {
+        return;
+    }
+
+    let instance = TempInstance::new();
+    let running = RunningInstance::start(&instance).await;
+    let client = client();
+
+    for path in ["/index.html", "/dashboard.html", "/login.html"] {
+        let response = client
+            .get(format!("{}{path}", running.base_url))
+            .send()
+            .await
+            .expect("the interface must answer");
+        assert_eq!(response.status(), StatusCode::OK, "{path}");
+
+        let script_src = response
+            .headers()
+            .get("content-security-policy")
+            .and_then(|value| value.to_str().ok())
+            .expect("every response carries a policy")
+            .split("; ")
+            .find(|directive| directive.starts_with("script-src"))
+            .expect("the policy names script-src")
+            .to_owned();
+        let html = response.text().await.expect("a body");
+
+        for digest in afisharr_api::interface::inline_script_digests(&html) {
+            assert!(
+                script_src.contains(&digest),
+                "{path} was served with a script its own policy blocks: {script_src}"
+            );
+        }
+    }
+
+    running.stop().await;
+}
+
+#[tokio::test]
 async fn a_fingerprinted_bundle_is_cacheable_for_a_year() {
     if skip_without_spa() {
         return;

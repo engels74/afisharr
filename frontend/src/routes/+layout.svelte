@@ -16,6 +16,7 @@
 		isBareRoute,
 		LOGIN,
 		NavShell,
+		SETUP,
 		shellFor,
 	} from '$lib/features/navigation';
 	import { t } from '$lib/shared/i18n';
@@ -80,8 +81,15 @@
 		// before this one is still the state during the request that will
 		// replace it, and acting on it here is what sends an operator who has
 		// just signed in back to the sign-in page (P1).
-		if (!bare && !session.refreshing && session.state.kind === 'signedOut') {
+		if (bare || session.refreshing) {
+			return;
+		}
+		if (session.state.kind === 'signedOut') {
 			void goto(LOGIN, { replaceState: true });
+		} else if (session.state.kind === 'setupRequired') {
+			// Not the sign-in page: signing in is refused too until setup
+			// finishes, so `/login` would be the same dead end one route along.
+			void goto(SETUP, { replaceState: true });
 		}
 	});
 

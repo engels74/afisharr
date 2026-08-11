@@ -3,7 +3,7 @@
 
 //! Reading the trusted chain, right to left.
 
-use std::net::IpAddr;
+use std::net::{IpAddr, SocketAddr};
 
 use axum::http::HeaderMap;
 
@@ -57,7 +57,7 @@ impl Edge {
 
         let mut leftmost = None;
         for (index, entry) in chain.iter().enumerate().rev() {
-            let Ok(address) = entry.parse::<IpAddr>() else {
+            let Some(address) = parse_entry(entry) else {
                 return unprovable;
             };
             if !trusted.trusts(address) {
@@ -120,6 +120,37 @@ impl Edge {
             Scheme::Http
         }
     }
+}
+
+/// The address one `X-Forwarded-For` entry names, in the three shapes real
+/// proxies write it.
+///
+/// A bare address is the common one, and it was the only one this understood.
+/// The other two are not exotic: Azure Application Gateway and App Service
+/// append `host:port`, several `HAProxy` configurations do the same, and a proxy
+/// forwarding an IPv6 client commonly brackets the literal. Refusing those ends
+/// the walk, and the walk ending is not a small failure — the whole chain falls
+/// back to the peer, so an operator who configured `trustProxy` correctly still
+/// has every client on the internet attributed to their proxy's one address,
+/// with one rate-limit counter for all of them and one address filling the
+/// session list, and nothing anywhere saying the configuration did not take.
+///
+/// A value that names no address at all — `unknown`, an obfuscated identifier —
+/// still ends the walk. That is the honest answer: the chain cannot be shown to
+/// be trusted past a value that cannot be compared against the trusted list.
+fn parse_entry(entry: &str) -> Option<IpAddr> {
+    if let Ok(address) = entry.parse::<IpAddr>() {
+        return Some(address);
+    }
+    // `1.2.3.4:51234` and `[2001:db8::1]:51234`, which `SocketAddr` reads whole.
+    if let Ok(socket) = entry.parse::<SocketAddr>() {
+        return Some(socket.ip());
+    }
+    // `[2001:db8::1]`, a bracketed literal carrying no port.
+    entry
+        .strip_prefix('[')
+        .and_then(|rest| rest.strip_suffix(']'))
+        .and_then(|inner| inner.parse::<IpAddr>().ok())
 }
 
 /// Every value of `name`, in order.
@@ -255,6 +286,68 @@ mod tests {
         );
         assert_eq!(context.address.to_string(), "10.0.0.5");
         assert_eq!(context.scheme, Scheme::Http);
+    }
+
+    #[test]
+    fn an_entry_carrying_a_port_is_still_the_client_it_names() {
+        // Azure Application Gateway and App Service append `host:port`, and
+        // several `HAProxy` configurations do too. Refusing the entry ends the
+        // walk, and every client on the internet is then attributed to the
+        // proxy — one rate-limit counter for all of them, one address in the
+        // session list, and no sign the configuration did not take.
+        let trusted = TrustedProxies::parse(&["10.0.0.0/8"]).expect("parses");
+        let context = ClientContext::resolve(
+            peer("10.0.0.5"),
+            &headers(&[(FORWARDED_FOR, "203.0.113.9:51234")]),
+            &trusted,
+        );
+        assert_eq!(context.address.to_string(), "203.0.113.9");
+    }
+
+    #[test]
+    fn a_bracketed_ipv6_entry_is_read_with_and_without_its_port() {
+        let trusted = TrustedProxies::parse(&["10.0.0.0/8"]).expect("parses");
+        for entry in ["[2001:db8::1]", "[2001:db8::1]:51234", "2001:db8::1"] {
+            let context = ClientContext::resolve(
+                peer("10.0.0.5"),
+                &headers(&[(FORWARDED_FOR, entry)]),
+                &trusted,
+            );
+            assert_eq!(
+                context.address.to_string(),
+                "2001:db8::1",
+                "entry {entry:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_value_that_names_no_address_still_ends_the_walk() {
+        // The bound on the tolerance above: `unknown` cannot be compared
+        // against the trusted list, so nothing past it is provable and the
+        // peer's own address is the safe answer (P2).
+        let trusted = TrustedProxies::parse(&["10.0.0.0/8"]).expect("parses");
+        for entry in ["unknown", "_hidden", "203.0.113.9:notaport", "[2001:db8::1"] {
+            let context = ClientContext::resolve(
+                peer("10.0.0.5"),
+                &headers(&[(FORWARDED_FOR, entry)]),
+                &trusted,
+            );
+            assert_eq!(context.address.to_string(), "10.0.0.5", "entry {entry:?}");
+        }
+    }
+
+    #[test]
+    fn a_port_bearing_proxy_entry_is_matched_against_the_trusted_list() {
+        // The entry is trusted, so the walk must step past it to the client
+        // rather than stopping and attributing the request to the proxy.
+        let trusted = TrustedProxies::parse(&["10.0.0.0/8"]).expect("parses");
+        let context = ClientContext::resolve(
+            peer("10.0.0.5"),
+            &headers(&[(FORWARDED_FOR, "203.0.113.9:4000, 10.0.0.9:8080")]),
+            &trusted,
+        );
+        assert_eq!(context.address.to_string(), "203.0.113.9");
     }
 
     #[test]

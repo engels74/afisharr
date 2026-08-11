@@ -52,6 +52,18 @@
 	}
 
 	/**
+	 * Sends the operator back to the claim page, from wherever the claim lapsed.
+	 *
+	 * `load()` already does this on mount; this is the same journey for a lease
+	 * that lapsed later, while the form was open. Without it the operator sits
+	 * on a page whose one control answers 403 for ever, and the instance stays
+	 * without an administrator.
+	 */
+	async function returnToClaim() {
+		await goto('/setup');
+	}
+
+	/**
 	 * Finishes setup, then sends the operator to sign in.
 	 *
 	 * Creating the administrator only moves the derived step on. Until setup is
@@ -91,7 +103,7 @@
 		{#if refusal}
 			<ErrorState state={{ kind: 'error', summary: refusal }} />
 		{/if}
-		<AdminForm oncreated={finish} />
+		<AdminForm oncreated={finish} onclaimlost={returnToClaim} />
 	{:else if finishing}
 		<PendingState state={{ kind: 'pending', operation: t('setup.finish.pending') }} />
 	{:else if refusal}

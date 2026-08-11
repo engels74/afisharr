@@ -75,6 +75,14 @@ impl From<&User> for SignedIn {
 /// The limiter is consulted before the hash and recorded after it, and only on
 /// failure: a limit that counted successes would lock out the operator signing
 /// in from a fourth device (PRD §21.4.3).
+///
+/// That ordering is what makes the failure count honest, and it is also why the
+/// limiter cannot be the only thing standing in front of the hash: an attempt
+/// that has not finished has not failed, so a burst arriving inside one instant
+/// passes the check together and nothing here has counted any of it yet. The
+/// bound that holds for a burst is a bound on the work itself —
+/// `accounts::verify` admits a fixed number of Argon2id operations at a time,
+/// so extra requests wait for a permit instead of each allocating 64 MiB.
 #[utoipa::path(
     post,
     path = "/api/auth/login",
@@ -84,6 +92,7 @@ impl From<&User> for SignedIn {
         (status = 200, description = "Signed in", body = SignedIn),
         (status = 400, description = "The request body was not readable", body = Problem),
         (status = 401, description = "The credentials were not accepted", body = Problem),
+        (status = 403, description = "Setup has not been completed on this instance", body = Problem),
         (status = 429, description = "Too many attempts", body = Problem),
     ),
 )]
@@ -142,6 +151,8 @@ pub async fn log_in(
     responses(
         (status = 204, description = "Signed out"),
         (status = 401, description = "No session to sign out of", body = Problem),
+        (status = 403, description = "Setup has not been completed on this instance", body = Problem),
+        (status = 429, description = "Too many requests", body = Problem),
     ),
 )]
 pub async fn log_out(
@@ -167,6 +178,8 @@ pub async fn log_out(
     responses(
         (status = 200, description = "The signed-in account", body = SignedIn),
         (status = 401, description = "Nobody is signed in", body = Problem),
+        (status = 403, description = "Setup has not been completed on this instance", body = Problem),
+        (status = 429, description = "Too many requests", body = Problem),
     ),
 )]
 pub async fn whoami(

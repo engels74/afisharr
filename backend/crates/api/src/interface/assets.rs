@@ -35,6 +35,18 @@ pub trait AssetSource: fmt::Debug + Send + Sync + 'static {
     /// was built into this binary, which the route reports as such rather than
     /// as a missing page.
     fn shell(&self) -> Option<Asset>;
+
+    /// Every HTML document this build can serve, the shell included.
+    ///
+    /// The shell is not the only one. `adapter-static` prerenders each route to
+    /// its own file — `index.html`, `dashboard.html`, and so on — and
+    /// [`Self::get`] serves any of them by exact path, so a bookmark on
+    /// `/index.html`, a crawler, or a proxy configured with `index index.html`
+    /// is answered with a document the shell's own hash does not cover. The
+    /// content policy is built from all of them, because a document whose
+    /// inline bootstrap is not admitted renders as a blank page with the reason
+    /// visible only in the browser console.
+    fn documents(&self) -> Vec<Asset>;
 }
 
 /// An empty source, for a build with no SPA in it.
@@ -54,6 +66,10 @@ impl AssetSource for NoAssets {
     fn shell(&self) -> Option<Asset> {
         None
     }
+
+    fn documents(&self) -> Vec<Asset> {
+        Vec::new()
+    }
 }
 
 #[cfg(test)]
@@ -64,5 +80,6 @@ mod tests {
     fn the_empty_source_reports_absence_rather_than_an_empty_page() {
         assert_eq!(NoAssets.get("favicon.svg"), None);
         assert_eq!(NoAssets.shell(), None);
+        assert!(NoAssets.documents().is_empty());
     }
 }

@@ -115,25 +115,38 @@ fn protected_routes(state: &ApiState) -> Router<ApiState> {
         .route("/settings/api-keys/{id}", delete(keys::revoke))
         .route("/stream", get(stream::stream))
         // Read outside-in: setup first, so an unconfigured instance refuses
-        // before it spends anybody's budget, then the API limit over everything
-        // that survives. The limit is a layer and not a per-handler call for
-        // the same reason the setup gate is — a route added later inherits it
-        // without anybody remembering to (PRD §21.4.3).
-        .layer(from_fn_with_state(state.clone(), api_rate_limit))
+        // before it spends anybody's budget, then the anonymous limit over
+        // everything that survives. The limit is a layer and not a per-handler
+        // call for the same reason the setup gate is — a route added later
+        // inherits it without anybody remembering to (PRD §21.4.3).
+        .layer(from_fn_with_state(state.clone(), anonymous_rate_limit))
         .layer(from_fn_with_state(state.clone(), require_setup_completed))
 }
 
-/// Counts every call to a protected route against the caller's API budget.
+/// Counts a call that carries no credential against its address's budget.
 ///
-/// `Bucket::Api` is 600 requests a minute (PRD §21.4.3). Without this it is a
-/// table entry with no enforcement: a caller holding a valid session or key
-/// could drive the database, the filesystem browser, and the stream as fast as
-/// the process answers, indefinitely.
-async fn api_rate_limit(
+/// The half of the API limit a layer can enforce, and only that half. A layer
+/// runs before any extractor, so it knows what the request *presents* and never
+/// whether the instance accepts it — and counting both kinds together is how an
+/// unauthenticated flood came to spend the allowance the operator's own
+/// interface needs. Behind a reverse proxy that `trustProxy` does not name,
+/// every caller resolves to the proxy's address, so that flood held the whole
+/// surface at 429 for the rest of the window from one source, with nothing in
+/// the answer saying why.
+///
+/// The other half is [`crate::authentication::Authenticated`], which counts an
+/// accepted credential against `Bucket::Api` under the credential's own name,
+/// and a refused one against this same anonymous budget. Between them every
+/// request through this group is counted exactly once.
+async fn anonymous_rate_limit(
     State(state): State<ApiState>,
     request: Request<Body>,
     next: Next,
 ) -> Result<Response, AppError> {
+    if crate::authentication::presents_credential(request.headers()) {
+        return Ok(next.run(request).await);
+    }
+
     let client = request
         .extensions()
         .get::<ClientContext>()
@@ -142,15 +155,11 @@ async fn api_rate_limit(
 
     if let Decision::Refused {
         retry_after_seconds,
-    } = state.limiter().record(&Bucket::Api, Some(client.address))
+    } = state
+        .limiter()
+        .record(&Bucket::Anonymous, Some(client.address))
     {
-        return Err(AppError::new(
-            crate::error::Problem::new(
-                crate::error::ErrorCode::RateLimited,
-                "Too many requests from this address. Try again shortly.",
-            )
-            .retry_after(retry_after_seconds),
-        ));
+        return Err(crate::ratelimit::too_many_requests(retry_after_seconds));
     }
     Ok(next.run(request).await)
 }
@@ -265,6 +274,17 @@ async fn csrf(
 }
 
 /// Refuses everything while `instance.setup_completed_at` is `NULL`.
+///
+/// A layer answers on behalf of every route under it, and the generated client
+/// is built from each route's own `#[utoipa::path(responses(...))]` block — so
+/// an answer produced here that no annotation declares is an answer the sole
+/// contract between the two surfaces says cannot happen. That is not a
+/// documentation gap: the interface is written against the contract, so the
+/// case simply goes unhandled, and `contract-check` stays green while it does,
+/// because it checks the client against the annotations and never the
+/// annotations against the router. Every route in `protected_routes` therefore
+/// declares this 403 and the 429 from [`anonymous_rate_limit`], and a route
+/// added to the group owes both.
 async fn require_setup_completed(
     State(state): State<ApiState>,
     request: Request<Body>,

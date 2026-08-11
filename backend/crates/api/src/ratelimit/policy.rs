@@ -19,8 +19,26 @@ pub enum Bucket {
     LoginAddress,
     /// Claim and recovery attempts from one address.
     SetupAttempt,
-    /// Authenticated calls from one address.
-    Api,
+    /// Calls made with one accepted credential.
+    ///
+    /// Keyed on the credential and not on the address, and that is the whole
+    /// of what it protects. Counted per address, this bucket is spent by
+    /// whoever reaches the instance first — and behind a reverse proxy that
+    /// `trustProxy` does not name, every caller resolves to the proxy's own
+    /// address, so one unauthenticated flood spends the allowance the
+    /// operator's own interface needs and holds the whole surface at 429 for
+    /// the rest of the window. A credential is something an attacker has to
+    /// obtain before they can spend anything counted under it.
+    Api {
+        /// The session digest or API key identifier the caller presented.
+        credential: String,
+    },
+    /// Calls from one address that carry no accepted credential.
+    ///
+    /// Sign-in, the Plex pin exchange, and every request whose credential was
+    /// refused. Separate from [`Bucket::Api`] so that traffic anybody can send
+    /// cannot spend the budget of callers who have proved who they are.
+    Anonymous,
     /// Calls that reach a third-party service on the caller's behalf.
     Provider,
 }
@@ -51,6 +69,20 @@ impl Bucket {
         }
     }
 
+    /// The API bucket for one accepted credential.
+    ///
+    /// `credential` is a server-side identifier — a session digest or an API
+    /// key's row id — so the set of keys this bucket can ever hold is the set
+    /// of credentials this instance issued. A caller cannot mint a new counter
+    /// by inventing a value, because a value this instance did not issue never
+    /// reaches here (`guard::Authenticated` refuses it first).
+    #[must_use]
+    pub fn api(credential: &str) -> Self {
+        Self::Api {
+            credential: credential.to_owned(),
+        }
+    }
+
     /// The limit this bucket is counted against.
     #[must_use]
     pub const fn policy(&self) -> Policy {
@@ -77,8 +109,20 @@ impl Bucket {
                 window_millis: 15 * 60 * 1000,
                 lockout: None,
             },
-            Self::Api => Policy {
+            Self::Api { .. } => Policy {
                 allowance: 600,
+                window_millis: 60 * 1000,
+                lockout: None,
+            },
+            // Half the authenticated allowance, and it is not a guess at what
+            // an attacker needs — it is what the unauthenticated interface
+            // itself needs. The Plex pin exchange polls while the operator is
+            // away at plex.tv, and the sign-in page reads the session once per
+            // load; both fit inside this several times over, and a caller doing
+            // neither has no business making three hundred anonymous calls a
+            // minute.
+            Self::Anonymous => Policy {
+                allowance: 300,
                 window_millis: 60 * 1000,
                 lockout: None,
             },
@@ -109,9 +153,14 @@ impl Bucket {
     /// it per address would hand them the full allowance again from every
     /// address they can reach the instance from, which for anything behind a
     /// residential connection or a botnet is unbounded (PRD §21.4.3).
+    ///
+    /// `Api` is not either, for the mirror reason: it already names the
+    /// credential, and adding the address would split one operator's budget
+    /// across their devices while merging every caller behind an untrusted
+    /// proxy into one.
     #[must_use]
     pub const fn counts_per_address(&self) -> bool {
-        !matches!(self, Self::LoginAccount { .. })
+        !matches!(self, Self::LoginAccount { .. } | Self::Api { .. })
     }
 }
 
@@ -210,9 +259,25 @@ mod tests {
         );
         assert_eq!(Bucket::LoginAddress.policy().allowance, 20);
         assert_eq!(Bucket::SetupAttempt.policy().allowance, 5);
-        assert_eq!(Bucket::Api.policy().allowance, 600);
-        assert_eq!(Bucket::Api.policy().window_millis, 60 * 1000);
+        assert_eq!(Bucket::api("session").policy().allowance, 600);
+        assert_eq!(Bucket::api("session").policy().window_millis, 60 * 1000);
+        assert_eq!(Bucket::Anonymous.policy().allowance, 300);
         assert_eq!(Bucket::Provider.policy().allowance, 60);
+    }
+
+    #[test]
+    fn two_credentials_are_two_api_budgets() {
+        // One operator's browser and one integration's key are two callers, and
+        // neither may exhaust the other's allowance.
+        assert_ne!(Bucket::api("a-session-digest"), Bucket::api("a-key-id"));
+    }
+
+    #[test]
+    fn anonymous_traffic_never_lands_in_an_api_budget() {
+        // The lockout this closes is the whole interface: an unauthenticated
+        // flood that spent `Api` would answer 429 to the operator's own
+        // dashboard for the rest of the window.
+        assert_ne!(Bucket::Anonymous, Bucket::api(""));
     }
 
     #[test]
@@ -224,25 +289,28 @@ mod tests {
             .counts_failures_only()
         );
         assert!(Bucket::LoginAddress.counts_failures_only());
-        assert!(!Bucket::Api.counts_failures_only());
+        assert!(!Bucket::api("session").counts_failures_only());
+        assert!(!Bucket::Anonymous.counts_failures_only());
         assert!(!Bucket::Provider.counts_failures_only());
         assert!(!Bucket::SetupAttempt.counts_failures_only());
     }
 
     #[test]
-    fn only_the_account_bucket_is_counted_without_an_address() {
-        // The bucket already names the account. Adding the address to the key
-        // would give a guesser five attempts per address instead of five in
-        // total, which is the limit not existing.
+    fn only_the_buckets_that_name_their_caller_are_counted_without_an_address() {
+        // Each already names who is being counted. Adding the address to the
+        // key would give a guesser five attempts per address instead of five in
+        // total, and would split one operator's API budget across their
+        // devices while merging every caller behind an untrusted proxy.
         assert!(
             !Bucket::LoginAccount {
                 username: "operator".to_owned()
             }
             .counts_per_address()
         );
+        assert!(!Bucket::api("a-session-digest").counts_per_address());
         assert!(Bucket::LoginAddress.counts_per_address());
         assert!(Bucket::SetupAttempt.counts_per_address());
-        assert!(Bucket::Api.counts_per_address());
+        assert!(Bucket::Anonymous.counts_per_address());
         assert!(Bucket::Provider.counts_per_address());
     }
 

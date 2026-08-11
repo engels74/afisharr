@@ -66,6 +66,7 @@ pub struct PinStarted {
     responses(
         (status = 200, description = "A pin was created", body = PinStarted),
         (status = 400, description = "The request body was not readable, or the return target is not this instance's configured origin", body = Problem),
+        (status = 403, description = "Setup has not been completed on this instance", body = Problem),
         (status = 429, description = "Too many attempts", body = Problem),
         (status = 502, description = "plex.tv could not be reached", body = Problem),
     ),

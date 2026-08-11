@@ -30,10 +30,11 @@ thiserror = { workspace = true }
 # `fs` is used directly by `backup` and `storage`, and `rt` by the filesystem
 # browser: cap-std is synchronous, so a directory read — which on a network
 # mount can block for a long time — belongs on the blocking pool rather than on
-# a runtime worker. Declared rather than taken from sqlx's `runtime-tokio`,
-# which enables both today: a crate that compiles on a feature it never asked
-# for breaks when the dependency that supplied it moves.
-tokio = { workspace = true, features = ["fs", "rt"] }
+# a runtime worker. `sync` is the semaphore that bounds how many Argon2id
+# operations hold their 64 MiB at once. Declared rather than taken from sqlx's
+# `runtime-tokio`, which enables all three today: a crate that compiles on a
+# feature it never asked for breaks when the dependency that supplied it moves.
+tokio = { workspace = true, features = ["fs", "rt", "sync"] }
 tracing = { workspace = true }
 ulid = { workspace = true }
 
@@ -42,4 +43,4 @@ workspace = true
 
 [dev-dependencies]
 tempfile = "3.27.0"
-tokio = { workspace = true, features = ["rt-multi-thread", "macros"] }
+tokio = { workspace = true, features = ["rt-multi-thread", "macros", "time"] }

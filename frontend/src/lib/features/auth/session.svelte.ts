@@ -7,7 +7,18 @@ import { readSession, type SignedIn } from './auth-client';
 export type SessionState =
 	| { readonly kind: 'unknown' }
 	| { readonly kind: 'signedIn'; readonly account: SignedIn }
-	| { readonly kind: 'signedOut' };
+	| { readonly kind: 'signedOut' }
+	/**
+	 * The instance has not been set up, so nobody can be signed in yet.
+	 *
+	 * A separate state and not a synonym for signed out: the sign-in page
+	 * cannot work either until setup finishes, so sending an operator there
+	 * would only move the dead end. `/api/auth/session` sits behind
+	 * `require_setup_completed`, which answers `setupRequired` while
+	 * `instance.setup_completed_at` is `NULL` — the exact case a bookmarked
+	 * `/dashboard` on a freshly deployed container lands in.
+	 */
+	| { readonly kind: 'setupRequired' };
 
 /**
  * Who is signed in, as one value the shell reads.
@@ -85,8 +96,18 @@ export function createSession(): Session {
 				// turning any of them into `signedOut` sends an operator who is
 				// still signed in to the sign-in page, mid-task, on a fault
 				// that had nothing to do with them (P1).
+				//
+				// `setupRequired` is the third answer this route really gives,
+				// and leaving it out of the record was a dead end rather than a
+				// missing branch: the state stayed `unknown`, the shell rendered
+				// its loading skeleton, and nothing ever replaced it. An
+				// operator opening a bookmarked shell route on a container that
+				// has not been set up watched it wait for ever, with no
+				// redirect and no error (`I-UX-2`).
 				if (result.problem.code === 'unauthenticated') {
 					state = { kind: 'signedOut' };
+				} else if (result.problem.code === 'setupRequired') {
+					state = { kind: 'setupRequired' };
 				}
 			} finally {
 				inFlight -= 1;

@@ -98,7 +98,9 @@ pub struct SessionView {
         (status = 200, description = "The password is changed", body = PasswordChanged),
         (status = 400, description = "The new password was refused", body = Problem),
         (status = 401, description = "The current password was not accepted", body = Problem),
+        (status = 403, description = "Setup has not been completed on this instance", body = Problem),
         (status = 409, description = "That account has no password to change, or another change reached it first", body = Problem),
+        (status = 429, description = "Too many requests", body = Problem),
     ),
 )]
 pub async fn change_password(
@@ -219,6 +221,8 @@ pub async fn change_password(
     responses(
         (status = 200, description = "Every session, newest first", body = Vec<SessionView>),
         (status = 401, description = "No accepted credential was presented", body = Problem),
+        (status = 403, description = "Setup has not been completed on this instance", body = Problem),
+        (status = 429, description = "Too many requests", body = Problem),
     ),
 )]
 pub async fn list_sessions(
@@ -246,7 +250,9 @@ pub async fn list_sessions(
     responses(
         (status = 204, description = "The session is revoked"),
         (status = 401, description = "No accepted credential was presented", body = Problem),
+        (status = 403, description = "Setup has not been completed on this instance", body = Problem),
         (status = 404, description = "No such session on this account", body = Problem),
+        (status = 429, description = "Too many requests", body = Problem),
     ),
 )]
 pub async fn revoke_session(

@@ -10,9 +10,19 @@
 
 	interface Props {
 		oncreated: () => void;
+		/**
+		 * The claim lapsed while this form was open.
+		 *
+		 * A separate signal from a refusal, because it is not one this form can
+		 * render its way out of: `POST /api/setup/admin` is behind the claim
+		 * gate, so once the ten-minute lease lapses every submission answers
+		 * the same 403 and this page offers no token field to fix it with. The
+		 * page owns where that goes, as it owns every other navigation here.
+		 */
+		onclaimlost: () => void;
 	}
 
-	let { oncreated }: Props = $props();
+	let { oncreated, onclaimlost }: Props = $props();
 
 	let username = $state('');
 	let password = $state('');
@@ -40,10 +50,22 @@
 		submitting = true;
 		const result = await createAdmin(username, password);
 		submitting = false;
-		refusal = result.outcome === 'refused' ? result.problem : undefined;
 		if (result.outcome === 'ok') {
+			refusal = undefined;
 			oncreated();
+			return;
 		}
+		// The bounce back to the claim page lives in the route's `load()`, which
+		// runs on mount and never again — so a lease that lapsed while the
+		// operator was choosing a password in their manager surfaced here as a
+		// banner telling them to enter the token again, on a page with no token
+		// field, whose one button reproduces the same 403 for ever.
+		if (result.problem.code === 'setupRequired') {
+			refusal = undefined;
+			onclaimlost();
+			return;
+		}
+		refusal = result.problem;
 	}
 </script>
 

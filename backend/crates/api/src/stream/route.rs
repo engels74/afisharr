@@ -51,7 +51,8 @@ pub struct StreamOpened {
     responses(
         (status = 200, description = "The event stream, multiplexed by topic", content_type = "text/event-stream"),
         (status = 401, description = "No accepted credential was presented", body = crate::error::Problem),
-        (status = 403, description = "That account does not administer this instance", body = crate::error::Problem),
+        (status = 403, description = "That account does not administer this instance, or setup has not been completed", body = crate::error::Problem),
+        (status = 429, description = "Too many requests", body = crate::error::Problem),
     ),
 )]
 pub async fn stream(

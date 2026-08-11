@@ -18,6 +18,14 @@ export interface paths {
          * @description The limiter is consulted before the hash and recorded after it, and only on
          *     failure: a limit that counted successes would lock out the operator signing
          *     in from a fourth device (PRD §21.4.3).
+         *
+         *     That ordering is what makes the failure count honest, and it is also why the
+         *     limiter cannot be the only thing standing in front of the hash: an attempt
+         *     that has not finished has not failed, so a burst arriving inside one instant
+         *     passes the check together and nothing here has counted any of it yet. The
+         *     bound that holds for a burst is a bound on the work itself —
+         *     `accounts::verify` admits a fixed number of Argon2id operations at a time,
+         *     so extra requests wait for a permit instead of each allocating 64 MiB.
          */
         post: operations["log_in"];
         delete?: never;
@@ -826,6 +834,15 @@ export interface operations {
                     "application/json": components["schemas"]["Problem"];
                 };
             };
+            /** @description Setup has not been completed on this instance */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Problem"];
+                };
+            };
             /** @description Too many attempts */
             429: {
                 headers: {
@@ -862,6 +879,24 @@ export interface operations {
                     "application/json": components["schemas"]["Problem"];
                 };
             };
+            /** @description Setup has not been completed on this instance */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Too many requests */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Problem"];
+                };
+            };
         };
     };
     start_plex_pin: {
@@ -888,6 +923,15 @@ export interface operations {
             };
             /** @description The request body was not readable, or the return target is not this instance's configured origin */
             400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Setup has not been completed on this instance */
+            403: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -936,7 +980,7 @@ export interface operations {
                     "application/json": components["schemas"]["PinState"];
                 };
             };
-            /** @description The attempt belongs to another browser, or the Plex account is not linked to an Afisharr account */
+            /** @description The attempt belongs to another browser, the Plex account is not linked to an Afisharr account, or setup has not been completed on this instance */
             403: {
                 headers: {
                     [name: string]: unknown;
@@ -1010,6 +1054,24 @@ export interface operations {
                     "application/json": components["schemas"]["Problem"];
                 };
             };
+            /** @description Setup has not been completed on this instance */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Too many requests */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Problem"];
+                };
+            };
         };
     };
     browse: {
@@ -1053,7 +1115,7 @@ export interface operations {
                     "application/json": components["schemas"]["Problem"];
                 };
             };
-            /** @description The path is not inside the root, or that account does not administer this instance */
+            /** @description The path is not inside the root, that account does not administer this instance, or setup has not been completed */
             403: {
                 headers: {
                     [name: string]: unknown;
@@ -1064,6 +1126,15 @@ export interface operations {
             };
             /** @description No such root */
             404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Too many requests */
+            429: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -1100,8 +1171,17 @@ export interface operations {
                     "application/json": components["schemas"]["Problem"];
                 };
             };
-            /** @description That account does not administer this instance */
+            /** @description That account does not administer this instance, or setup has not been completed */
             403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Too many requests */
+            429: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -1158,8 +1238,17 @@ export interface operations {
                     "application/json": components["schemas"]["Problem"];
                 };
             };
-            /** @description That account does not administer this instance */
+            /** @description That account does not administer this instance, or setup has not been completed */
             403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Too many requests */
+            429: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -1209,8 +1298,17 @@ export interface operations {
                     "application/json": components["schemas"]["Problem"];
                 };
             };
-            /** @description That account does not administer this instance */
+            /** @description That account does not administer this instance, or setup has not been completed */
             403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Too many requests */
+            429: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -1248,7 +1346,7 @@ export interface operations {
                     "application/json": components["schemas"]["Problem"];
                 };
             };
-            /** @description That account does not administer this instance */
+            /** @description That account does not administer this instance, or setup has not been completed */
             403: {
                 headers: {
                     [name: string]: unknown;
@@ -1259,6 +1357,15 @@ export interface operations {
             };
             /** @description No such key, or it was already revoked */
             404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Too many requests */
+            429: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -1308,8 +1415,26 @@ export interface operations {
                     "application/json": components["schemas"]["Problem"];
                 };
             };
+            /** @description Setup has not been completed on this instance */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Problem"];
+                };
+            };
             /** @description That account has no password to change, or another change reached it first */
             409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Too many requests */
+            429: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -1339,6 +1464,24 @@ export interface operations {
             };
             /** @description No accepted credential was presented */
             401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Setup has not been completed on this instance */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Too many requests */
+            429: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -1376,8 +1519,26 @@ export interface operations {
                     "application/json": components["schemas"]["Problem"];
                 };
             };
+            /** @description Setup has not been completed on this instance */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Problem"];
+                };
+            };
             /** @description No such session on this account */
             404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Too many requests */
+            429: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -1411,6 +1572,15 @@ export interface operations {
             };
             /** @description The username or password was refused */
             400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description The claim on this wizard has expired */
+            403: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -1536,6 +1706,15 @@ export interface operations {
                     "application/json": components["schemas"]["SetupStatus"];
                 };
             };
+            /** @description The claim on this wizard has expired */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Problem"];
+                };
+            };
             /** @description Setup has already been completed */
             404: {
                 headers: {
@@ -1634,6 +1813,15 @@ export interface operations {
                     "application/json": components["schemas"]["SetupStatus"];
                 };
             };
+            /** @description The claim on this wizard has expired */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Problem"];
+                };
+            };
             /** @description Setup has already been completed */
             404: {
                 headers: {
@@ -1672,8 +1860,17 @@ export interface operations {
                     "application/json": components["schemas"]["Problem"];
                 };
             };
-            /** @description That account does not administer this instance */
+            /** @description That account does not administer this instance, or setup has not been completed */
             403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Too many requests */
+            429: {
                 headers: {
                     [name: string]: unknown;
                 };

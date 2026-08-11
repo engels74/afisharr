@@ -47,7 +47,18 @@ mkdir -p "$generated"
 
 # openapi-typescript emits types only; `openapi-fetch` supplies the runtime and
 # is typed entirely from them, so there is no generated code to review by hand.
-bunx --bun openapi-typescript "$document.new" --output "$types.new" >/dev/null
+#
+# `cd frontend` rather than a run from the root, for the same class of reason as
+# the `cd backend` above: `bunx` resolves a binary by walking *up* from the
+# working directory, and the only `node_modules` in this repository is
+# `frontend/node_modules`. Run from the root it finds nothing, fetches whatever
+# the registry publishes today, and ignores the version `frontend/package.json`
+# pins — so the first release that changes emitted formatting fails every
+# developer's push and every PR's contract lane with a diff nobody authored, and
+# a runner without registry access fails outright. Absolute paths, because the
+# arguments are relative to the root.
+(cd frontend && bunx --bun openapi-typescript "$root/$document.new" \
+	--output "$root/$types.new") >/dev/null
 
 if [ "$check" = true ]; then
 	status=0

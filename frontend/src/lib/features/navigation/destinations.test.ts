@@ -160,6 +160,14 @@ describe('what a visit is allowed to see', () => {
 		expect(shellFor(false, { kind: 'signedOut' })).toBe('waiting');
 	});
 
+	test('an instance that is not set up waits rather than rendering a shell', () => {
+		// The dead end this closes: `/api/auth/session` answers `setupRequired`
+		// on a freshly deployed container, and a state the session never
+		// recorded left the shell on its loading skeleton for ever, with no
+		// redirect to the wizard and no error to read (`I-UX-2`).
+		expect(shellFor(false, { kind: 'setupRequired' })).toBe('waiting');
+	});
+
 	test('a bare route renders itself, whoever is asking', () => {
 		// The sign-in page must render for a viewer and for nobody alike, or
 		// there is no way back in.
@@ -168,6 +176,7 @@ describe('what a visit is allowed to see', () => {
 			viewer,
 			{ kind: 'unknown' } as const,
 			{ kind: 'signedOut' } as const,
+			{ kind: 'setupRequired' } as const,
 		]) {
 			expect(shellFor(true, state)).toBe('bare');
 		}

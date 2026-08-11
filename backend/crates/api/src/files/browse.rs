@@ -95,7 +95,8 @@ pub struct DirectoryListing {
     responses(
         (status = 200, description = "Every enabled root", body = Vec<RootView>),
         (status = 401, description = "No accepted credential was presented", body = Problem),
-        (status = 403, description = "That account does not administer this instance", body = Problem),
+        (status = 403, description = "That account does not administer this instance, or setup has not been completed", body = Problem),
+        (status = 429, description = "Too many requests", body = Problem),
     ),
 )]
 pub async fn roots(State(state): State<ApiState>, _caller: Administrator) -> Json<Vec<RootView>> {
@@ -123,8 +124,9 @@ pub async fn roots(State(state): State<ApiState>, _caller: Administrator) -> Jso
         (status = 200, description = "The directory's contents", body = DirectoryListing),
         (status = 400, description = "The query was not readable", body = Problem),
         (status = 401, description = "No accepted credential was presented", body = Problem),
-        (status = 403, description = "The path is not inside the root, or that account does not administer this instance", body = Problem),
+        (status = 403, description = "The path is not inside the root, that account does not administer this instance, or setup has not been completed", body = Problem),
         (status = 404, description = "No such root", body = Problem),
+        (status = 429, description = "Too many requests", body = Problem),
     ),
 )]
 pub async fn browse(

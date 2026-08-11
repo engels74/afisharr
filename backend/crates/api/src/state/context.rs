@@ -92,7 +92,7 @@ impl ApiState {
     /// Assembles the state from what the binary owns.
     #[must_use]
     pub fn new(parts: ApiStateParts) -> Self {
-        let policy = ContentSecurityPolicy::with_script_digests(&shell_script_digests(
+        let policy = ContentSecurityPolicy::with_script_digests(&document_script_digests(
             parts.assets.as_ref(),
         ));
         let limiter = RateLimiter::new(parts.clock.clone());
@@ -217,13 +217,28 @@ impl ApiState {
     }
 }
 
-/// The inline-script digests of the shell this build serves.
-fn shell_script_digests(assets: &dyn AssetSource) -> Vec<String> {
-    assets
-        .shell()
-        .and_then(|shell| String::from_utf8(shell.bytes.into_owned()).ok())
-        .map(|html| crate::interface::inline_script_digests(&html))
-        .unwrap_or_default()
+/// The inline-script digests of every HTML document this build serves.
+///
+/// Every one, and not the shell alone. `interface::spa` answers an exact path
+/// before it falls back, and `adapter-static` writes one prerendered file per
+/// route — so `/index.html` and `/dashboard.html` are documents this binary
+/// really serves, and each carries a bootstrap that hashes differently from the
+/// shell's. A digest set built from the shell alone leaves those pages with
+/// their only script blocked, which the operator sees as a permanently blank
+/// page and nothing else.
+fn document_script_digests(assets: &dyn AssetSource) -> Vec<String> {
+    let mut digests: Vec<String> = assets
+        .documents()
+        .into_iter()
+        .chain(assets.shell())
+        .filter_map(|document| String::from_utf8(document.bytes.into_owned()).ok())
+        .flat_map(|html| crate::interface::inline_script_digests(&html))
+        .collect();
+    // The shell is usually also one of the documents, and a policy that named
+    // the same hash twice would be longer for no effect.
+    digests.sort_unstable();
+    digests.dedup();
+    digests
 }
 
 #[cfg(test)]
@@ -234,6 +249,14 @@ mod tests {
 
     use super::*;
 
+    fn document(body: &'static str) -> Asset {
+        Asset {
+            bytes: Cow::Borrowed(body.as_bytes()),
+            content_type: "text/html".to_owned(),
+            immutable: false,
+        }
+    }
+
     #[derive(Debug)]
     struct OneInlineScript;
 
@@ -243,22 +266,60 @@ mod tests {
         }
 
         fn shell(&self) -> Option<Asset> {
-            Some(Asset {
-                bytes: Cow::Borrowed(b"<html><script>start()</script></html>"),
-                content_type: "text/html".to_owned(),
-                immutable: false,
-            })
+            Some(document("<html><script>start()</script></html>"))
+        }
+
+        fn documents(&self) -> Vec<Asset> {
+            vec![self.shell().expect("the shell is present")]
+        }
+    }
+
+    /// A build whose prerendered pages differ from the shell, as a real one is.
+    #[derive(Debug)]
+    struct PrerenderedRoutes;
+
+    impl AssetSource for PrerenderedRoutes {
+        fn get(&self, _path: &str) -> Option<Asset> {
+            None
+        }
+
+        fn shell(&self) -> Option<Asset> {
+            Some(document("<html><script>start(200)</script></html>"))
+        }
+
+        fn documents(&self) -> Vec<Asset> {
+            vec![
+                self.shell().expect("the shell is present"),
+                document("<html><script>start(index)</script></html>"),
+            ]
         }
     }
 
     #[test]
     fn a_build_with_no_interface_admits_no_inline_script() {
-        assert!(shell_script_digests(&NoAssets).is_empty());
+        assert!(document_script_digests(&NoAssets).is_empty());
     }
 
     #[test]
     fn the_policy_admits_the_shell_this_build_actually_serves() {
-        let digests = shell_script_digests(&OneInlineScript);
+        let digests = document_script_digests(&OneInlineScript);
         assert_eq!(digests, vec![afisharr_core::digest::csp_source("start()")]);
+    }
+
+    #[test]
+    fn the_policy_admits_every_prerendered_page_and_not_only_the_shell() {
+        // A page whose bootstrap the policy does not name renders blank, and
+        // the only account of why is a console message the operator never sees.
+        let digests = document_script_digests(&PrerenderedRoutes);
+        assert!(
+            digests.contains(&afisharr_core::digest::csp_source("start(index)")),
+            "a prerendered route's own bootstrap must be admitted: {digests:?}"
+        );
+        assert!(digests.contains(&afisharr_core::digest::csp_source("start(200)")));
+    }
+
+    #[test]
+    fn a_digest_the_shell_shares_with_a_document_is_named_once() {
+        assert_eq!(document_script_digests(&OneInlineScript).len(), 1);
     }
 }

@@ -254,11 +254,11 @@ mod tests {
     fn the_window_lapses_and_the_allowance_returns() {
         let (clock, limiter) = limiter();
         for _ in 0..21 {
-            let _ = limiter.record(&Bucket::Api, address("1.2.3.4"));
+            let _ = limiter.record(&Bucket::Anonymous, address("1.2.3.4"));
         }
         clock.advance(60 * 1000);
         assert_eq!(
-            limiter.record(&Bucket::Api, address("1.2.3.4")),
+            limiter.record(&Bucket::Anonymous, address("1.2.3.4")),
             Decision::Allowed
         );
     }

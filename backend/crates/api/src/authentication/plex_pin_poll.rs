@@ -82,7 +82,7 @@ pub enum PinState {
     params(("id" = String, Path, description = "The attempt returned by the start call")),
     responses(
         (status = 200, description = "The attempt's current state", body = PinState),
-        (status = 403, description = "The attempt belongs to another browser, or the Plex account is not linked to an Afisharr account", body = Problem),
+        (status = 403, description = "The attempt belongs to another browser, the Plex account is not linked to an Afisharr account, or setup has not been completed on this instance", body = Problem),
         (status = 404, description = "No such attempt", body = Problem),
         (status = 409, description = "The client identifier changed, or the attempt was already completed", body = Problem),
         (status = 429, description = "Too many calls to plex.tv", body = Problem),

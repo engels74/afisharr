@@ -65,6 +65,16 @@ impl AssetSource for EmbeddedInterface {
             immutable: false,
         })
     }
+
+    fn documents(&self) -> Vec<Asset> {
+        // Every prerendered route writes its own file beside `200.html`, and
+        // `get` serves each of them by exact path. Their inline bootstraps
+        // carry route-specific data and so hash differently from the shell's.
+        BuiltSpa::iter()
+            .filter(|path| path.ends_with(".html"))
+            .filter_map(|path| self.get(&path))
+            .collect()
+    }
 }
 
 /// The content type for a path, from its extension.

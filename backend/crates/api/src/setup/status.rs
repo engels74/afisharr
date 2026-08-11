@@ -65,6 +65,7 @@ pub struct SetupStatus {
     tag = "setup",
     responses(
         (status = 200, description = "The derived step", body = SetupStatus),
+        (status = 403, description = "The claim on this wizard has expired", body = Problem),
         (status = 404, description = "Setup has already been completed", body = Problem),
     ),
 )]
@@ -106,6 +107,7 @@ pub async fn status(State(state): State<ApiState>, jar: CookieJar) -> AppResult<
     tag = "setup",
     responses(
         (status = 200, description = "Setup is finished", body = SetupStatus),
+        (status = 403, description = "The claim on this wizard has expired", body = Problem),
         (status = 404, description = "Setup has already been completed", body = Problem),
         (status = 409, description = "Another browser holds the wizard, or no administrator exists yet", body = Problem),
     ),

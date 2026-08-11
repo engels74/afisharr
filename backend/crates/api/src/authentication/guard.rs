@@ -16,16 +16,23 @@ use axum::{
 use axum_extra::extract::CookieJar;
 
 use crate::{
+    authentication::budget,
     error::{AppError, ErrorCode},
+    proxy::ClientContext,
     security::SESSION_COOKIE,
     state::ApiState,
 };
 
-/// How long a session's `last_seen_at` may lag before it is written again.
+/// How long a credential's "last seen" may lag before it is written again.
 ///
 /// The idle window is seven days, so second-granularity precision buys nothing
 /// and costs one serialised write per request through the single write actor
 /// (D-024). A minute of slack keeps the window honest and the hot path clean.
+///
+/// It applies to both credentials, and it has to: an API key is the one a
+/// script holds, and a script polling at the permitted rate is exactly the
+/// caller that would otherwise put a serialised write in front of every
+/// operator-facing one.
 const TOUCH_INTERVAL_MILLIS: i64 = 60 * 1000;
 
 /// Which credential a caller presented.
@@ -73,16 +80,35 @@ impl FromRequestParts<ApiState> for Authenticated {
         state: &ApiState,
     ) -> Result<Self, Self::Rejection> {
         let now = state.clock().now();
-
-        if let Some(presented) = bearer_key(parts) {
-            return from_api_key(state, &presented, now).await;
-        }
+        let address = parts
+            .extensions
+            .get::<ClientContext>()
+            .map(|context| context.address);
 
         let jar = CookieJar::from_headers(&parts.headers);
-        let Some(cookie) = jar.get(SESSION_COOKIE) else {
+        let resolved = if let Some(presented) = bearer_key(parts) {
+            from_api_key(state, &presented, now).await
+        } else if let Some(cookie) = jar.get(SESSION_COOKIE) {
+            from_session(state, cookie.value(), now).await
+        } else {
+            // Nothing was presented, so `anonymous_rate_limit` has already
+            // counted this request against the address's budget. Counting it
+            // again here would charge one request twice.
             return Err(unauthenticated());
         };
-        from_session(state, cookie.value(), now).await
+
+        match resolved {
+            Ok(caller) => {
+                budget::spend_api(state, &caller)?;
+                Ok(caller)
+            }
+            // A credential this instance does not accept is anonymous traffic
+            // wearing a header, and it is bounded as such. Without this a
+            // caller sending invented keys is refused every time and limited by
+            // nothing: the layer skipped them because they presented something,
+            // and the API budget is never reached because they hold nothing.
+            Err(refusal) => Err(budget::spend_anonymous(state, address).unwrap_or(refusal)),
+        }
     }
 }
 
@@ -155,14 +181,26 @@ async fn from_api_key(
     // Last-used is recorded even when the request that follows fails: the
     // question the interface answers is "is this key still in use", and a key
     // making refused calls is very much in use.
-    let _ = state
-        .database()
-        .writer()
-        .submit(TouchApiKey {
-            id: record.id.clone(),
-            at: now,
-        })
-        .await;
+    //
+    // Throttled on the same interval as a session's, and for the same reason:
+    // Settings shows this to the minute at best, and an unthrottled write is
+    // one serialised trip through the single write actor per request (D-024).
+    // A script polling at the permitted rate would put six hundred of them a
+    // minute in front of every operator-facing write — signing in, changing a
+    // password — and stall the interface while doing nothing but reading.
+    if record
+        .last_used_at
+        .is_none_or(|seen| seen.millis_until(now) >= TOUCH_INTERVAL_MILLIS)
+    {
+        let _ = state
+            .database()
+            .writer()
+            .submit(TouchApiKey {
+                id: record.id.clone(),
+                at: now,
+            })
+            .await;
+    }
 
     // An API key acts for the account that created it. A key whose creator was
     // deleted acts for nobody and is refused rather than escalated.

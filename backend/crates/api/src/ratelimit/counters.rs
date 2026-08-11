@@ -123,8 +123,8 @@ mod tests {
 
     #[test]
     fn a_bucket_that_counts_per_address_keeps_it() {
-        let here = Key::of(&Bucket::Api, "1.2.3.4".parse::<IpAddr>().ok());
-        let there = Key::of(&Bucket::Api, "9.9.9.9".parse::<IpAddr>().ok());
+        let here = Key::of(&Bucket::Anonymous, "1.2.3.4".parse::<IpAddr>().ok());
+        let there = Key::of(&Bucket::Anonymous, "9.9.9.9".parse::<IpAddr>().ok());
         assert_ne!(here, there);
     }
 

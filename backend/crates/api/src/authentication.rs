@@ -14,6 +14,7 @@
 //! claim (`I-SEC-8`, D-045).
 
 pub(crate) mod account_routes;
+mod budget;
 mod guard;
 pub(crate) mod password_login;
 mod plex_pin_authorize;
@@ -24,6 +25,7 @@ pub(crate) mod session;
 pub use account_routes::{
     PasswordChange, PasswordChanged, SessionView, change_password, list_sessions, revoke_session,
 };
+pub use budget::presents_credential;
 pub use guard::{Administrator, Authenticated, Credential};
 pub(crate) use password_login::ABSENT_ACCOUNT_HASH;
 pub use password_login::{Credentials, SignedIn, log_in, log_out, whoami};

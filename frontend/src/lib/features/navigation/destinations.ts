@@ -109,8 +109,8 @@ export function landingFor(setupCompleted: boolean, signedIn: boolean): string {
  *
  * - `bare` — setup and sign-in, which have no shell to render.
  * - `shell` — the administrator's interface.
- * - `waiting` — nothing has been answered yet, or the answer was "nobody" and
- *   the redirect to the sign-in page is on its way.
+ * - `waiting` — nothing has been answered yet, or the answer was "nobody" or
+ *   "this instance is not set up" and the redirect is on its way.
  * - `notPermitted` — signed in, and not an administrator.
  */
 export type ShellView = 'bare' | 'shell' | 'waiting' | 'notPermitted';

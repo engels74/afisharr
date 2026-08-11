@@ -7,6 +7,7 @@ use argon2::{
     Algorithm, Argon2, Params, Version,
     password_hash::{PasswordHash, PasswordHasher, PasswordVerifier, SaltString},
 };
+use tokio::sync::Semaphore;
 
 use crate::{accounts::AccountError, entropy};
 
@@ -28,6 +29,28 @@ pub const PARAMETERS: Cost = Cost {
     lanes: 1,
 };
 
+/// How many Argon2id operations may hold their memory at the same time.
+///
+/// The cost above is a memory cost, and it is charged per operation in flight,
+/// not per second: every concurrent hash allocates its own 64 MiB. Nothing in
+/// the request path bounded that number before this, because the rate limiters
+/// in front of sign-in count *failures* and cannot count an attempt that has
+/// not finished — so a burst of simultaneous `POST /api/auth/login` requests
+/// arriving inside one instant all passed the limit together. Tokio's blocking
+/// pool admits 512 of them, which is 32 GiB of resident memory and an
+/// OOM-killed container: an unauthenticated caller ending the process, the
+/// database, and every open session with one burst.
+///
+/// Four, matching the reference machine's four cores (PRD §21.1). More permits
+/// buy no throughput — the work is CPU-bound at one lane apiece — and each one
+/// costs another 64 MiB of peak memory. Requests past the fourth wait for a
+/// permit instead of allocating, so a burst costs queueing time rather than
+/// memory, and `spawn_blocking` is reached only by work that has room to run.
+const CONCURRENT_OPERATIONS: usize = 4;
+
+/// The permits [`CONCURRENT_OPERATIONS`] hands out.
+static IN_FLIGHT: Semaphore = Semaphore::const_new(CONCURRENT_OPERATIONS);
+
 /// One Argon2id cost setting.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Cost {
@@ -43,13 +66,15 @@ pub struct Cost {
 ///
 /// The work is deliberately a quarter of a second, which is a quarter of a
 /// second a Tokio worker must not spend, so the call is not offered in a form
-/// that lets a handler forget to move it (§24.2.4).
+/// that lets a handler forget to move it (§24.2.4). It also holds 64 MiB while
+/// it runs, so it waits for one of [`CONCURRENT_OPERATIONS`] permits first.
 ///
 /// # Errors
 /// Returns [`AccountError::Hashing`] when the parameters are rejected or the
 /// hash cannot be produced, and [`AccountError::Interrupted`] when the blocking
 /// task did not complete.
 pub async fn hash(plaintext: String) -> Result<String, AccountError> {
+    let _permit = admit().await?;
     tokio::task::spawn_blocking(move || hash_blocking(&plaintext))
         .await
         .map_err(|_| AccountError::Interrupted)?
@@ -67,9 +92,25 @@ pub async fn hash(plaintext: String) -> Result<String, AccountError> {
 /// PHC hash, and [`AccountError::Interrupted`] when the blocking task did not
 /// complete.
 pub async fn verify(plaintext: String, phc: String) -> Result<bool, AccountError> {
+    let _permit = admit().await?;
     tokio::task::spawn_blocking(move || verify_blocking(&plaintext, &phc))
         .await
         .map_err(|_| AccountError::Interrupted)?
+}
+
+/// Waits for room to run one Argon2id operation.
+///
+/// The permit is held for as long as the returned guard lives, which is the
+/// whole of the blocking call, so the memory is released before the next
+/// waiter is admitted.
+async fn admit() -> Result<tokio::sync::SemaphorePermit<'static>, AccountError> {
+    // The semaphore is a `static` and nothing closes it, so the error arm is
+    // unreachable; reporting it as an interruption rather than unwrapping keeps
+    // a sign-in from panicking a worker if that ever stops being true.
+    IN_FLIGHT
+        .acquire()
+        .await
+        .map_err(|_| AccountError::Interrupted)
 }
 
 fn argon2() -> Result<Argon2<'static>, AccountError> {
@@ -156,6 +197,35 @@ mod tests {
             .await
             .expect("hashing must succeed");
         assert_ne!(first, second);
+    }
+
+    #[tokio::test]
+    async fn a_verification_waits_rather_than_allocating_when_the_permits_are_gone() {
+        // The failure this catches is a memory one, and it is invisible in any
+        // single-request test: each operation holds 64 MiB, so an unbounded
+        // burst of sign-ins is an OOM the caller does not have to authenticate
+        // to cause. Holding every permit and watching a verification fail to
+        // start is what proves the bound is really in the path.
+        let held = IN_FLIGHT
+            .acquire_many(u32::try_from(CONCURRENT_OPERATIONS).expect("a small count"))
+            .await
+            .expect("the semaphore is never closed");
+
+        let waiting = verify("secret".to_owned(), "not-a-phc-string".to_owned());
+        assert!(
+            tokio::time::timeout(std::time::Duration::from_millis(50), waiting)
+                .await
+                .is_err(),
+            "a verification must not start while every permit is held"
+        );
+
+        drop(held);
+        assert!(
+            verify("secret".to_owned(), "not-a-phc-string".to_owned())
+                .await
+                .is_err(),
+            "the released permit must let the next operation run"
+        );
     }
 
     #[tokio::test]

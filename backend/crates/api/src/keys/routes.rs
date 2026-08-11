@@ -93,7 +93,8 @@ pub struct IssuedKey {
     responses(
         (status = 200, description = "Every key, newest first", body = Vec<ApiKeyView>),
         (status = 401, description = "No accepted credential was presented", body = Problem),
-        (status = 403, description = "That account does not administer this instance", body = Problem),
+        (status = 403, description = "That account does not administer this instance, or setup has not been completed", body = Problem),
+        (status = 429, description = "Too many requests", body = Problem),
     ),
 )]
 pub async fn list(
@@ -116,7 +117,8 @@ pub async fn list(
         (status = 200, description = "The key, with its plaintext", body = IssuedKey),
         (status = 400, description = "The name was refused", body = Problem),
         (status = 401, description = "No accepted credential was presented", body = Problem),
-        (status = 403, description = "That account does not administer this instance", body = Problem),
+        (status = 403, description = "That account does not administer this instance, or setup has not been completed", body = Problem),
+        (status = 429, description = "Too many requests", body = Problem),
     ),
 )]
 pub async fn create(
@@ -161,7 +163,8 @@ pub async fn create(
     responses(
         (status = 204, description = "The key is revoked"),
         (status = 401, description = "No accepted credential was presented", body = Problem),
-        (status = 403, description = "That account does not administer this instance", body = Problem),
+        (status = 403, description = "That account does not administer this instance, or setup has not been completed", body = Problem),
+        (status = 429, description = "Too many requests", body = Problem),
         (status = 404, description = "No such key, or it was already revoked", body = Problem),
     ),
 )]

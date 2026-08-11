@@ -141,11 +141,20 @@ pub async fn recover(
     JsonBody(request): JsonBody<RecoverRequest>,
 ) -> AppResult<(CookieJar, Json<ClaimGranted>)> {
     let now = state.clock().now();
+    // The caller's own cookie, exactly as `claim` reads it. Passing `None` here
+    // would classify a claim *this* browser holds as held by another and refuse
+    // it — which is the one case recovery exists for: the container restarted,
+    // so the console token died with the process, while the lease row and this
+    // browser's cookie both survived. Both doors would then be shut, and the
+    // operator would wait out a claim that is already theirs.
+    let existing = jar
+        .get(CLAIM_COOKIE)
+        .map(|cookie| cookie.value().to_owned());
 
-    if let ClaimState::HeldByAnother { expires_at } = inspect(state.database().readers(), None, now)
+    let held = inspect(state.database().readers(), existing.as_deref(), now)
         .await
-        .map_err(AppError::internal)?
-    {
+        .map_err(AppError::internal)?;
+    if let ClaimState::HeldByAnother { expires_at } = held {
         return Err(held_elsewhere(now, expires_at));
     }
 
@@ -182,7 +191,16 @@ pub async fn recover(
         .limiter()
         .forget(&account_bucket, Some(client.address));
 
-    let granted = grant(&state, client, jar, mint_cookie_value(), now).await;
+    // The holder's own value when they already hold the lease, exactly as
+    // `claim` renews. A fresh value would hash to a different lease owner, so
+    // `MintClaim` would neither renew nor take and would report the operator's
+    // own claim as blocking them.
+    let cookie_value = match held {
+        ClaimState::HeldByCaller { .. } => existing.unwrap_or_else(mint_cookie_value),
+        ClaimState::Unclaimed | ClaimState::HeldByAnother { .. } => mint_cookie_value(),
+    };
+
+    let granted = grant(&state, client, jar, cookie_value, now).await;
     if granted.is_ok() {
         record_step(
             &state,

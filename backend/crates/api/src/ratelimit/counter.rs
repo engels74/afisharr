@@ -137,7 +137,7 @@ mod tests {
     #[test]
     fn an_ordinary_counter_is_forgotten_when_its_window_closes() {
         let now = Timestamp::from_millis(1_000);
-        let policy = crate::ratelimit::Bucket::Api.policy();
+        let policy = crate::ratelimit::Bucket::Anonymous.policy();
         assert_eq!(
             forgotten_at(&counter(now), policy),
             now.plus_millis(policy.window_millis)
@@ -163,7 +163,7 @@ mod tests {
     #[test]
     fn a_bucket_with_no_lockout_reports_the_rest_of_its_window() {
         let now = Timestamp::from_millis(1_000);
-        let policy = crate::ratelimit::Bucket::Api.policy();
+        let policy = crate::ratelimit::Bucket::Anonymous.policy();
         let mut spent = counter(now);
         assert_eq!(
             engage_lockout(&mut spent, policy, now),
