@@ -29,7 +29,12 @@ export interface Session {
 	 * who has just signed in straight back to the sign-in page.
 	 */
 	readonly refreshing: boolean;
-	/** Asks the API who is signed in. */
+	/**
+	 * Asks the API who is signed in.
+	 *
+	 * Records an answer, and only an answer: a refused credential is a
+	 * sign-out, and every other failure leaves what is known where it was.
+	 */
 	refresh(): Promise<void>;
 	/** Records a sign-in that just happened, without a second round trip. */
 	adopt(account: SignedIn): void;
@@ -47,7 +52,14 @@ export interface Session {
  */
 export function createSession(): Session {
 	let state = $state<SessionState>({ kind: 'unknown' });
-	let inFlight = $state(0);
+	// Plain, and reactive only through the flag below. `refresh()` reads this
+	// to increment it, and a rune read inside an effect is a dependency of that
+	// effect — so a shell that refreshed the session from an `$effect` would
+	// invalidate itself on its own write, refresh again, and flood
+	// `/api/auth/session` until Svelte's update-depth guard stopped it
+	// rendering entirely (P1).
+	let inFlight = 0;
+	let refreshing = $state(false);
 
 	return {
 		get state() {
@@ -55,19 +67,30 @@ export function createSession(): Session {
 		},
 
 		get refreshing() {
-			return inFlight > 0;
+			return refreshing;
 		},
 
 		async refresh(): Promise<void> {
 			inFlight += 1;
+			refreshing = true;
 			try {
 				const result = await readSession();
-				state =
-					result.outcome === 'ok'
-						? { kind: 'signedIn', account: result.value }
-						: { kind: 'signedOut' };
+				if (result.outcome === 'ok') {
+					state = { kind: 'signedIn', account: result.value };
+					return;
+				}
+				// Only a refused credential is a signed-out one. A 500, a
+				// gateway that answered for the instance, or a browser that
+				// could not reach it at all say nothing about the cookie — and
+				// turning any of them into `signedOut` sends an operator who is
+				// still signed in to the sign-in page, mid-task, on a fault
+				// that had nothing to do with them (P1).
+				if (result.problem.code === 'unauthenticated') {
+					state = { kind: 'signedOut' };
+				}
 			} finally {
 				inFlight -= 1;
+				refreshing = inFlight > 0;
 			}
 		},
 

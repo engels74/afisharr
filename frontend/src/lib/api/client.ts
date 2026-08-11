@@ -2,6 +2,9 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 import createClient from 'openapi-fetch';
+// Relative, not `$lib`: this module is reachable from `bun test`, which
+// resolves outside the Vite graph (see the note in destinations.test.ts).
+import { t } from '../shared/i18n';
 import type { components, paths } from './generated/schema';
 
 /**
@@ -27,6 +30,46 @@ export type Problem = components['schemas']['Problem'];
 
 /** What kind of failure a {@link Problem} is. */
 export type ErrorCode = components['schemas']['ErrorCode'];
+
+/**
+ * The status a failure this client synthesised is reported under.
+ *
+ * 503, because that is what it describes: the instance did not answer. Nothing
+ * reads it — every caller narrows on {@link Problem.code} — but a response has
+ * to carry one, and one that lied about having succeeded would be worse than
+ * one nobody looks at.
+ */
+const UNREACHABLE_STATUS = 503;
+
+/**
+ * Turns a transport failure into the failure shape every route answers with.
+ *
+ * The browser rejects `fetch` when it cannot reach the instance at all — a
+ * restart, a dropped network, a proxy in between — and that rejection
+ * propagates out of `openapi-fetch` as an exception. Every wrapper in
+ * `$lib/features` promises a refusal *value* instead, and their callers await
+ * them without a `try`, so the exception escapes past the code that would have
+ * cleared the pending state: the form stays disabled, the spinner stays up, and
+ * the interface waits for something that already failed.
+ *
+ * Normalised here rather than in each wrapper, because "the API answered
+ * something" and "the API could not be reached" are both answers to the same
+ * question, and a wrapper that had to remember to catch is a wrapper somebody
+ * will write without catching.
+ */
+api.use({
+	onError: () =>
+		new Response(
+			JSON.stringify({
+				code: 'upstream',
+				message: t('api.unreachable'),
+			} satisfies Problem),
+			{
+				status: UNREACHABLE_STATUS,
+				headers: { 'content-type': 'application/json' },
+			},
+		),
+});
 
 /**
  * The cookie the API sets for the double-submit CSRF check.

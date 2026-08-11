@@ -7,7 +7,7 @@ use std::sync::Arc;
 
 use afisharr_api::{
     interface::AssetSource,
-    proxy::TrustedProxies,
+    proxy::{PublicOrigin, TrustedProxies},
     state::{ApiState, ApiStateParts, InstanceIdentity},
 };
 use afisharr_core::{
@@ -61,6 +61,19 @@ pub async fn build_state_against(
     let trusted_proxies = TrustedProxies::parse(&booted.settings.body.http.trust_proxy)
         .context("reading the configured trustProxy list")?;
 
+    // Refused rather than ignored: an operator who mistyped this would get an
+    // instance that quietly refuses every hosted Plex sign-in, with nothing in
+    // front of them saying which of the two ends is wrong.
+    let public_origin = booted
+        .settings
+        .body
+        .http
+        .public_origin
+        .as_deref()
+        .map(PublicOrigin::parse)
+        .transpose()
+        .context("reading the configured publicOrigin")?;
+
     let plex_identity = ClientIdentity::new(
         &booted.instance.client_identifier,
         &booted.instance.device_name,
@@ -100,6 +113,7 @@ pub async fn build_state_against(
             None => PlexTvClient::new(outbound, plex_identity),
         },
         trusted_proxies,
+        public_origin,
         asset_roots,
         assets,
     }))

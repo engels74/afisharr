@@ -7,7 +7,11 @@
 import { GlobalRegistrator } from '@happy-dom/global-registrator';
 import { compileModule } from 'svelte/compiler';
 
-GlobalRegistrator.register();
+// With a document location, because `about:blank` cannot resolve a relative
+// URL: every request this interface makes is same-origin and relative, so a DOM
+// registered without one turns the first `api.GET('/api/...')` into a
+// `DOMException` about the document rather than an answer about the API.
+GlobalRegistrator.register({ url: 'http://localhost/' });
 
 // Runes are compiler primitives, not functions Bun can resolve, so a
 // `.svelte.ts` module loaded raw fails at `$state is not defined`. Vite runs

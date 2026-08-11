@@ -43,11 +43,42 @@ impl RunningInstance {
         Self::start_full(instance, SettingsBody::default(), Some(plex_base)).await
     }
 
+    /// The same, with nothing configured as the public origin.
+    ///
+    /// What an operator who never set one has. The hosted plex.tv sign-in is
+    /// the one flow that needs an absolute address for this instance, so it is
+    /// the one flow that has to say so rather than believing whatever authority
+    /// the request carried.
+    pub async fn start_without_public_origin(instance: &TempInstance, plex_base: &str) -> Self {
+        Self::listening(instance, SettingsBody::default(), Some(plex_base), false).await
+    }
+
     async fn start_full(
         instance: &TempInstance,
         configured: SettingsBody,
         plex_base: Option<&str>,
     ) -> Self {
+        Self::listening(instance, configured, plex_base, true).await
+    }
+
+    async fn listening(
+        instance: &TempInstance,
+        configured: SettingsBody,
+        plex_base: Option<&str>,
+        with_public_origin: bool,
+    ) -> Self {
+        // The socket first, because its address is what a deployed instance has
+        // configured as the origin operators reach it at — and here the port is
+        // the operating system's to choose.
+        let serving = server::serve("127.0.0.1", 0)
+            .await
+            .expect("binding an ephemeral port must succeed");
+        let base_url = format!("http://{}", serving.address);
+
+        let mut configured = configured;
+        if with_public_origin && configured.http.public_origin.is_none() {
+            configured.http.public_origin = Some(base_url.clone());
+        }
         let booted = instance.boot_with(configured).await;
 
         let bootstrap = Arc::new(TokenStore::empty());
@@ -60,10 +91,6 @@ impl RunningInstance {
         let state = server::build_state_against(&booted, Arc::clone(&bootstrap), plex_base)
             .await
             .expect("the router's state must assemble");
-        let serving = server::serve("127.0.0.1", 0)
-            .await
-            .expect("binding an ephemeral port must succeed");
-        let base_url = format!("http://{}", serving.address);
 
         let (shutdown, stop) = tokio::sync::oneshot::channel();
         let task = tokio::spawn(async move {

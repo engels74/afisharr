@@ -4,6 +4,7 @@
 import { describe, expect, test } from 'bun:test';
 import { en, enPlurals } from './catalogue.en';
 import { interpolate, placeholdersOf } from './interpolate';
+import type { Catalogue } from './messages.svelte';
 import { english, locale, t, tn, useCatalogue } from './messages.svelte';
 import { selectPlural } from './plural';
 
@@ -110,6 +111,39 @@ describe('the catalogue in force', () => {
 
 		useCatalogue(english);
 		expect(t('auth.signIn')).toBe('Sign in');
+	});
+
+	test('a translated catalogue supplies its own plural forms', () => {
+		// What a second language actually is. Typed to English's own strings,
+		// this does not compile: a catalogue would have to repeat the English
+		// text word for word, and a language whose rules need `few` could not
+		// express it at all — which is the whole of the interface being
+		// translatable (`I-UX-7`).
+		const polish: Catalogue = {
+			locale: 'pl',
+			messages: { ...en, 'auth.signIn': 'Zaloguj się' },
+			plurals: {
+				...enPlurals,
+				'count.items': {
+					one: '{count} przedmiot',
+					few: '{count} przedmioty',
+					many: '{count} przedmiotów',
+					other: '{count} przedmiotu',
+				},
+			},
+		};
+		useCatalogue(polish);
+
+		expect(t('auth.signIn')).toBe('Zaloguj się');
+		expect(tn('count.items', 1)).toBe('1 przedmiot');
+		// Polish takes `few` at 2 and `many` at 5. English has neither, so a
+		// catalogue that could only hold English's categories would render the
+		// same sentence for both.
+		expect(tn('count.items', 2)).toBe('2 przedmioty');
+		expect(tn('count.items', 5)).toBe('5 przedmiotów');
+
+		useCatalogue(english);
+		expect(tn('count.items', 2)).toBe('2 items');
 	});
 });
 

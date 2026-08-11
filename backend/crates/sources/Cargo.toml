@@ -29,3 +29,6 @@ workspace = true
 # described: a server that sends headers and then goes away is the one shape a
 # mocked client cannot produce honestly.
 tokio = { workspace = true, features = ["io-util", "macros", "net", "rt-multi-thread"] }
+# A subscriber, because the request timing is reported to the log rather than
+# returned: asserting on what the log says needs something collecting it.
+tracing-subscriber.workspace = true

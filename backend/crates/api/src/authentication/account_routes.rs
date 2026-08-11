@@ -98,7 +98,7 @@ pub struct SessionView {
         (status = 200, description = "The password is changed", body = PasswordChanged),
         (status = 400, description = "The new password was refused", body = Problem),
         (status = 401, description = "The current password was not accepted", body = Problem),
-        (status = 409, description = "That account has no password to change", body = Problem),
+        (status = 409, description = "That account has no password to change, or another change reached it first", body = Problem),
     ),
 )]
 pub async fn change_password(
@@ -131,7 +131,7 @@ pub async fn change_password(
             "This account signs in through Plex and has no password to change.",
         ));
     };
-    if !accounts::verify(request.current_password, stored)
+    if !accounts::verify(request.current_password, stored.clone())
         .await
         .map_err(AppError::internal)?
     {
@@ -158,6 +158,7 @@ pub async fn change_password(
         .writer()
         .submit(RotatePassword {
             user_id: user.id.clone(),
+            expected_hash: stored,
             password_hash: hashed,
             current_session: caller.session_digest().map(str::to_owned),
             replacement_digest: replacement.digest().to_owned(),
@@ -171,14 +172,28 @@ pub async fn change_password(
         .await
         .map_err(AppError::internal)?;
 
-    let PasswordRotation::Rotated { others_revoked } = rotated else {
+    let others_revoked = match rotated {
+        PasswordRotation::Rotated { others_revoked } => others_revoked,
+        // Another change verified the same password and committed first. This
+        // one is rotating away a credential that is already gone: writing it
+        // would revoke the replacement session that change's browser is
+        // holding, and hand the account to whichever request finished last.
+        PasswordRotation::Superseded => {
+            return Err(AppError::of(
+                ErrorCode::Conflict,
+                "That password was already changed by another request. \
+                 Sign in with the new password.",
+            ));
+        }
         // The account was read and its current password verified a moment ago,
         // so finding no local row to change means it was deleted or disabled in
         // between. Nothing was written.
-        return Err(AppError::of(
-            ErrorCode::Conflict,
-            "That account can no longer be changed. Sign in again.",
-        ));
+        PasswordRotation::NoLocalAccount => {
+            return Err(AppError::of(
+                ErrorCode::Conflict,
+                "That account can no longer be changed. Sign in again.",
+            ));
+        }
     };
 
     let mut jar = jar;

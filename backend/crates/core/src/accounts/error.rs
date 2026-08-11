@@ -32,6 +32,17 @@ pub enum AccountError {
         kind: String,
     },
 
+    /// Another account already holds the username this one arrived under.
+    ///
+    /// Usernames are globally unique, and a plex.tv account arrives under the
+    /// name plex.tv reports. A defined refusal rather than a constraint
+    /// failure, because the caller has to render it to whoever is signing in.
+    #[error("the username '{username}' is already taken")]
+    UsernameTaken {
+        /// The name that was already in use.
+        username: String,
+    },
+
     /// The database refused the statement.
     #[error("account storage failed")]
     Storage(#[from] StorageError),

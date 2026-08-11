@@ -89,7 +89,9 @@ pub(super) async fn authorize(
 
     // The row is refreshed from plex.tv rather than left as it was: a renamed
     // account is the same account, matched on the numeric id, which is the
-    // binding and not the key (P4).
+    // binding and not the key (P4). The local username survives a rename that
+    // would collide with another account's, so a sign-in whose pin is already
+    // spent cannot fail on a name plex.tv chose.
     let refreshed = state
         .database()
         .writer()
@@ -105,7 +107,18 @@ pub(super) async fn authorize(
         })
         .await
         .map_err(AppError::internal)?
-        .map_err(AppError::internal)?;
+        .map_err(|error| match error {
+            // Only reachable for an account no row is bound to yet, which is
+            // not this route: the link was found above. Defined anyway, so a
+            // name that is already taken is never a 500 an operator has to
+            // read a log to understand.
+            accounts::AccountError::UsernameTaken { ref username } => AppError::of(
+                ErrorCode::Conflict,
+                format!("Another account on this instance already uses the name '{username}'."),
+            )
+            .caused_by(error),
+            other => AppError::internal(other),
+        })?;
 
     close(state, attempt_id, plex_pin::PinLoginResult::Success, now).await;
 

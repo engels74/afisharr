@@ -19,6 +19,9 @@ export const en = {
 	'app.sourceLink': 'Source',
 	'app.skipToContent': 'Skip to content',
 
+	'api.unreachable':
+		'Afisharr did not answer. It may be restarting, or the connection to it is down.',
+
 	'nav.dashboard': 'Dashboard',
 	'nav.collections': 'Collections',
 	'nav.design': 'Design',
@@ -91,6 +94,8 @@ export const en = {
 	'auth.plexCode': 'Enter this code at plex.tv/link: {code}',
 	'auth.plexWaiting': 'Waiting for Plex…',
 	'auth.plexExpired': 'That Plex sign-in expired. Start it again.',
+	'auth.notAdministrator':
+		'This account does not administer this instance, and Afisharr’s interface is administrator-only. Ask whoever runs it for administrator rights, or sign out and use another account.',
 
 	'page.dashboard.title': 'Dashboard',
 	'page.dashboard.empty':

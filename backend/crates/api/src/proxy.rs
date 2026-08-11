@@ -16,8 +16,10 @@
 //! flag).
 
 mod edge;
+mod origin;
 mod peer;
 mod trusted;
 
+pub use origin::{PublicOrigin, PublicOriginError};
 pub use peer::{ClientContext, Scheme};
 pub use trusted::{TrustedProxies, TrustedProxyError};

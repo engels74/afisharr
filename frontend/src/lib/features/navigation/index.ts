@@ -5,7 +5,7 @@
 
 import NavShell from './nav-shell.svelte';
 
-export type { Destination } from './destinations';
+export type { Destination, ShellView } from './destinations';
 export {
 	isActive,
 	isBareRoute,
@@ -15,5 +15,6 @@ export {
 	SETTINGS,
 	SETTINGS_SUBPAGES,
 	SETUP,
+	shellFor,
 } from './destinations';
 export { NavShell };

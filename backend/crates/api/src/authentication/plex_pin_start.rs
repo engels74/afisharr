@@ -12,20 +12,15 @@
 
 use afisharr_core::{identifier::Id, plex_pin};
 use afisharr_plex::pin::{AuthorizationUrl, Mode, PinError};
-use axum::{
-    Json,
-    extract::State,
-    http::{HeaderMap, header::HOST},
-};
+use axum::{Json, extract::State};
 use axum_extra::extract::CookieJar;
 use serde::{Deserialize, Serialize};
-use url::Url;
 use utoipa::ToSchema;
 
 use crate::{
     authentication::session,
     error::{AppError, AppResult, ErrorCode, JsonBody, Problem},
-    proxy::{ClientContext, Scheme},
+    proxy::{ClientContext, PublicOrigin},
     ratelimit::{Bucket, Decision},
     security::{PLEX_PIN_COOKIE, PLEX_PIN_COOKIE_PATH, set},
     state::ApiState,
@@ -40,10 +35,11 @@ pub struct StartPin {
     pub oauth: bool,
     /// Where plex.tv returns the operator, for the OAuth variant.
     ///
-    /// It must name this instance. plex.tv redirects to whatever this asks
-    /// for, so a target anywhere else turns the endpoint into a redirector
-    /// wearing a legitimate `app.plex.tv/auth` URL, and the operator who
-    /// completes the sign-in lands on somebody else's page.
+    /// It must be on this instance's configured `publicOrigin`. plex.tv
+    /// redirects to whatever this asks for, so a target anywhere else turns the
+    /// endpoint into a redirector wearing a legitimate `app.plex.tv/auth` URL,
+    /// and the operator who completes the sign-in lands on somebody else's
+    /// page.
     pub forward_url: Option<String>,
 }
 
@@ -69,7 +65,7 @@ pub struct PinStarted {
     request_body = StartPin,
     responses(
         (status = 200, description = "A pin was created", body = PinStarted),
-        (status = 400, description = "The request body was not readable, or the return target is not this instance", body = Problem),
+        (status = 400, description = "The request body was not readable, or the return target is not this instance's configured origin", body = Problem),
         (status = 429, description = "Too many attempts", body = Problem),
         (status = 502, description = "plex.tv could not be reached", body = Problem),
     ),
@@ -78,7 +74,6 @@ pub async fn start_plex_pin(
     State(state): State<ApiState>,
     client: ClientContext,
     jar: CookieJar,
-    headers: HeaderMap,
     JsonBody(request): JsonBody<StartPin>,
 ) -> AppResult<(CookieJar, Json<PinStarted>)> {
     // A pin creation reaches plex.tv on the caller's behalf, so it counts
@@ -107,17 +102,25 @@ pub async fn start_plex_pin(
     // Judged before plex.tv is called and before a row is stored: a return
     // target this instance will not stand behind is a bad request, not a
     // reason to spend an upstream call and leave an attempt behind.
+    //
+    // Judged against the configured origin and against nothing in the request.
+    // `Host` is written by whoever is calling, so an instance that compared
+    // against it would accept `Host: evil.example` beside
+    // `forwardUrl: https://evil.example/...` and hand the caller a genuine
+    // `app.plex.tv/auth` URL that returns the operator to somebody else's page
+    // (`I-SEC-1`).
     let forward_to = match (mode, request.forward_url.as_deref()) {
-        (Mode::OAuth, Some(forward_to)) if returns_here(forward_to, client.scheme, &headers) => {
+        (Mode::OAuth, Some(forward_to))
+            if state
+                .public_origin()
+                .is_some_and(|origin| origin.covers(forward_to)) =>
+        {
             Some(forward_to)
         }
         (Mode::OAuth, Some(_)) => {
             return Err(AppError::new(
-                Problem::new(
-                    ErrorCode::Invalid,
-                    "A Plex sign-in can only return to this instance.",
-                )
-                .at("/forwardUrl"),
+                Problem::new(ErrorCode::Invalid, unreturnable(state.public_origin()))
+                    .at("/forwardUrl"),
             ));
         }
         _ => None,
@@ -182,37 +185,23 @@ pub async fn start_plex_pin(
     ))
 }
 
-/// Whether `forward_to` sends the operator back to this instance.
+/// Why a return target was refused, in terms the operator can act on.
 ///
-/// The origin is taken from the request rather than from the body, because the
-/// body is the attacker's half of this: plex.tv redirects to whatever the
-/// `forwardUrl` names, and it does so from a real `app.plex.tv/auth` URL that
-/// this endpoint minted, so an unchecked target is an open redirect signed by
-/// Afisharr. Scheme comes from the resolved client context — the one place
-/// that decides whether a forwarded `https` is believable (`I-SEC-1`) — and the
-/// authority from `Host`, which is the same value the CSRF check binds a
-/// declared `Origin` to (P7).
-///
-/// Origins are compared as origins, not as strings: `https://host` and
-/// `https://host:443` are one instance, and a target with an opaque origin —
-/// `javascript:`, `data:` — is not one at all.
-fn returns_here(forward_to: &str, scheme: Scheme, headers: &HeaderMap) -> bool {
-    let Some(host) = headers.get(HOST).and_then(|value| value.to_str().ok()) else {
-        // Nothing to compare against, so nothing is provably this instance.
-        return false;
-    };
-    // A `Host` carrying a path, a query, or userinfo is not an authority, and
-    // parsing it as one would let the extra part choose the origin.
-    if host.is_empty() || host.contains(['/', '\\', '@', '?', '#']) {
-        return false;
+/// Two different problems wearing one status. With no `publicOrigin` set there
+/// is nothing to check a target against, and the answer has to name the setting
+/// rather than blame the target — otherwise a first-run operator reads "only to
+/// this instance" about the address they are sitting on.
+fn unreturnable(configured: Option<&PublicOrigin>) -> String {
+    match configured {
+        Some(origin) => format!(
+            "A Plex sign-in can only return to this instance, at {}.",
+            origin.as_str()
+        ),
+        None => "This instance has no public origin configured, so a hosted Plex sign-in \
+                 has no return address it can prove. Set http.publicOrigin, or sign in \
+                 with a code."
+            .to_owned(),
     }
-    let (Ok(here), Ok(target)) = (
-        Url::parse(&format!("{}://{host}", scheme.as_str())),
-        Url::parse(forward_to),
-    ) else {
-        return false;
-    };
-    target.origin().is_tuple() && target.origin() == here.origin()
 }
 
 /// Renders a plex.tv failure in the operator's terms.
@@ -273,85 +262,21 @@ mod tests {
         );
     }
 
-    fn host(value: &str) -> HeaderMap {
-        let mut headers = HeaderMap::new();
-        if !value.is_empty() {
-            headers.insert(
-                HOST,
-                axum::http::HeaderValue::from_str(value).expect("a valid header"),
-            );
-        }
-        headers
+    #[test]
+    fn a_refusal_with_no_configured_origin_names_the_setting() {
+        // The operator's two problems are different: nothing is configured, or
+        // the target is not this instance. An answer that gave the second
+        // sentence for the first case would send a first-run operator looking
+        // for a fault in the address they are sitting on.
+        let message = unreturnable(None);
+        assert!(message.contains("publicOrigin"), "{message}");
+        assert!(message.contains("code"), "{message}");
     }
 
     #[test]
-    fn a_return_to_this_instance_is_allowed() {
-        assert!(returns_here(
-            "http://afisharr.example/login",
-            Scheme::Http,
-            &host("afisharr.example"),
-        ));
-        assert!(returns_here(
-            "https://afisharr.example:8484/login?x=1",
-            Scheme::Https,
-            &host("afisharr.example:8484"),
-        ));
-    }
-
-    #[test]
-    fn a_return_to_somebody_else_is_refused() {
-        // The hole this closes: the caller posts `forwardUrl`, the endpoint
-        // embeds it in a genuine `app.plex.tv/auth` URL, and whoever finishes
-        // the sign-in lands on the attacker's page.
-        for target in [
-            "https://evil.example",
-            "https://evil.example/afisharr.example",
-            "https://afisharr.example.evil.example/login",
-            "https://afisharr.example@evil.example/login",
-            "//evil.example/login",
-            "javascript:alert(1)",
-            "data:text/html,<script></script>",
-            "not a url",
-        ] {
-            assert!(
-                !returns_here(target, Scheme::Https, &host("afisharr.example")),
-                "{target} must not be treated as this instance"
-            );
-        }
-    }
-
-    #[test]
-    fn a_default_port_and_its_spelling_are_one_instance() {
-        assert!(returns_here(
-            "https://afisharr.example:443/login",
-            Scheme::Https,
-            &host("afisharr.example"),
-        ));
-    }
-
-    #[test]
-    fn the_scheme_the_request_arrived_over_is_part_of_the_comparison() {
-        // A plaintext hop must not mint a return to an `https` origin it cannot
-        // prove it is, and vice versa: the scheme comes from the resolved
-        // client context, which is where a forwarded claim is judged.
-        assert!(!returns_here(
-            "https://afisharr.example/login",
-            Scheme::Http,
-            &host("afisharr.example"),
-        ));
-        assert!(!returns_here(
-            "http://afisharr.example/login",
-            Scheme::Https,
-            &host("afisharr.example"),
-        ));
-    }
-
-    #[test]
-    fn a_request_with_no_host_to_compare_against_proves_nothing() {
-        assert!(!returns_here(
-            "https://afisharr.example/login",
-            Scheme::Https,
-            &host(""),
-        ));
+    fn a_refusal_against_a_configured_origin_names_the_origin() {
+        let origin = PublicOrigin::parse("https://afisharr.example").expect("a valid origin");
+        let message = unreturnable(Some(&origin));
+        assert!(message.contains("afisharr.example"), "{message}");
     }
 }

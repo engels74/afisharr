@@ -13,6 +13,7 @@ import {
 	PRIMARY,
 	SETTINGS,
 	SETTINGS_SUBPAGES,
+	shellFor,
 } from './destinations';
 
 describe('the navigation model', () => {
@@ -120,5 +121,55 @@ describe('which routes render without the shell', () => {
 		// between the two forever.
 		expect(isBareRoute(landingFor(true, false))).toBe(true);
 		expect(isBareRoute(landingFor(false, false))).toBe(true);
+	});
+});
+
+describe('what a visit is allowed to see', () => {
+	const administrator = {
+		kind: 'signedIn',
+		account: { userId: 'A', username: 'operator', isAdmin: true },
+	} as const;
+	const viewer = {
+		kind: 'signedIn',
+		account: { userId: 'V', username: 'viewer', isAdmin: false },
+	} as const;
+
+	test('an administrator gets the shell', () => {
+		expect(shellFor(false, administrator)).toBe('shell');
+	});
+
+	test('an account that administers nothing does not', () => {
+		// Tier 0 is admin-only (D-007). A linked Plex viewer holds a session
+		// this API accepts, and routing them into the shell on the strength of
+		// it gives them a navigation bar whose every page answers 403 and a
+		// live stream whose handler refuses them outright.
+		expect(shellFor(false, viewer)).toBe('notPermitted');
+	});
+
+	test('an account that administers nothing is not treated as signed out', () => {
+		// The other half. They are signed in, so the sign-in page would take
+		// them straight back here — a loop instead of a sentence.
+		expect(shellFor(false, viewer)).not.toBe('waiting');
+	});
+
+	test('nothing asked yet is neither the shell nor a refusal', () => {
+		expect(shellFor(false, { kind: 'unknown' })).toBe('waiting');
+	});
+
+	test('signed out waits, because the redirect is already on its way', () => {
+		expect(shellFor(false, { kind: 'signedOut' })).toBe('waiting');
+	});
+
+	test('a bare route renders itself, whoever is asking', () => {
+		// The sign-in page must render for a viewer and for nobody alike, or
+		// there is no way back in.
+		for (const state of [
+			administrator,
+			viewer,
+			{ kind: 'unknown' } as const,
+			{ kind: 'signedOut' } as const,
+		]) {
+			expect(shellFor(true, state)).toBe('bare');
+		}
 	});
 });

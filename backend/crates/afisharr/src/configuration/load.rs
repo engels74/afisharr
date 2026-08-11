@@ -77,6 +77,12 @@ fn apply_environment(body: &mut SettingsBody) -> Result<()> {
             .map(str::to_owned)
             .collect();
     }
+    if let Some(value) = override_value("PUBLIC_ORIGIN")? {
+        // Absolute, and judged when the router is built rather than here: this
+        // loader's job is to read the document, and a URL that will not parse
+        // is reported by the one place that has to use it.
+        body.http.public_origin = Some(value);
+    }
     if let Some(value) = override_value("LOG_LEVEL")? {
         body.logging.level = value;
     }

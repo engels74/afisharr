@@ -4,6 +4,7 @@
 // Relative, not `$lib`: this module is reachable from `bun test`, which
 // resolves outside the Vite graph (see the note in destinations.test.ts).
 import type { MessageKey } from '../../shared/i18n';
+import type { SessionState } from '../auth/session.svelte';
 
 /** One entry in the navigation shell. */
 export interface Destination {
@@ -101,4 +102,39 @@ export function landingFor(setupCompleted: boolean, signedIn: boolean): string {
 		return SETUP;
 	}
 	return signedIn ? '/dashboard' : LOGIN;
+}
+
+/**
+ * What the layout renders for one visit.
+ *
+ * - `bare` — setup and sign-in, which have no shell to render.
+ * - `shell` — the administrator's interface.
+ * - `waiting` — nothing has been answered yet, or the answer was "nobody" and
+ *   the redirect to the sign-in page is on its way.
+ * - `notPermitted` — signed in, and not an administrator.
+ */
+export type ShellView = 'bare' | 'shell' | 'waiting' | 'notPermitted';
+
+/**
+ * What `state` is allowed to see, on a route that is `bare` or is not.
+ *
+ * Being signed in is not the same as administering this instance. Tier 0 is an
+ * admin-only surface (D-007): a linked Plex viewer holds a session this API
+ * accepts, and routing them into the shell on the strength of it gives them a
+ * navigation bar whose every page answers 403 and a live stream whose handler
+ * refuses them outright — an interface insisting it works while nothing in it
+ * does. They are not signed out and must not be sent to the sign-in page
+ * either; what they are owed is a sentence saying so (`I-UX-2`).
+ *
+ * A function rather than a chain of branches inside the layout, because "what
+ * does this visit see" is a question that has to be answerable on its own.
+ */
+export function shellFor(bare: boolean, state: SessionState): ShellView {
+	if (bare) {
+		return 'bare';
+	}
+	if (state.kind === 'signedIn') {
+		return state.account.isAdmin ? 'shell' : 'notPermitted';
+	}
+	return 'waiting';
 }

@@ -11,8 +11,12 @@ use afisharr_core::{
 use afisharr_plex::pin::PlexTvClient;
 
 use crate::{
-    interface::AssetSource, proxy::TrustedProxies, ratelimit::RateLimiter,
-    security::ContentSecurityPolicy, state::InstanceIdentity, stream::StreamHub,
+    interface::AssetSource,
+    proxy::{PublicOrigin, TrustedProxies},
+    ratelimit::RateLimiter,
+    security::ContentSecurityPolicy,
+    state::InstanceIdentity,
+    stream::StreamHub,
 };
 
 /// Everything the router needs, behind one cheap clone.
@@ -49,6 +53,7 @@ struct Inner {
     plex: PlexTvClient,
     limiter: RateLimiter,
     trusted_proxies: TrustedProxies,
+    public_origin: Option<PublicOrigin>,
     asset_roots: Vec<Root>,
     stream: StreamHub,
     assets: Arc<dyn AssetSource>,
@@ -75,6 +80,8 @@ pub struct ApiStateParts {
     pub plex: PlexTvClient,
     /// Proxies whose forwarded headers are honoured.
     pub trusted_proxies: TrustedProxies,
+    /// The origin operators reach this instance at, when one is configured.
+    pub public_origin: Option<PublicOrigin>,
     /// Roots the filesystem browser may walk.
     pub asset_roots: Vec<Root>,
     /// The embedded interface.
@@ -101,6 +108,7 @@ impl ApiState {
                 plex: parts.plex,
                 limiter,
                 trusted_proxies: parts.trusted_proxies,
+                public_origin: parts.public_origin,
                 asset_roots: parts.asset_roots,
                 stream: StreamHub::new(),
                 assets: parts.assets,
@@ -155,6 +163,16 @@ impl ApiState {
     #[must_use]
     pub fn trusted_proxies(&self) -> &TrustedProxies {
         &self.inner.trusted_proxies
+    }
+
+    /// The origin operators reach this instance at, if the operator set one.
+    ///
+    /// `None` is not "derive it from the request": the request's authority is
+    /// the caller's to choose, so a route that needs an absolute URL for this
+    /// instance refuses instead (`I-SEC-1`).
+    #[must_use]
+    pub fn public_origin(&self) -> Option<&PublicOrigin> {
+        self.inner.public_origin.as_ref()
     }
 
     /// The roots the filesystem browser may walk.

@@ -753,10 +753,11 @@ export interface components {
             /**
              * @description Where plex.tv returns the operator, for the OAuth variant.
              *
-             *     It must name this instance. plex.tv redirects to whatever this asks
-             *     for, so a target anywhere else turns the endpoint into a redirector
-             *     wearing a legitimate `app.plex.tv/auth` URL, and the operator who
-             *     completes the sign-in lands on somebody else's page.
+             *     It must be on this instance's configured `publicOrigin`. plex.tv
+             *     redirects to whatever this asks for, so a target anywhere else turns the
+             *     endpoint into a redirector wearing a legitimate `app.plex.tv/auth` URL,
+             *     and the operator who completes the sign-in lands on somebody else's
+             *     page.
              */
             forwardUrl?: string | null;
             /**
@@ -885,7 +886,7 @@ export interface operations {
                     "application/json": components["schemas"]["PinStarted"];
                 };
             };
-            /** @description The request body was not readable, or the return target is not this instance */
+            /** @description The request body was not readable, or the return target is not this instance's configured origin */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -1307,7 +1308,7 @@ export interface operations {
                     "application/json": components["schemas"]["Problem"];
                 };
             };
-            /** @description That account has no password to change */
+            /** @description That account has no password to change, or another change reached it first */
             409: {
                 headers: {
                     [name: string]: unknown;

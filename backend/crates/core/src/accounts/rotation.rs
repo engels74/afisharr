@@ -9,10 +9,10 @@ use crate::{sessions::ABSOLUTE_LIFETIME_MILLIS, storage::WriteOperation, time::T
 
 /// What a rotation did.
 ///
-/// A value rather than an error for the "no such local account" case: the
-/// caller re-verified the current password before submitting this, so finding
-/// no row means the account was deleted or converted between the two, which is
-/// a refusal to render and not a fault to report.
+/// Values rather than errors for the two refusals: the caller re-verified the
+/// current password before submitting this, so finding nothing to change means
+/// the account was deleted or converted in between, or somebody else's change
+/// landed first. Both are refusals to render, and neither is a fault to report.
 #[derive(Debug, PartialEq, Eq)]
 pub enum PasswordRotation {
     /// The password changed, and this many sessions *other than the caller's*
@@ -21,6 +21,13 @@ pub enum PasswordRotation {
         /// How many other devices were signed out.
         others_revoked: u64,
     },
+    /// The password had already moved on, so nothing was written.
+    ///
+    /// Two requests that verified the same current password are two rotations
+    /// of one credential. The second is stale by the time it arrives, and the
+    /// account keeps the first one's password and the first one's replacement
+    /// session.
+    Superseded,
     /// No enabled local account holds that identifier, so nothing was written.
     NoLocalAccount,
 }
@@ -41,6 +48,13 @@ pub enum PasswordRotation {
 pub struct RotatePassword {
     /// The account being changed.
     pub user_id: String,
+    /// The Argon2id PHC string the caller verified against.
+    ///
+    /// The rotation is conditional on it. Without it the write is
+    /// last-one-wins: two changes that verified the same password would both
+    /// commit, and the second would revoke the replacement session the first
+    /// one's browser is holding.
+    pub expected_hash: String,
     /// The new Argon2id PHC string.
     pub password_hash: String,
     /// The session that asked, revoked with the rest and not counted with them.
@@ -72,17 +86,37 @@ impl WriteOperation for RotatePassword {
 
         let changed = sqlx::query!(
             "UPDATE users SET password_hash = ?2, updated_at = ?3
-             WHERE id = ?1 AND kind = 'Local' AND disabled_at IS NULL",
+             WHERE id = ?1 AND kind = 'Local' AND disabled_at IS NULL
+               AND password_hash = ?4",
             self.user_id,
             self.password_hash,
-            at
+            at,
+            self.expected_hash
         )
         .execute(&mut *transaction)
         .await?
         .rows_affected();
         if changed != 1 {
+            // Two changes that verified the same password are two rotations of
+            // one credential, and the second of them is rotating away a
+            // password that is already gone. Letting it write would revoke the
+            // first one's replacement session — leaving a browser holding a
+            // cookie the instance no longer honours — and hand the rotation to
+            // whichever caller committed last (PRD §21.4.2).
+            let present = sqlx::query_scalar!(
+                "SELECT 1 FROM users
+                 WHERE id = ?1 AND kind = 'Local' AND disabled_at IS NULL",
+                self.user_id
+            )
+            .fetch_optional(&mut *transaction)
+            .await?
+            .is_some();
             transaction.rollback().await?;
-            return Ok(PasswordRotation::NoLocalAccount);
+            return Ok(if present {
+                PasswordRotation::Superseded
+            } else {
+                PasswordRotation::NoLocalAccount
+            });
         }
 
         // Counted apart from the caller's own so the answer can say how many

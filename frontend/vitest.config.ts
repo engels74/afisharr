@@ -3,10 +3,14 @@
 
 import { sveltekit } from '@sveltejs/kit/vite';
 import { playwright } from '@vitest/browser-playwright';
+import UnoCSS from 'unocss/vite';
 import { defineConfig } from 'vitest/config';
 
 export default defineConfig({
-	plugins: [sveltekit()],
+	// The same pair as the application build, in the same order: UnoCSS first,
+	// because the Svelte plugin resolves `virtual:uno.css`, and the layout —
+	// the one component every visit passes through — imports it.
+	plugins: [UnoCSS(), sveltekit()],
 	test: {
 		include: ['src/**/*.svelte.test.ts'],
 		// No `.svelte` component exists yet — the interface shell is Phase 1.

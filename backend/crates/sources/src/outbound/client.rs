@@ -128,7 +128,11 @@ impl OutboundClient {
         let timeout_millis = u64::try_from(effective.as_duration().as_millis()).unwrap_or(u64::MAX);
         let started = Instant::now();
         let outcome = request.send().await;
-        let elapsed = started.elapsed();
+        // Time to headers, which is the whole of a call that never got any
+        // further. It is not what a completed call took: the body is still to
+        // come, and a success logged from here reports a request that nearly
+        // exhausted its deadline as a fast one (P1).
+        let to_headers = started.elapsed();
 
         let response = match outcome {
             Ok(response) => response,
@@ -136,7 +140,7 @@ impl OutboundClient {
                 warn!(
                     %host,
                     %method,
-                    elapsed_ms = elapsed.as_millis(),
+                    elapsed_ms = to_headers.as_millis(),
                     timeout_ms = timeout_millis,
                     "outbound request did not complete"
                 );
@@ -173,6 +177,11 @@ impl OutboundClient {
                 });
             }
         };
+        // Measured after the body, because the body is the answer. A provider
+        // whose headers arrive in 20ms and whose body takes four seconds is a
+        // slow provider, and a log that reported 20ms would hide the only
+        // number the §21.2 budgets are about.
+        let elapsed = started.elapsed();
         info!(
             %host,
             %method,

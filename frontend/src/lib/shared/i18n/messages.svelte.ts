@@ -3,7 +3,7 @@
 
 import { en, enPlurals } from './catalogue.en';
 import { interpolate, type Values } from './interpolate';
-import { selectPlural } from './plural';
+import { type PluralForms, selectPlural } from './plural';
 
 /** Every key the interface may ask for. Derived, so a typo is a type error. */
 export type MessageKey = keyof typeof en;
@@ -17,8 +17,15 @@ export interface Catalogue {
 	readonly locale: string;
 	/** The flat messages. */
 	readonly messages: Record<MessageKey, string>;
-	/** The counted messages. */
-	readonly plurals: Record<PluralKey, (typeof enPlurals)[PluralKey]>;
+	/**
+	 * The counted messages.
+	 *
+	 * Typed as {@link PluralForms} rather than as English's own strings: the
+	 * key set is fixed and the text is not. A second catalogue has to be able
+	 * to say something different, in a language whose plural rules may need a
+	 * category English has never had.
+	 */
+	readonly plurals: Record<PluralKey, PluralForms>;
 }
 
 /** English, which every build ships complete. */

@@ -6,13 +6,19 @@
 	import '../app.css';
 	import 'virtual:uno.css';
 	import { ModeWatcher } from 'mode-watcher';
-	import type { Snippet } from 'svelte';
+	import { type Snippet, untrack } from 'svelte';
 	import { goto } from '$app/navigation';
 	import { page } from '$app/state';
 	import { api } from '$lib/api/client';
-	import { LoadingState } from '$lib/components/state';
-	import { session } from '$lib/features/auth';
-	import { isBareRoute, LOGIN, NavShell } from '$lib/features/navigation';
+	import { BlockedState, LoadingState } from '$lib/components/state';
+	import { session, signOut } from '$lib/features/auth';
+	import {
+		isBareRoute,
+		LOGIN,
+		NavShell,
+		shellFor,
+	} from '$lib/features/navigation';
+	import { t } from '$lib/shared/i18n';
 	import { recordProvenance, sourceHref } from '$lib/shared/provenance';
 	import { StreamConnection } from '$lib/shared/stream';
 
@@ -28,6 +34,14 @@
 	 */
 	const bare = $derived(isBareRoute(page.url.pathname));
 
+	/**
+	 * What this visit is allowed to see.
+	 *
+	 * Signed in is not the same as administering this instance: the shell is
+	 * admin-only, and so is the stream it opens.
+	 */
+	const view = $derived(shellFor(bare, session.state));
+
 	const stream = new StreamConnection();
 
 	/**
@@ -41,12 +55,24 @@
 	 * forever — the interface insisting it is working while nothing in it does.
 	 * The session is asked once per navigation into the shell, and it is the
 	 * only thing that decides.
+	 *
+	 * The ask goes through `untrack`, and that is not a detail. `refresh()`
+	 * touches the session's own in-flight bookkeeping, and anything an effect
+	 * reads becomes a dependency of that effect — so an untracked call is the
+	 * difference between asking once per navigation and asking again on every
+	 * answer, which is a flood of `/api/auth/session` that ends at Svelte's
+	 * update-depth guard with nothing rendered at all (P1).
 	 */
 	$effect(() => {
-		if (bare) {
+		// Read as the dependency, so a navigation into the shell asks again and
+		// a change inside the session does not.
+		const pathname = page.url.pathname;
+		if (isBareRoute(pathname)) {
 			return;
 		}
-		void session.refresh();
+		untrack(() => {
+			void session.refresh();
+		});
 	});
 
 	$effect(() => {
@@ -95,30 +121,63 @@
 	});
 
 	$effect(() => {
-		// Established after auth, and only where a shell is rendered: the
-		// stream carries job progress and source health, it is refused without
-		// a session, and a client that opened it anyway would spend the whole
-		// visit reconnecting into a 401.
-		if (bare || session.state.kind !== 'signedIn') {
+		// Established after auth, and only where the shell is rendered: the
+		// stream carries job progress and source health, its handler requires
+		// an administrator, and a client that opened it anyway would spend the
+		// whole visit reconnecting into a refusal.
+		if (view !== 'shell') {
 			return;
 		}
 		stream.open();
 		return () => stream.close();
 	});
+
+	/**
+	 * Leaves an account this interface has nothing to show.
+	 *
+	 * The one action that unblocks the state below: the session is real, and
+	 * the only way to a shell is a different account.
+	 */
+	async function leave() {
+		await signOut();
+		session.forget();
+		await goto(LOGIN, { replaceState: true });
+	}
 </script>
 
 <!-- ModeWatcher sets the theme before paint, so a dark-mode instance never
      flashes light on the way in. -->
 <ModeWatcher />
 
-{#if bare}
+{#if view === 'bare'}
 	<main class="min-h-screen px-4 py-10">
 		{@render children?.()}
 	</main>
-{:else if session.state.kind === 'signedIn'}
+{:else if view === 'shell'}
 	<NavShell streamStatus={stream.status} sourceHref={sourceHref()}>
 		{@render children?.()}
 	</NavShell>
+{:else if view === 'notPermitted'}
+	<!--
+		Signed in, and not an administrator. Tier 0 is an admin-only surface
+		(D-007), so there is no shell to render — and this is not a sign-out
+		either: the session is real and the sign-in page would only take them
+		back here. What is owed is the sentence saying so (`I-UX-2`).
+	-->
+	<main class="min-h-screen px-4 py-10">
+		<BlockedState
+			state={{
+				kind: 'blocked',
+				reason: t('auth.notAdministrator'),
+			}}
+		>
+			{#snippet action()}
+				<button class="text-sm underline" type="button" onclick={leave}>
+					{t('auth.signOut')}
+				</button>
+			{/snippet}
+		</BlockedState>
+	</main>
 {:else}
 	<!--
 		Asked and not yet answered, or answered "nobody" and on the way to the

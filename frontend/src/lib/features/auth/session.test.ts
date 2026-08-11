@@ -90,6 +90,64 @@ describe('what the interface knows about who is signed in', () => {
 		expect(session.state.kind).toBe('signedOut');
 	});
 
+	test('a fault at the instance is not a sign-out', async () => {
+		// The failure this closes: `/api/auth/session` answers 500 — a bad
+		// deploy, a database that will not open, a gateway answering for the
+		// instance — and the shell reads "not signed in", redirects, and puts
+		// an operator who is still signed in on the sign-in page mid-task. The
+		// cookie is not what failed, and nothing here has learned otherwise
+		// (P1 — absence of evidence is not evidence of absence).
+		const session = createSession();
+		await session.refresh();
+		expect(session.state.kind).toBe('signedIn');
+
+		answer = {
+			outcome: 'refused',
+			problem: { code: 'internal', message: 'Afisharr could not do that.' },
+		} as AuthResult<SignedIn>;
+		await session.refresh();
+
+		expect(session.state).toEqual({ kind: 'signedIn', account: OPERATOR });
+	});
+
+	test('a transport failure on the first ask leaves the state unknown', async () => {
+		// Nothing has been asked and answered, so nothing is known. Recording
+		// `signedOut` here would send every visitor to the sign-in page for as
+		// long as the instance was restarting, including the ones holding a
+		// perfectly good cookie.
+		answer = {
+			outcome: 'refused',
+			problem: { code: 'upstream', message: 'Afisharr did not answer.' },
+		} as AuthResult<SignedIn>;
+
+		const session = createSession();
+		await session.refresh();
+
+		expect(session.state.kind).toBe('unknown');
+	});
+
+	test('a refusal after a fault still signs the session out', async () => {
+		// The other half: keeping state through a fault must not make an
+		// expired cookie unrecognisable, or the shell would sit on a session
+		// the instance has already refused.
+		const session = createSession();
+		await session.refresh();
+
+		answer = {
+			outcome: 'refused',
+			problem: { code: 'internal', message: 'Afisharr could not do that.' },
+		} as AuthResult<SignedIn>;
+		await session.refresh();
+
+		answer = {
+			outcome: 'refused',
+			problem: { code: 'unauthenticated', message: 'Sign in to continue.' },
+		} as AuthResult<SignedIn>;
+		await session.refresh();
+
+		expect(session.state.kind).toBe('signedOut');
+	});
+
 	test('a sign-in that just happened is adopted without a second round trip', () => {
 		const session = createSession();
 		session.adopt(OPERATOR);

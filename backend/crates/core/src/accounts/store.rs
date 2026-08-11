@@ -176,6 +176,13 @@ fn is_unique_violation(error: &sqlx::Error) -> bool {
 /// `plex_account_id` is the binding, never the key (P4): the row keeps its ULID
 /// across a rename on plex.tv, and a returning account matches on the numeric
 /// id rather than on whatever display name it now carries.
+///
+/// The local username is the row's own, and a refresh takes plex.tv's only when
+/// nothing else holds it. Usernames are globally unique here, so a linked
+/// account that renames itself on plex.tv to a name another local account
+/// already has would otherwise fail the write — and it would fail it inside a
+/// sign-in whose pin attempt is already spent, leaving that operator unable to
+/// get in at all until they renamed themselves back.
 #[derive(Debug)]
 pub struct UpsertPlexUser {
     /// The identifier to assign if this account is new.
@@ -204,13 +211,20 @@ impl WriteOperation for UpsertPlexUser {
         let at = self.at.as_millis();
         let is_admin = i64::from(self.is_admin);
 
-        sqlx::query!(
+        let inserted = sqlx::query!(
             "INSERT INTO users (
                  id, kind, username, email, plex_account_id, plex_uuid, avatar_url,
                  is_admin, created_at, updated_at)
              VALUES (?1, 'Plex', ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?8)
              ON CONFLICT(plex_account_id) WHERE plex_account_id IS NOT NULL DO UPDATE SET
-                 username   = excluded.username,
+                 username   = CASE
+                                  WHEN NOT EXISTS (
+                                      SELECT 1 FROM users AS other
+                                      WHERE other.username = excluded.username
+                                        AND other.id <> users.id)
+                                  THEN excluded.username
+                                  ELSE users.username
+                              END,
                  email      = excluded.email,
                  plex_uuid  = excluded.plex_uuid,
                  avatar_url = excluded.avatar_url,
@@ -225,7 +239,22 @@ impl WriteOperation for UpsertPlexUser {
             at
         )
         .execute(&mut *conn)
-        .await?;
+        .await;
+
+        // The insert path is the one that can still take a name: a plex.tv
+        // account nobody has linked yet, arriving under a username a local
+        // account already holds. A defined refusal rather than a bare
+        // constraint failure, because the caller has an operator in front of it
+        // and "the database refused a statement" is not something they can act
+        // on.
+        if let Err(error) = inserted {
+            if is_unique_violation(&error) {
+                return Ok(Err(AccountError::UsernameTaken {
+                    username: self.username,
+                }));
+            }
+            return Err(error);
+        }
 
         let row = sqlx::query_as!(
             Row,

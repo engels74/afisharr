@@ -262,6 +262,109 @@ async fn a_password_change_revokes_every_other_session() {
     running.stop().await;
 }
 
+/// One password change, as a browser makes it.
+async fn change_password(
+    client: &Client,
+    csrf: &str,
+    running: &RunningInstance,
+    new_password: &str,
+) -> (StatusCode, serde_json::Value) {
+    let response = client
+        .post(format!("{}/api/settings/password", running.base_url))
+        .header("x-afisharr-csrf", csrf)
+        .json(&serde_json::json!({
+            "currentPassword": PASSWORD,
+            "newPassword": new_password,
+        }))
+        .send()
+        .await
+        .expect("the password route must answer");
+    let status = response.status();
+    (status, response.json().await.expect("a JSON body"))
+}
+
+#[tokio::test]
+async fn two_changes_of_one_password_do_not_both_land() {
+    // The race: both requests verify the same current password before either
+    // writes, because hashing takes long enough for the second to have read the
+    // row the first is about to change. Unconditional, the later write wins and
+    // revokes the replacement session the earlier one's browser is holding —
+    // so the operator who changed the password successfully is signed out by
+    // the request that was refused, and the account ends on whichever password
+    // committed last.
+    const LAPTOP: &str = "the laptop's own new password";
+    const DESKTOP: &str = "the desktop's own new password";
+
+    let instance = TempInstance::new();
+    let running = signed_out_instance(&instance).await;
+
+    let laptop = browser();
+    let laptop_csrf = sign_in(&laptop, &running.base_url).await;
+    let desktop = browser();
+    let desktop_csrf = sign_in(&desktop, &running.base_url).await;
+
+    let (from_laptop, from_desktop) = tokio::join!(
+        change_password(&laptop, &laptop_csrf, &running, LAPTOP),
+        change_password(&desktop, &desktop_csrf, &running, DESKTOP),
+    );
+
+    let laptop_landed = from_laptop.0 == StatusCode::OK;
+    let (winner, winning_password, landed, refused) = if laptop_landed {
+        (&laptop, LAPTOP, from_laptop, from_desktop)
+    } else {
+        (&desktop, DESKTOP, from_desktop, from_laptop)
+    };
+    assert_eq!(landed.0, StatusCode::OK, "one change must land");
+    assert_eq!(
+        refused.0,
+        StatusCode::CONFLICT,
+        "a change of a password that already moved on must be refused, not applied"
+    );
+    assert_eq!(refused.1["code"], "conflict");
+
+    // The browser whose change landed is still signed in. It holds the
+    // replacement session that change issued, and nothing may revoke it
+    // afterwards on the strength of a password it never had.
+    assert_eq!(
+        winner
+            .get(format!("{}/api/auth/session", running.base_url))
+            .send()
+            .await
+            .expect("the session route must answer")
+            .status(),
+        StatusCode::OK,
+        "the change that landed must not have its own session revoked"
+    );
+
+    // And the account is on that change's password, not on the refused one's.
+    for (password, expected) in [
+        (winning_password, StatusCode::OK),
+        (
+            if winning_password == LAPTOP {
+                DESKTOP
+            } else {
+                LAPTOP
+            },
+            StatusCode::UNAUTHORIZED,
+        ),
+    ] {
+        let returning = browser();
+        assert_eq!(
+            returning
+                .post(format!("{}/api/auth/login", running.base_url))
+                .json(&serde_json::json!({ "username": "operator", "password": password }))
+                .send()
+                .await
+                .expect("the login route must answer")
+                .status(),
+            expected,
+            "signing in with '{password}' answered the wrong way"
+        );
+    }
+
+    running.stop().await;
+}
+
 #[tokio::test]
 async fn a_state_changing_request_without_the_csrf_token_is_refused() {
     let instance = TempInstance::new();

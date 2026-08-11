@@ -62,6 +62,18 @@ pub struct HttpSettings {
     /// forwarded headers are ignored and the peer address is used — a
     /// forged `X-Forwarded-For` then buys nothing.
     pub trust_proxy: Vec<String>,
+    /// The absolute origin operators reach this instance at, if one is set.
+    ///
+    /// `https://afisharr.example` or `http://192.168.1.10:8484` — scheme, host,
+    /// and port; anything after them is ignored. Nothing derives it from the
+    /// request, because the request's `Host` belongs to whoever sent it: an
+    /// instance that trusted that header would mint a plex.tv sign-in returning
+    /// the operator to whatever address the caller asked for.
+    ///
+    /// Unset by default, and what it gates is the hosted plex.tv sign-in, which
+    /// is the one flow that hands an absolute URL for this instance to somebody
+    /// else. The code sign-in needs no return target and works without it.
+    pub public_origin: Option<String>,
 }
 
 impl Default for HttpSettings {
@@ -70,6 +82,7 @@ impl Default for HttpSettings {
             bind_address: "0.0.0.0".to_owned(),
             port: 8484,
             trust_proxy: Vec::new(),
+            public_origin: None,
         }
     }
 }
@@ -159,6 +172,10 @@ mod tests {
             body.http.trust_proxy.is_empty(),
             "no proxy is trusted by default"
         );
+        assert!(
+            body.http.public_origin.is_none(),
+            "nothing is assumed about the address this instance is reached at"
+        );
         assert_eq!(body.render.cache_cap_bytes, 10 * 1024 * 1024 * 1024);
         assert_eq!(body.backup.retained_pre_migration, 3);
     }
@@ -167,6 +184,7 @@ mod tests {
     fn the_body_round_trips_through_json() {
         let mut body = SettingsBody::default();
         body.http.trust_proxy.push("10.0.0.0/8".to_owned());
+        body.http.public_origin = Some("https://afisharr.example".to_owned());
         let encoded = serde_json::to_string(&body).unwrap();
         assert_eq!(
             serde_json::from_str::<SettingsBody>(&encoded).unwrap(),
@@ -178,6 +196,7 @@ mod tests {
     fn field_names_are_camel_case_on_the_wire() {
         let encoded = serde_json::to_string(&SettingsBody::default()).unwrap();
         assert!(encoded.contains("\"trustProxy\""), "{encoded}");
+        assert!(encoded.contains("\"publicOrigin\""), "{encoded}");
         assert!(encoded.contains("\"cacheCapBytes\""), "{encoded}");
     }
 }

@@ -57,7 +57,7 @@ mod tests {
         HttpSettings {
             bind_address: bind.to_owned(),
             port,
-            trust_proxy: Vec::new(),
+            ..HttpSettings::default()
         }
     }
 
