@@ -178,16 +178,35 @@ async fn migrate(
     Ok(())
 }
 
-/// Seeds `settings` on a first start; afterwards the stored row is the truth.
+/// Seeds `settings` on a first start; afterwards the stored row is the truth,
+/// with the environment's deployment variables laid back over it.
+///
+/// The row alone is not enough, and the gap is not theoretical: `publicOrigin`,
+/// `trustProxy`, `bindAddress` and `port` describe how *this* deployment is
+/// reached, an operator states them in their compose file, and a row written on
+/// the day the container first booted cannot know any of it. Returning the row
+/// verbatim makes `AFISHARR_PUBLIC_ORIGIN` dead on every instance that has
+/// started once — so the operator who sets it is told to set the very thing
+/// they have set, and the hosted Plex sign-in stays unavailable with nothing
+/// explaining why.
+///
+/// Applied in memory rather than written back. The row is what the operator
+/// saved, and rewriting it on every boot would turn a compose variable into a
+/// silent edit of their saved document. That means a settings surface offering
+/// these fields has to show which of them the environment is currently holding
+/// — the same obligation `logging` and `backup.retainedPreMigration` already
+/// carry (`configuration::load`).
 async fn ensure_settings(
     database: &Database,
     configured: SettingsBody,
     clock: &SystemClock,
 ) -> Result<Settings> {
-    if let Some(stored) = afisharr_core::settings::load(database.readers())
+    if let Some(mut stored) = afisharr_core::settings::load(database.readers())
         .await
         .context("reading settings")?
     {
+        crate::configuration::apply_environment(&mut stored.body)
+            .context("applying the environment over the stored settings")?;
         return Ok(stored);
     }
 

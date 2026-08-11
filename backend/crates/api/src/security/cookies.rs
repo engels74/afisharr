@@ -42,6 +42,14 @@ pub const CSRF_COOKIE: &str = "afisharr_csrf";
 /// operator reaching a fresh instance over plaintext on their LAN would
 /// otherwise be handed a cookie the browser refuses to send back, and would see
 /// a login that succeeds and then immediately does not.
+///
+/// The scheme reaching here is not only the forwarded one. `trustProxy` is
+/// empty by default, so a stock deployment behind TLS discards its proxy's
+/// `X-Forwarded-Proto` and would resolve as plaintext — setting this cookie
+/// without `Secure` on a connection carrying TLS, with nothing saying so. The
+/// router resolves a request arriving at the operator's configured `https`
+/// `publicOrigin` as HTTPS for exactly that reason, so an operator has a way to
+/// state the fact that does not require them to also name their proxy.
 #[must_use]
 pub fn set<'c>(
     name: &'static str,

@@ -228,7 +228,21 @@ async fn a_symlink_out_of_the_root_is_refused() {
         .send()
         .await
         .expect("the browse route must answer");
-    assert!(response.status().is_client_error());
+    // The status, and not merely "some 4xx". 403 is what this handler's
+    // `#[utoipa::path]` block documents for a path outside the root, so it is
+    // the branch the generated client narrows to; answering 404 makes an
+    // escape indistinguishable from a mistyped directory, and an operator with
+    // a symbolic link into a second mount — an ordinary media layout — cannot
+    // tell which of the two they are looking at.
+    assert_eq!(response.status(), StatusCode::FORBIDDEN);
+    let problem: serde_json::Value = response.json().await.expect("a JSON body");
+    assert!(
+        !problem["message"]
+            .as_str()
+            .unwrap_or_default()
+            .contains("outside.txt"),
+        "the refusal disclosed the resolved path: {problem}"
+    );
 
     running.stop().await;
 }

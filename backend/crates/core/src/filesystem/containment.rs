@@ -116,10 +116,9 @@ impl Contained {
 ///
 /// # Errors
 /// Returns [`ContainmentError::UnresolvableRoot`] when the root itself cannot
-/// be opened, [`ContainmentError::Outside`] when the requested path climbs or
-/// is absolute, and [`ContainmentError::Unresolvable`] when a component cannot
-/// be opened inside the root — which is what a link out of the root looks like
-/// from in here.
+/// be opened, [`ContainmentError::Outside`] when the requested path climbs, is
+/// absolute, or resolves through a link whose target is not inside the root,
+/// and [`ContainmentError::Unresolvable`] when a component is simply not there.
 pub fn contain(root: &Root, requested: &Path) -> Result<Contained, ContainmentError> {
     let components = inside(root, requested)?;
     let root_dir = open_root(root)?;
@@ -138,7 +137,7 @@ pub fn contain(root: &Root, requested: &Path) -> Result<Contained, ContainmentEr
     for component in parents {
         parent = parent
             .open_dir(component)
-            .map_err(|source| unresolvable(root, source))?;
+            .map_err(|source| ContainmentError::from_failed_open(&root.label, source))?;
     }
 
     // The last component is proved through the same handle rather than
@@ -146,7 +145,7 @@ pub fn contain(root: &Root, requested: &Path) -> Result<Contained, ContainmentEr
     // the promise without it would be opening a name nothing checked.
     parent
         .metadata(name)
-        .map_err(|source| unresolvable(root, source))?;
+        .map_err(|source| ContainmentError::from_failed_open(&root.label, source))?;
 
     Ok(Contained {
         root_label: root.label.clone(),
@@ -224,13 +223,6 @@ fn inside(root: &Root, requested: &Path) -> Result<Vec<OsString>, ContainmentErr
         }
     }
     Ok(components)
-}
-
-fn unresolvable(root: &Root, source: std::io::Error) -> ContainmentError {
-    ContainmentError::Unresolvable {
-        root_label: root.label.clone(),
-        source,
-    }
 }
 
 #[cfg(test)]
@@ -320,6 +312,10 @@ mod tests {
             .expect_err("a link out of the root must be refused");
         assert_eq!(error.root_label(), Some("assets"));
         assert!(!error.to_string().contains("outside.txt"), "{error}");
+        // The classification, not only the refusal: an escape reported as
+        // `Unresolvable` reaches the browser as 404, which is byte-for-byte
+        // the answer a mistyped directory gives.
+        assert!(matches!(error, ContainmentError::Outside { .. }), "{error}");
     }
 
     #[test]
@@ -336,6 +332,22 @@ mod tests {
         let error = contain(&root, Path::new("posters/up"))
             .expect_err("a link out of the root must be refused");
         assert_eq!(error.root_label(), Some("assets"));
+        assert!(matches!(error, ContainmentError::Outside { .. }), "{error}");
+    }
+
+    #[test]
+    fn a_path_that_is_simply_not_there_stays_a_separate_answer_from_an_escape() {
+        // The other half of the classification. Reporting everything unopenable
+        // as an escape would answer "the path is not inside the root" to a
+        // typo, which is a different lie in the same place.
+        let (_dir, root) = root_with_a_file();
+        for missing in ["nowhere", "posters/nothing.png"] {
+            let error = contain(&root, Path::new(missing)).expect_err("must be refused");
+            assert!(
+                matches!(error, ContainmentError::Unresolvable { .. }),
+                "{missing}: {error}"
+            );
+        }
     }
 
     #[test]

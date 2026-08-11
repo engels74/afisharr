@@ -56,6 +56,29 @@
 	let expired = $state(false);
 
 	/**
+	 * Whether the hosted variant is still worth offering.
+	 *
+	 * The hosted sign-in needs a return address this instance will stand behind,
+	 * and that is `http.publicOrigin` — unset by default, and with no route on
+	 * this surface that reports it. Offering the button regardless means a
+	 * first-run operator clicks it and is refused every time, with nothing in
+	 * the interface ever narrowing what they are being offered.
+	 *
+	 * So the precondition is learned from the one place that knows it: a
+	 * refusal pointing at `/forwardUrl` is the instance saying it cannot honour
+	 * a return target. The button goes away for the rest of this visit, the
+	 * code variant stays — it needs no return address — and the refusal that
+	 * named `http.publicOrigin` stays on screen. Nothing is inferred; the
+	 * server was asked and it answered (D-046).
+	 */
+	let hostedOffered = $state(true);
+
+	/** Whether `problem` is the instance refusing the return target itself. */
+	function refusedTheReturnTarget(problem: Problem): boolean {
+		return problem.pointer === '/forwardUrl';
+	}
+
+	/**
 	 * Starts a sign-in.
 	 *
 	 * Both variants of the same exchange, and both are reachable: `pin` shows a
@@ -70,6 +93,9 @@
 		const result = await startPlexPin(oauth);
 		if (result.outcome === 'refused') {
 			refusal = result.problem;
+			if (oauth && refusedTheReturnTarget(result.problem)) {
+				hostedOffered = false;
+			}
 			return;
 		}
 		started = result.value;
@@ -106,6 +132,15 @@
 			if (result.outcome === 'refused') {
 				refusal = result.problem;
 				clearInterval(timer);
+				// And the attempt goes with it. The timer is torn down here and
+				// nothing restarts it — `refusal` is not read by this effect —
+				// so leaving `started` set renders the "waiting for Plex"
+				// branch forever, with the start controls hidden in its
+				// `{:else}` and no control anywhere to try again. One transient
+				// refusal, a 502 from plex.tv or the provider limit, and the
+				// operator's only move is to reload the page (`I-UX-2`).
+				started = undefined;
+				sessionStorage.removeItem(RESUME_KEY);
 				return;
 			}
 			if (result.value.state === 'authorized') {
@@ -155,13 +190,15 @@
 			>
 				{t('auth.plexStart')}
 			</button>
-			<button
-				class="text-sm underline"
-				type="button"
-				onclick={() => begin(true)}
-			>
-				{t('auth.plexOauthStart')}
-			</button>
+			{#if hostedOffered}
+				<button
+					class="text-sm underline"
+					type="button"
+					onclick={() => begin(true)}
+				>
+					{t('auth.plexOauthStart')}
+				</button>
+			{/if}
 		</div>
 	{/if}
 </section>

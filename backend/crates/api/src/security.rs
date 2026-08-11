@@ -10,6 +10,7 @@
 
 mod cookies;
 mod csrf;
+mod declared;
 mod headers;
 
 pub use cookies::{

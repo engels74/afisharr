@@ -76,23 +76,6 @@ pub async fn start_plex_pin(
     jar: CookieJar,
     JsonBody(request): JsonBody<StartPin>,
 ) -> AppResult<(CookieJar, Json<PinStarted>)> {
-    // A pin creation reaches plex.tv on the caller's behalf, so it counts
-    // against the provider bucket rather than the general API one (§21.4.3).
-    if let Decision::Refused {
-        retry_after_seconds,
-    } = state
-        .limiter()
-        .record(&Bucket::Provider, Some(client.address))
-    {
-        return Err(AppError::new(
-            Problem::new(
-                ErrorCode::RateLimited,
-                "Too many sign-in attempts against Plex. Try again shortly.",
-            )
-            .retry_after(retry_after_seconds),
-        ));
-    }
-
     let mode = if request.oauth {
         Mode::OAuth
     } else {
@@ -102,6 +85,14 @@ pub async fn start_plex_pin(
     // Judged before plex.tv is called and before a row is stored: a return
     // target this instance will not stand behind is a bad request, not a
     // reason to spend an upstream call and leave an attempt behind.
+    //
+    // And judged before the limiter, for the same reason. `Bucket::Provider`
+    // protects the operator's plex.tv quota; a request refused here never
+    // reaches plex.tv, so counting it spends an allowance nothing was drawn
+    // from. On a default install — where `publicOrigin` is unset and every
+    // hosted sign-in is refused — that is 60 refusals a minute exhausting the
+    // budget the *code* sign-in also draws on, and taking the working variant
+    // down with the one that cannot work.
     //
     // Judged against the configured origin and against nothing in the request.
     // `Host` is written by whoever is calling, so an instance that compared
@@ -125,6 +116,24 @@ pub async fn start_plex_pin(
         }
         _ => None,
     };
+
+    // A pin creation reaches plex.tv on the caller's behalf, so it counts
+    // against the provider bucket rather than the general API one (§21.4.3).
+    if let Decision::Refused {
+        retry_after_seconds,
+    } = state
+        .limiter()
+        .record(&Bucket::Provider, Some(client.address))
+    {
+        return Err(AppError::new(
+            Problem::new(
+                ErrorCode::RateLimited,
+                "Too many sign-in attempts against Plex. Try again shortly.",
+            )
+            .retry_after(retry_after_seconds),
+        ));
+    }
+
     let resource = state
         .plex()
         .create_pin(request.oauth)

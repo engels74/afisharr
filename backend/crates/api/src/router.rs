@@ -12,7 +12,7 @@ use axum::{
     Router,
     body::Body,
     extract::{ConnectInfo, FromRequestParts, Request, State},
-    http::request::Parts,
+    http::{HeaderMap, header::HOST, request::Parts},
     middleware::{Next, from_fn_with_state},
     response::Response,
     routing::{delete, get, post},
@@ -23,7 +23,7 @@ use crate::{
     authentication,
     error::AppError,
     files, health, interface, keys,
-    proxy::ClientContext,
+    proxy::{ClientContext, PublicOrigin, Scheme},
     ratelimit::{Bucket, Decision},
     security, setup,
     state::ApiState,
@@ -174,12 +174,51 @@ async fn envelope(
     mut request: Request<Body>,
     next: Next,
 ) -> Response {
-    let client = ClientContext::resolve(peer, request.headers(), state.trusted_proxies());
+    let mut client = ClientContext::resolve(peer, request.headers(), state.trusted_proxies());
+    if reached_at_the_configured_origin(request.headers(), state.public_origin()) {
+        client.scheme = Scheme::Https;
+    }
     request.extensions_mut().insert(client);
 
     let mut response = next.run(request).await;
-    security::apply_security_headers(response.headers_mut(), state.policy(), client.scheme);
+    security::apply_security_headers(
+        response.headers_mut(),
+        state.policy(),
+        client.scheme,
+        state.public_origin(),
+    );
     response
+}
+
+/// Whether this request arrived at the `https` address the operator configured.
+///
+/// The gap this closes: `trustProxy` is empty by default, so a stock
+/// deployment behind Caddy, nginx, or Cloudflare on an HTTPS address discards
+/// the proxy's `X-Forwarded-Proto` and resolves as plaintext. The session
+/// cookie is then set without `Secure` on a connection that is carrying TLS,
+/// and nothing anywhere says the instance is in that state.
+///
+/// The operator's `publicOrigin` is the fix, because it is a statement about
+/// this instance rather than about one request. Read together with the `Host`
+/// the browser wrote from the URL it is calling, it says the request arrived at
+/// the address the operator declared to be HTTPS — and it says so without
+/// believing any header that decides its own answer.
+///
+/// It does not cover every deployment. A proxy that rewrites `Host` to the
+/// upstream's own name — `proxy_pass` with no `proxy_set_header Host` — leaves
+/// nothing here to match, and that instance still has to name its proxy in
+/// `trustProxy` for the forwarded scheme to be honoured at all.
+fn reached_at_the_configured_origin(
+    headers: &HeaderMap,
+    configured: Option<&PublicOrigin>,
+) -> bool {
+    let Some(origin) = configured.filter(|origin| origin.is_secure()) else {
+        return false;
+    };
+    headers
+        .get(HOST)
+        .and_then(|value| value.to_str().ok())
+        .is_some_and(|host| origin.matches_host(host))
 }
 
 /// Refuses a state-changing request that another site could have caused.
@@ -192,7 +231,7 @@ async fn envelope(
 /// the third, and behind it sits the request that turns a finished plex.tv
 /// exchange into a session.
 async fn csrf(
-    State(_state): State<ApiState>,
+    State(state): State<ApiState>,
     request: Request<Body>,
     next: Next,
 ) -> Result<Response, AppError> {
@@ -211,6 +250,7 @@ async fn csrf(
         request.headers(),
         token.as_deref(),
         carries_ambient_credential,
+        state.public_origin(),
     ) {
         security::CsrfDecision::Allowed => Ok(next.run(request).await),
         security::CsrfDecision::ForeignOrigin => Err(AppError::of(

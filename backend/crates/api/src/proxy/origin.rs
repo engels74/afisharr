@@ -63,6 +63,32 @@ impl PublicOrigin {
         target.origin().is_tuple() && target.origin() == self.0.origin()
     }
 
+    /// Whether `host` — a `Host` header's value — names this origin.
+    ///
+    /// Compared as an origin rather than as text, so `media.example` and
+    /// `media.example:443` are one instance under `https` and differ under
+    /// `http`. The scheme comes from the configured origin and never from the
+    /// request, because the request has none to give: a `Host` header is a host
+    /// and a port, and reading a scheme into it would be reading one out of
+    /// thin air.
+    #[must_use]
+    pub fn matches_host(&self, host: &str) -> bool {
+        let Ok(parsed) = Url::parse(&format!("{}://{host}", self.0.scheme())) else {
+            return false;
+        };
+        parsed.origin().is_tuple() && parsed.origin() == self.0.origin()
+    }
+
+    /// Whether the operator configured this instance as reachable over TLS.
+    ///
+    /// The one statement about the scheme that no caller can write. Everything
+    /// else this module knows about how a request arrived comes from a header,
+    /// and a header is worth exactly as much as the trust list in front of it.
+    #[must_use]
+    pub fn is_secure(&self) -> bool {
+        self.0.scheme() == "https"
+    }
+
     /// The origin as configured, for a message that has to name it.
     #[must_use]
     pub fn as_str(&self) -> &str {
@@ -124,6 +150,47 @@ mod tests {
         let origin =
             PublicOrigin::parse("https://media.example/afisharr/").expect("a valid origin");
         assert!(origin.covers("https://media.example/anything"));
+    }
+
+    #[test]
+    fn a_host_header_naming_the_configured_origin_matches() {
+        let origin = PublicOrigin::parse("https://afisharr.example").expect("a valid origin");
+        assert!(origin.matches_host("afisharr.example"));
+        assert!(origin.matches_host("AFISHARR.EXAMPLE"));
+        // The default port for the configured scheme, spelled out.
+        assert!(origin.matches_host("afisharr.example:443"));
+    }
+
+    #[test]
+    fn a_host_header_naming_anywhere_else_does_not_match() {
+        // The `Host` header is written by whoever is calling. Matching it
+        // against the configured origin is what makes a proxy that rewrites
+        // `Host` stop breaking every write, without letting a caller nominate
+        // an origin of their own.
+        let origin = PublicOrigin::parse("https://afisharr.example").expect("a valid origin");
+        for host in [
+            "evil.example",
+            "afisharr.example.evil.example",
+            "afisharr.example:8484",
+            "",
+            "not a host",
+        ] {
+            assert!(!origin.matches_host(host), "'{host}' must not match");
+        }
+    }
+
+    #[test]
+    fn the_configured_scheme_is_what_says_whether_the_instance_is_reached_over_tls() {
+        assert!(
+            PublicOrigin::parse("https://afisharr.example")
+                .expect("a valid origin")
+                .is_secure()
+        );
+        assert!(
+            !PublicOrigin::parse("http://192.168.1.10:8484")
+                .expect("a valid origin")
+                .is_secure()
+        );
     }
 
     #[test]

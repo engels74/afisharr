@@ -10,7 +10,7 @@ use axum::http::{
     },
 };
 
-use crate::proxy::Scheme;
+use crate::proxy::{PublicOrigin, Scheme};
 
 /// `Permissions-Policy` has no constant in the `http` crate.
 const PERMISSIONS_POLICY: HeaderName = HeaderName::from_static("permissions-policy");
@@ -95,33 +95,67 @@ impl Default for ContentSecurityPolicy {
 /// these would otherwise produce two values for a header whose meaning is the
 /// strictest of them, and "strictest of two" is not a property anyone should
 /// have to reason about per route.
+///
+/// `configured` is this instance's `publicOrigin`, and it is the second of the
+/// two things HSTS needs. See [`emits_hsts`] for why one is not enough.
 pub fn apply_security_headers(
     headers: &mut HeaderMap,
     policy: &ContentSecurityPolicy,
     scheme: Scheme,
+    configured: Option<&PublicOrigin>,
 ) {
     headers.insert(CONTENT_SECURITY_POLICY, policy.value().clone());
     headers.insert(X_CONTENT_TYPE_OPTIONS, NOSNIFF);
     headers.insert(REFERRER_POLICY, NO_REFERRER);
     headers.insert(PERMISSIONS_POLICY, PERMISSIONS);
 
-    // Only over HTTPS, and only when a trusted proxy vouched for it. Sending
-    // HSTS over plaintext asks a browser to refuse the only scheme the operator
-    // can currently reach the instance on.
-    if scheme.is_secure() {
+    if emits_hsts(scheme, configured) {
         headers.insert(STRICT_TRANSPORT_SECURITY, HSTS);
     } else {
         headers.remove(STRICT_TRANSPORT_SECURITY);
     }
 }
 
+/// Whether this answer may carry `Strict-Transport-Security`.
+///
+/// Two conditions, and the second is not redundant. The resolved scheme is
+/// derived from `X-Forwarded-Proto`, and that header is only as trustworthy as
+/// the chain in front of it: a proxy that sets `X-Forwarded-For` without also
+/// setting `X-Forwarded-Proto` passes the client's own claim straight through,
+/// and nothing in the header can tell the two apart. A forged `https` then
+/// pins the whole registrable domain — every unrelated subdomain included — to
+/// HTTPS in that browser for a year, with no way for the operator to click
+/// through it.
+///
+/// So the durable half rests on the one statement no caller can write: the
+/// operator having configured `publicOrigin` as an `https` address. A forged
+/// header can still make a single answer look secure; it cannot make this
+/// instance ask a browser to remember it.
+///
+/// The scheme condition stays because it is the reverse mistake: sending HSTS
+/// over plaintext asks a browser to refuse the only scheme an operator on the
+/// LAN can currently reach the instance on.
+fn emits_hsts(scheme: Scheme, configured: Option<&PublicOrigin>) -> bool {
+    scheme.is_secure() && configured.is_some_and(PublicOrigin::is_secure)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
+    fn secure_origin() -> PublicOrigin {
+        PublicOrigin::parse("https://afisharr.example").expect("a valid origin")
+    }
+
+    /// The header set for a deployment whose `publicOrigin` names HTTPS.
     fn applied(scheme: Scheme) -> HeaderMap {
         let mut headers = HeaderMap::new();
-        apply_security_headers(&mut headers, &ContentSecurityPolicy::default(), scheme);
+        apply_security_headers(
+            &mut headers,
+            &ContentSecurityPolicy::default(),
+            scheme,
+            Some(&secure_origin()),
+        );
         headers
     }
 
@@ -183,11 +217,45 @@ mod tests {
     }
 
     #[test]
+    fn a_forged_scheme_alone_never_pins_a_domain_for_a_year() {
+        // The harm this closes. A proxy that sets `X-Forwarded-For` and not
+        // `X-Forwarded-Proto` passes the client's own claim through, and the
+        // header cannot say which of the two wrote it. Resting HSTS on that
+        // alone lets a caller pin the whole registrable domain in the
+        // operator's browser for a year, with no way to click through it.
+        let mut headers = HeaderMap::new();
+        apply_security_headers(
+            &mut headers,
+            &ContentSecurityPolicy::default(),
+            Scheme::Https,
+            None,
+        );
+        assert!(
+            headers.get(STRICT_TRANSPORT_SECURITY).is_none(),
+            "an unconfigured instance must not emit HSTS on a claimed scheme"
+        );
+
+        let plaintext = PublicOrigin::parse("http://192.168.1.10:8484").expect("a valid origin");
+        let mut headers = HeaderMap::new();
+        apply_security_headers(
+            &mut headers,
+            &ContentSecurityPolicy::default(),
+            Scheme::Https,
+            Some(&plaintext),
+        );
+        assert!(
+            headers.get(STRICT_TRANSPORT_SECURITY).is_none(),
+            "an operator who configured a plaintext origin has not asked for HSTS"
+        );
+    }
+
+    #[test]
     fn applying_twice_leaves_one_value_per_header() {
         let mut headers = HeaderMap::new();
         let policy = ContentSecurityPolicy::default();
-        apply_security_headers(&mut headers, &policy, Scheme::Https);
-        apply_security_headers(&mut headers, &policy, Scheme::Https);
+        let origin = secure_origin();
+        apply_security_headers(&mut headers, &policy, Scheme::Https, Some(&origin));
+        apply_security_headers(&mut headers, &policy, Scheme::Https, Some(&origin));
         assert_eq!(
             headers.get_all(CONTENT_SECURITY_POLICY).iter().count(),
             1,
@@ -199,8 +267,9 @@ mod tests {
     fn a_response_that_was_https_and_is_replayed_as_http_loses_hsts() {
         let mut headers = HeaderMap::new();
         let policy = ContentSecurityPolicy::default();
-        apply_security_headers(&mut headers, &policy, Scheme::Https);
-        apply_security_headers(&mut headers, &policy, Scheme::Http);
+        let origin = secure_origin();
+        apply_security_headers(&mut headers, &policy, Scheme::Https, Some(&origin));
+        apply_security_headers(&mut headers, &policy, Scheme::Http, Some(&origin));
         assert!(headers.get(STRICT_TRANSPORT_SECURITY).is_none());
     }
 }

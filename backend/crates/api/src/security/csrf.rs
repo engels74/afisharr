@@ -3,11 +3,13 @@
 
 //! Cross-site request forgery, refused on every state-changing request.
 
-use axum::http::{
-    HeaderMap, HeaderName, Method,
-    header::{HOST, ORIGIN, REFERER},
-};
+use axum::http::{HeaderMap, HeaderName, Method};
 use subtle::ConstantTimeEq;
+
+use crate::{
+    proxy::PublicOrigin,
+    security::declared::{declared_origin, declares_this_instance},
+};
 
 /// The header the SPA echoes the CSRF cookie in.
 pub const CSRF_HEADER: HeaderName = HeaderName::from_static("x-afisharr-csrf");
@@ -45,25 +47,31 @@ pub enum CsrfDecision {
 /// same name — can post to `/api/setup/complete` without ever reading the
 /// answer. So `carries_ambient_credential` is every cookie that authorises
 /// something, and the caller is the one that enumerates them (PRD §21.4.2).
+///
+/// `configured` is this instance's `publicOrigin`, and it is what the declared
+/// origin is compared against whenever the operator has set one. The fallback
+/// — the request's own `Host` — is what a first-run instance has and nothing
+/// more: `Host` is written by whoever is calling, and every mainstream reverse
+/// proxy rewrites it. nginx's `proxy_pass` alone sets `Host` to the upstream's
+/// name, so an instance judging against it sees `Host: afisharr:8484` beside
+/// `Origin: https://media.example` and refuses every write the operator makes,
+/// with a message about cross-site attacks that are not happening.
 #[must_use]
 pub fn judge_csrf(
     method: &Method,
     headers: &HeaderMap,
     cookie_token: Option<&str>,
     carries_ambient_credential: bool,
+    configured: Option<&PublicOrigin>,
 ) -> CsrfDecision {
     if is_safe(method) || !carries_ambient_credential {
         return CsrfDecision::Allowed;
     }
 
-    if let Some(declared) = declared_origin(headers) {
-        let host = headers
-            .get(HOST)
-            .and_then(|value| value.to_str().ok())
-            .unwrap_or_default();
-        if !origin_matches_host(&declared, host) {
-            return CsrfDecision::ForeignOrigin;
-        }
+    if let Some(declared) = declared_origin(headers)
+        && !declares_this_instance(&declared, headers, configured)
+    {
+        return CsrfDecision::ForeignOrigin;
     }
 
     let echoed = headers
@@ -83,43 +91,16 @@ fn is_safe(method: &Method) -> bool {
     matches!(*method, Method::GET | Method::HEAD | Method::OPTIONS)
 }
 
-/// The host-and-port the request says it came from.
-///
-/// `Origin` first, `Referer` as the fallback: `Origin` is the one designed for
-/// this and is sent on every cross-origin state-changing request, and `Referer`
-/// is what remains when a privacy setting has stripped it down.
-fn declared_origin(headers: &HeaderMap) -> Option<String> {
-    let raw = headers
-        .get(ORIGIN)
-        .or_else(|| headers.get(REFERER))?
-        .to_str()
-        .ok()?;
-    if raw == "null" {
-        // An opaque origin — a sandboxed frame or a `data:` document. It is
-        // not this instance, and treating it as absent would skip the check.
-        return Some(String::from("null"));
-    }
-    let without_scheme = raw.split_once("://").map(|(_, rest)| rest)?;
-    Some(
-        without_scheme
-            .split(['/', '?', '#'])
-            .next()
-            .unwrap_or_default()
-            .to_owned(),
-    )
-}
-
-fn origin_matches_host(declared: &str, host: &str) -> bool {
-    !declared.is_empty() && !host.is_empty() && declared.eq_ignore_ascii_case(host)
-}
-
 fn constant_time_equal(left: &str, right: &str) -> bool {
     left.len() == right.len() && left.as_bytes().ct_eq(right.as_bytes()).into()
 }
 
 #[cfg(test)]
 mod tests {
-    use axum::http::HeaderValue;
+    use axum::http::{
+        HeaderValue,
+        header::{HOST, ORIGIN, REFERER},
+    };
 
     use super::*;
 
@@ -131,11 +112,30 @@ mod tests {
         map
     }
 
+    /// An instance with no `publicOrigin` set, which is the default.
+    fn unconfigured(
+        map: &HeaderMap,
+        cookie_token: Option<&str>,
+        carries_ambient_credential: bool,
+    ) -> CsrfDecision {
+        judge_csrf(
+            &Method::POST,
+            map,
+            cookie_token,
+            carries_ambient_credential,
+            None,
+        )
+    }
+
+    fn configured(value: &str) -> PublicOrigin {
+        PublicOrigin::parse(value).expect("a valid origin")
+    }
+
     #[test]
     fn a_read_is_never_a_forgery() {
         for method in [Method::GET, Method::HEAD, Method::OPTIONS] {
             assert_eq!(
-                judge_csrf(&method, &HeaderMap::new(), None, true),
+                judge_csrf(&method, &HeaderMap::new(), None, true, None),
                 CsrfDecision::Allowed
             );
         }
@@ -149,7 +149,7 @@ mod tests {
             (CSRF_HEADER, "token-value"),
         ]);
         assert_eq!(
-            judge_csrf(&Method::POST, &map, Some("token-value"), true),
+            unconfigured(&map, Some("token-value"), true),
             CsrfDecision::Allowed
         );
     }
@@ -162,7 +162,7 @@ mod tests {
             (CSRF_HEADER, "token-value"),
         ]);
         assert_eq!(
-            judge_csrf(&Method::POST, &map, Some("token-value"), true),
+            unconfigured(&map, Some("token-value"), true),
             CsrfDecision::ForeignOrigin
         );
     }
@@ -174,7 +174,7 @@ mod tests {
             (HOST, "afisharr.example"),
         ]);
         assert_eq!(
-            judge_csrf(&Method::POST, &map, Some("token-value"), true),
+            unconfigured(&map, Some("token-value"), true),
             CsrfDecision::TokenMismatch
         );
     }
@@ -186,10 +186,7 @@ mod tests {
             (HOST, "afisharr.example"),
             (CSRF_HEADER, "token-value"),
         ]);
-        assert_eq!(
-            judge_csrf(&Method::POST, &map, None, true),
-            CsrfDecision::TokenMismatch
-        );
+        assert_eq!(unconfigured(&map, None, true), CsrfDecision::TokenMismatch);
     }
 
     #[test]
@@ -200,7 +197,19 @@ mod tests {
             (CSRF_HEADER, "token-value"),
         ]);
         assert_eq!(
-            judge_csrf(&Method::POST, &map, Some("token-value"), true),
+            unconfigured(&map, Some("token-value"), true),
+            CsrfDecision::ForeignOrigin
+        );
+        // And against a configured origin too: `null` is not a URL, so it
+        // covers nothing.
+        assert_eq!(
+            judge_csrf(
+                &Method::POST,
+                &map,
+                Some("token-value"),
+                true,
+                Some(&configured("https://afisharr.example")),
+            ),
             CsrfDecision::ForeignOrigin
         );
     }
@@ -213,7 +222,7 @@ mod tests {
             (CSRF_HEADER, "token-value"),
         ]);
         assert_eq!(
-            judge_csrf(&Method::POST, &map, Some("token-value"), true),
+            unconfigured(&map, Some("token-value"), true),
             CsrfDecision::ForeignOrigin
         );
     }
@@ -223,7 +232,7 @@ mod tests {
         // An API-key caller attaches no ambient credential, so there is nothing
         // for another site to make a browser send on its behalf.
         assert_eq!(
-            judge_csrf(&Method::POST, &HeaderMap::new(), None, false),
+            unconfigured(&HeaderMap::new(), None, false),
             CsrfDecision::Allowed
         );
     }
@@ -239,11 +248,11 @@ mod tests {
             (CSRF_HEADER, "token-value"),
         ]);
         assert_eq!(
-            judge_csrf(&Method::POST, &map, Some("token-value"), true),
+            unconfigured(&map, Some("token-value"), true),
             CsrfDecision::ForeignOrigin
         );
         assert_eq!(
-            judge_csrf(&Method::POST, &HeaderMap::new(), None, true),
+            unconfigured(&HeaderMap::new(), None, true),
             CsrfDecision::TokenMismatch
         );
     }
@@ -252,12 +261,42 @@ mod tests {
     fn a_write_with_no_origin_header_still_needs_the_token() {
         let map = headers(&[(HOST, "afisharr.example"), (CSRF_HEADER, "token-value")]);
         assert_eq!(
-            judge_csrf(&Method::POST, &map, Some("token-value"), true),
+            unconfigured(&map, Some("token-value"), true),
             CsrfDecision::Allowed
         );
         assert_eq!(
-            judge_csrf(&Method::POST, &map, Some("other"), true),
+            unconfigured(&map, Some("other"), true),
             CsrfDecision::TokenMismatch
+        );
+    }
+
+    #[test]
+    fn a_proxy_that_rewrites_host_does_not_refuse_every_write() {
+        // The deployment this closes, and it is the ordinary one: nginx's
+        // `proxy_pass` sets `Host` to the upstream's own name, so the instance
+        // sees `Host: afisharr:8484` while the browser declares the address the
+        // operator actually reached it at. Judged against `Host`, every write
+        // an operator makes is refused as a cross-site attack — sign-in, the
+        // setup claim, and creating the administrator included.
+        let map = headers(&[
+            (ORIGIN, "https://media.example"),
+            (HOST, "afisharr:8484"),
+            (CSRF_HEADER, "token-value"),
+        ]);
+        assert_eq!(
+            unconfigured(&map, Some("token-value"), true),
+            CsrfDecision::ForeignOrigin,
+            "the Host fallback is what the configured origin replaces"
+        );
+        assert_eq!(
+            judge_csrf(
+                &Method::POST,
+                &map,
+                Some("token-value"),
+                true,
+                Some(&configured("https://media.example")),
+            ),
+            CsrfDecision::Allowed
         );
     }
 }

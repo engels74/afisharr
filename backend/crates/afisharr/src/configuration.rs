@@ -6,5 +6,5 @@
 mod load;
 mod paths;
 
-pub use load::load;
+pub use load::{apply_environment, load};
 pub use paths::DataPaths;

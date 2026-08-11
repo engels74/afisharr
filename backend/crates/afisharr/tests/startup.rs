@@ -355,3 +355,78 @@ async fn a_retention_of_zero_still_leaves_this_migration_its_backup() {
         "a forward-only migration may never run with nothing behind it (I-DATA-8)"
     );
 }
+
+/// A deployment variable has to survive the first boot, or it does nothing.
+///
+/// The failure this pins: `ensure_settings` returned the stored `settings` row
+/// verbatim, so every `AFISHARR_*` deployment variable was read exactly once —
+/// on the very first start a container ever made — and ignored on every start
+/// after it. An operator upgrading an existing instance, adding
+/// `AFISHARR_PUBLIC_ORIGIN` to their compose file and restarting, was told by
+/// the hosted Plex sign-in to set the setting they had just set;
+/// `AFISHARR_TRUST_PROXY` behind a reverse proxy was ignored the same way, so
+/// every request kept being attributed to the proxy's own address and twenty
+/// failed sign-ins from any one visitor rate-limited the whole instance.
+///
+/// Driven through the real binary and a real socket, because the claim is about
+/// what a container operator gets: the port is the observable that no library
+/// call can fake, and it answers only if the environment beat the stored row.
+#[tokio::test]
+async fn an_environment_override_is_honoured_on_every_start_and_not_only_the_first() {
+    let instance = TempInstance::new();
+
+    // A first start, which is what writes the `settings` row. It stores the
+    // default port, and from here on that row is the one being overridden.
+    instance.boot().await.database.close().await;
+
+    let port = free_port();
+    let mut child = std::process::Command::new(env!("CARGO_BIN_EXE_afisharr"))
+        .arg("start")
+        .env("AFISHARR_DATA_DIR", instance.paths().root())
+        .env("AFISHARR_BIND_ADDRESS", "127.0.0.1")
+        .env("AFISHARR_PORT", port.to_string())
+        .spawn()
+        .expect("the afisharr binary must start");
+
+    let answered = wait_for_health(port).await;
+
+    let _ = child.kill();
+    let _ = child.wait();
+
+    assert!(
+        answered,
+        "nothing answered on port {port}: the stored settings row won over \
+         AFISHARR_PORT, so every deployment variable is dead after the first boot"
+    );
+}
+
+/// A port nothing is listening on, as far as the operating system knows.
+fn free_port() -> u16 {
+    let listener =
+        std::net::TcpListener::bind("127.0.0.1:0").expect("binding an ephemeral port must succeed");
+    let port = listener
+        .local_addr()
+        .expect("a bound listener has an address")
+        .port();
+    drop(listener);
+    port
+}
+
+/// Whether the health route answers on `port` within a bounded wait.
+///
+/// Polled rather than slept on: a fixed sleep is either longer than the test
+/// needs on every run or shorter than it needs on a loaded machine, and the
+/// second of those is a test that fails for a reason nobody can reproduce.
+async fn wait_for_health(port: u16) -> bool {
+    let client = reqwest::Client::new();
+    let url = format!("http://127.0.0.1:{port}/api/health");
+    for _ in 0..100 {
+        if let Ok(response) = client.get(&url).send().await
+            && response.status().is_success()
+        {
+            return true;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+    }
+    false
+}

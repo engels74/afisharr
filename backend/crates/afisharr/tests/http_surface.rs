@@ -185,6 +185,11 @@ async fn a_forwarded_https_claim_from_a_trusted_peer_produces_hsts() {
     let instance = TempInstance::new();
     let mut configured = afisharr_core::settings::SettingsBody::default();
     configured.http.trust_proxy = vec!["127.0.0.1".to_owned()];
+    // Both halves, because HSTS needs both. The trusted chain says this
+    // request arrived over TLS; the configured origin says this instance is
+    // served over TLS, and only the second is a statement a caller cannot
+    // write.
+    configured.http.public_origin = Some("https://afisharr.example".to_owned());
     let running = RunningInstance::start_with(&instance, configured).await;
 
     let response = client()
@@ -200,6 +205,34 @@ async fn a_forwarded_https_claim_from_a_trusted_peer_produces_hsts() {
             .get("strict-transport-security")
             .and_then(|value| value.to_str().ok()),
         Some("max-age=31536000; includeSubDomains")
+    );
+
+    running.stop().await;
+}
+
+#[tokio::test]
+async fn a_forwarded_https_claim_alone_does_not_pin_the_domain_for_a_year() {
+    // A trusted proxy that sets `X-Forwarded-For` and leaves
+    // `X-Forwarded-Proto` alone passes the client's own claim straight through,
+    // and no count of header entries can tell that apart from a claim the
+    // proxy wrote. What the forgery must not reach is the one header a browser
+    // remembers for a year: HSTS pins every subdomain of the registrable
+    // domain, and an operator on a plaintext instance cannot click through it.
+    let instance = TempInstance::new();
+    let mut configured = afisharr_core::settings::SettingsBody::default();
+    configured.http.trust_proxy = vec!["127.0.0.1".to_owned()];
+    let running = RunningInstance::start_with(&instance, configured).await;
+
+    let response = client()
+        .get(format!("{}/api/health", running.base_url))
+        .header("x-forwarded-proto", "https")
+        .send()
+        .await
+        .expect("the health route must answer");
+
+    assert!(
+        !response.headers().contains_key("strict-transport-security"),
+        "an instance with no configured https origin must not emit HSTS"
     );
 
     running.stop().await;

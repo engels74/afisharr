@@ -4,7 +4,12 @@
 -->
 <script lang="ts">
 	import { goto } from '$app/navigation';
-	import { BlockedState, ErrorState, LoadingState } from '$lib/components/state';
+	import {
+		BlockedState,
+		ErrorState,
+		LoadingState,
+		PendingState,
+	} from '$lib/components/state';
 	import {
 		AdminForm,
 		completeSetup,
@@ -16,6 +21,8 @@
 	let status = $state<SetupStatus | undefined>(undefined);
 	let blocked = $state<string | undefined>(undefined);
 	let refusal = $state<string | undefined>(undefined);
+	/** Whether `finish()` is in flight, so its wait is not read as its failure. */
+	let finishing = $state(false);
 	let startedAt = Date.now();
 	let elapsed = $state(0);
 
@@ -53,7 +60,10 @@
 	 * to `/login` without this lands on a page that cannot work.
 	 */
 	async function finish() {
+		refusal = undefined;
+		finishing = true;
 		const completed = await completeSetup();
+		finishing = false;
 		if (completed.outcome === 'refused') {
 			refusal = completed.problem.message;
 			return;
@@ -77,10 +87,34 @@
 	<p class="text-xs text-[var(--muted-foreground)]">
 		{t('setup.step', { ordinal: status.ordinal })}
 	</p>
-	{#if refusal}
-		<ErrorState state={{ kind: 'error', summary: refusal }} />
+	{#if status.step === 'admin'}
+		{#if refusal}
+			<ErrorState state={{ kind: 'error', summary: refusal }} />
+		{/if}
+		<AdminForm oncreated={finish} />
+	{:else if finishing}
+		<PendingState state={{ kind: 'pending', operation: t('setup.finish.pending') }} />
+	{:else if refusal}
+		<!--
+			Past the administrator step, and `finish()` was refused. The form
+			must not render here: this instance already has an administrator, so
+			every submission answers 409 "Sign in instead", and `finish()` is
+			only reachable through the form's `oncreated` — which never fires.
+			The operator would be stuck on a page whose one control cannot
+			succeed, with a reload the only way out. What the step actually
+			needs is the retry for the call that failed (`I-UX-2`).
+		-->
+		<ErrorState
+			state={{
+				kind: 'error',
+				summary: refusal,
+				consequence: t('setup.finish.consequence'),
+			}}
+			onretry={finish}
+		/>
+	{:else}
+		<LoadingState state={{ kind: 'loading', elapsedMs: elapsed }} rows={2} />
 	{/if}
-	<AdminForm oncreated={finish} />
 {:else}
 	<LoadingState state={{ kind: 'loading', elapsedMs: elapsed }} rows={4} />
 {/if}

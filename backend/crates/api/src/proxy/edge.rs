@@ -92,6 +92,19 @@ impl Edge {
     /// that overwrites rather than appends — the rightmost entry is the only
     /// one this instance can attribute to anybody, and it is the immediate
     /// peer's.
+    ///
+    /// One case this cannot decide, and it is stated here rather than papered
+    /// over: a trusted proxy that sets `X-Forwarded-For` and leaves
+    /// `X-Forwarded-Proto` alone passes the client's own claim through
+    /// untouched, and the resulting one-entry chain is indistinguishable from
+    /// a one-entry chain the proxy wrote itself. Counting entries cannot
+    /// separate them, so nothing here tries to. What that forgery can reach is
+    /// bounded elsewhere instead: `Strict-Transport-Security` — the one effect
+    /// a browser remembers for a year — is emitted only when the operator has
+    /// configured an `https` `publicOrigin`, which no caller can write
+    /// (`security::headers`). A forged `Secure` on the session cookie is the
+    /// remainder, and it is self-correcting: the browser simply withholds a
+    /// cookie it was told to keep for TLS.
     pub(super) fn scheme(&self, headers: &HeaderMap) -> Scheme {
         let chain = entries(headers, FORWARDED_PROTO);
         let claimed = chain

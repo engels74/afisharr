@@ -22,6 +22,9 @@ export const en = {
 	'api.unreachable':
 		'Afisharr did not answer. It may be restarting, or the connection to it is down.',
 
+	'landing.unreachable':
+		'Until this instance answers, Afisharr cannot tell whether it has been set up, so it will not guess where to send you.',
+
 	'nav.dashboard': 'Dashboard',
 	'nav.collections': 'Collections',
 	'nav.design': 'Design',
@@ -82,6 +85,9 @@ export const en = {
 		'One account, and it holds every permission this instance has.',
 	'setup.admin.submit': 'Create account',
 	'setup.step': 'Step {ordinal} of 8',
+	'setup.finish.pending': 'Finishing setup…',
+	'setup.finish.consequence':
+		'The administrator account exists, but setup is not finished, so signing in is still refused. Finishing it is the only step left.',
 
 	'auth.username': 'Username',
 	'auth.password': 'Password',

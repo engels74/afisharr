@@ -14,16 +14,25 @@ const ENV_PREFIX: &str = "AFISHARR_";
 /// Builds the settings document from the optional config file and the
 /// environment, in that order.
 ///
-/// Only a first start uses this. Once `settings` holds a row it is the source
-/// of truth, because the operator edits it through the interface and a config
-/// file that silently overrode those edits on the next restart would make the
-/// settings page lie about the running configuration.
+/// The *file* is read only by a first start. Once `settings` holds a row it is
+/// the source of truth for everything the operator edits through the interface,
+/// because a config file that silently overrode those edits on the next restart
+/// would make the settings page lie about the running configuration.
 ///
-/// The exceptions are the values decided before the row can be read, and they
-/// are exceptions of ordering rather than of intent: `logging`, because the log
-/// is opened before the database, and `backup.retainedPreMigration`, because
-/// the pre-migration prune runs before the row is loaded. Both keep being read
-/// from here on every start, and a settings surface offering them has to say so.
+/// The *environment* is not the same thing and is not treated as one. A
+/// variable in a compose file is a statement the operator makes on every single
+/// start, and the container is where they make it: `AFISHARR_PUBLIC_ORIGIN`,
+/// `AFISHARR_TRUST_PROXY`, `AFISHARR_BIND_ADDRESS` and `AFISHARR_PORT` describe
+/// how this deployment is reached, which is not something the instance can
+/// learn from a row written the first time it ever booted. So
+/// [`apply_environment`] runs again over the stored document on every start
+/// (`startup::sequence`), and a settings surface offering these fields has to
+/// show which of them the environment is holding.
+///
+/// The other values read on every start are read that way for ordering rather
+/// than for intent: `logging`, because the log is opened before the database,
+/// and `backup.retainedPreMigration`, because the pre-migration prune runs
+/// before the row is loaded.
 ///
 /// # Errors
 /// Returns an error naming the file when it cannot be read, or naming the field
@@ -49,7 +58,18 @@ pub fn load(config_file: &Path) -> Result<SettingsBody> {
 /// the settings document rejects unknown fields, and a generic mapper would
 /// reintroduce the partial, unvalidated writes that PRD §19.5 rejects a
 /// key-value settings table for.
-fn apply_environment(body: &mut SettingsBody) -> Result<()> {
+///
+/// Called twice over a start, and the second call is what makes these variables
+/// mean anything after the first boot: once by [`load`] to build the document a
+/// first start seeds `settings` with, and once by `startup::sequence` over the
+/// stored row. Only fields whose variable is actually set are touched, so the
+/// same function does both jobs and there is no second list of names to keep in
+/// step (P7).
+///
+/// # Errors
+/// Returns an error naming the variable when it is set to nothing, to something
+/// that is not text, or to a value the field's type rejects.
+pub fn apply_environment(body: &mut SettingsBody) -> Result<()> {
     if let Some(value) = override_value("TIMEZONE")? {
         body.instance.timezone = value;
     }

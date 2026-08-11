@@ -149,6 +149,17 @@ pub async fn recover(
         return Err(held_elsewhere(now, expires_at));
     }
 
+    // Two limits, because this route verifies an administrator's password and
+    // so is the sign-in route wearing another name. `SetupAttempt` is counted
+    // per address and carries no lockout, which is all a claim token needs —
+    // the token dies with the process. A password does not: an attacker who
+    // can vary their address gets the whole per-address allowance again from
+    // every address they can reach the instance from, and rotating addresses
+    // is a residential proxy away. `LoginAccount` is the bucket that does not
+    // move with them, and its escalating lockout is why `log_in` spends it for
+    // the identical check (PRD §21.4.3).
+    let account_bucket = Bucket::login_account(&request.username);
+    refuse_if_limited(&state, &account_bucket, client)?;
     spend_attempt(&state, client)?;
 
     let account = accounts::find_by_username(state.database().readers(), &request.username)
@@ -157,10 +168,19 @@ pub async fn recover(
         .filter(|user| user.is_admin && user.is_active());
 
     if !verify_admin(account.as_ref(), request.password).await? {
+        // Recorded on failure only, for the reason `log_in` records it that
+        // way: a limit that counted successes would lock an operator out of
+        // their own interrupted setup for signing in twice.
+        let _ = state
+            .limiter()
+            .record(&account_bucket, Some(client.address));
         // The same refusal for an unknown username and a wrong password: a
         // different one tells a guesser which of the two they achieved.
         return Err(credentials_refused());
     }
+    state
+        .limiter()
+        .forget(&account_bucket, Some(client.address));
 
     let granted = grant(&state, client, jar, mint_cookie_value(), now).await;
     if granted.is_ok() {
@@ -256,6 +276,22 @@ fn spend_attempt(state: &ApiState, client: ClientContext) -> AppResult<()> {
             Problem::new(
                 ErrorCode::RateLimited,
                 "Too many setup attempts from this address. Try again later.",
+            )
+            .retry_after(retry_after_seconds),
+        )),
+    }
+}
+
+/// Refuses when `bucket` is already spent, without spending it again.
+fn refuse_if_limited(state: &ApiState, bucket: &Bucket, client: ClientContext) -> AppResult<()> {
+    match state.limiter().check(bucket, Some(client.address)) {
+        Decision::Allowed => Ok(()),
+        Decision::Refused {
+            retry_after_seconds,
+        } => Err(AppError::new(
+            Problem::new(
+                ErrorCode::RateLimited,
+                "Too many attempts against that account. Try again later.",
             )
             .retry_after(retry_after_seconds),
         )),
