@@ -157,7 +157,7 @@ fn parse_entry(entry: &str) -> Option<IpAddr> {
 ///
 /// A chain can arrive as one comma-joined header or as several, and a proxy
 /// that appends a second header line is appending to the same list.
-fn entries<'h>(headers: &'h HeaderMap, name: &str) -> Vec<&'h str> {
+pub(super) fn entries<'h>(headers: &'h HeaderMap, name: &str) -> Vec<&'h str> {
     headers
         .get_all(name)
         .iter()

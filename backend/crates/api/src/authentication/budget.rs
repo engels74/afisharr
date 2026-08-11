@@ -16,7 +16,7 @@
 
 use std::net::IpAddr;
 
-use axum::http::{HeaderMap, header::AUTHORIZATION};
+use axum::http::HeaderMap;
 use axum_extra::extract::CookieJar;
 
 use crate::{
@@ -42,14 +42,24 @@ impl Credential {
     }
 }
 
-/// Whether a request carries something it means as a credential.
+/// Whether a request carries something the guard will judge as a credential.
 ///
 /// Presenting one and holding one are different facts, and this answers only
 /// the first: it reads headers, never the database. The rate-limit layer needs
 /// exactly that much.
+///
+/// It reads the `Authorization` header through [`guard::bearer_key`] rather than
+/// asking whether the header exists, because the two questions have different
+/// answers and the gap between them was uncounted traffic. `Authorization: Basic
+/// x` and an empty bearer value are headers the guard cannot use: it refuses
+/// them before it reaches the arm that counts a refused credential. Reading them
+/// here as presented credentials made the layer skip them too, so a caller
+/// looping `Authorization: Basic x` against `/api/stream` was metered by
+/// nothing, and the limiter reported zero for traffic that was in fact
+/// unbounded.
 #[must_use]
 pub fn presents_credential(headers: &HeaderMap) -> bool {
-    headers.contains_key(AUTHORIZATION)
+    super::guard::bearer_key(headers).is_some()
         || CookieJar::from_headers(headers)
             .get(SESSION_COOKIE)
             .is_some()
@@ -89,7 +99,10 @@ pub fn spend_anonymous(state: &ApiState, address: Option<IpAddr>) -> Option<AppE
 
 #[cfg(test)]
 mod tests {
-    use axum::http::{HeaderValue, header::COOKIE};
+    use axum::http::{
+        HeaderValue,
+        header::{AUTHORIZATION, COOKIE},
+    };
 
     use super::*;
 
@@ -110,6 +123,21 @@ mod tests {
         assert!(presents_credential(&with_cookie));
 
         assert!(!presents_credential(&HeaderMap::new()));
+    }
+
+    #[test]
+    fn a_header_the_guard_cannot_read_is_not_a_presented_credential() {
+        // The gap that left traffic uncounted: the layer skipped these for
+        // carrying a header, and the guard refused them before the arm that
+        // counts a refused credential, so no bucket ever saw them.
+        for header in ["Basic abc123", "Bearer   ", "Bearer", ""] {
+            let mut headers = HeaderMap::new();
+            headers.insert(AUTHORIZATION, HeaderValue::from_str(header).expect("valid"));
+            assert!(
+                !presents_credential(&headers),
+                "{header:?} is not a credential this instance judges"
+            );
+        }
     }
 
     #[test]

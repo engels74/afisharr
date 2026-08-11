@@ -58,6 +58,20 @@ pub enum OutboundError {
         #[source]
         source: serde_json::Error,
     },
+
+    /// An answer arrived and its body was larger than this client will hold.
+    ///
+    /// Its own variant because it is neither of the two above: the service
+    /// answered, so it is not unreachable, and nothing was refused, so it is not
+    /// a status. What it says is that this instance stopped reading — the one
+    /// fact an operator needs to tell a provider incident from a limit here.
+    #[error("{host} answered with a body larger than {limit_bytes} bytes")]
+    Oversized {
+        /// The host that answered.
+        host: String,
+        /// The cap that was in force.
+        limit_bytes: usize,
+    },
 }
 
 impl OutboundError {
@@ -68,7 +82,8 @@ impl OutboundError {
             Self::Address { host, .. }
             | Self::Unreachable { host, .. }
             | Self::Status { host, .. }
-            | Self::Malformed { host, .. } => host,
+            | Self::Malformed { host, .. }
+            | Self::Oversized { host, .. } => host,
         }
     }
 
@@ -78,7 +93,10 @@ impl OutboundError {
     /// a fact (`I-SRC-1`).
     #[must_use]
     pub const fn service_answered(&self) -> bool {
-        matches!(self, Self::Status { .. } | Self::Malformed { .. })
+        matches!(
+            self,
+            Self::Status { .. } | Self::Malformed { .. } | Self::Oversized { .. }
+        )
     }
 }
 

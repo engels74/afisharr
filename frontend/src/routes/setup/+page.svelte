@@ -26,6 +26,9 @@
 	 * derived step has already moved on.
 	 */
 	async function load() {
+		// Cleared first, so a retry shows the skeleton rather than the refusal
+		// it is replacing.
+		refusal = undefined;
 		const gate = await readClaimStatus();
 		if (gate.outcome === 'refused') {
 			refusal = gate.problem.message;
@@ -69,7 +72,16 @@
 </script>
 
 {#if refusal}
-	<ErrorState state={{ kind: 'error', summary: refusal }} />
+	<!--
+		With a retry, because this is the first page a new instance renders and
+		it is outside the shell, so there is no navigation to leave by either.
+		The claim read is rate limited and can answer 429 — an operator behind a
+		NAT or a reverse proxy shares that budget — and the client turns an
+		unreachable instance into a 503, which is what a container restart looks
+		like from here. Both pass, and without a control the operator has to know
+		to reload the browser themselves (`I-UX-2`).
+	-->
+	<ErrorState state={{ kind: 'error', summary: refusal }} onretry={load} />
 {:else if status}
 	<p class="text-xs text-[var(--muted-foreground)]">
 		{t('setup.step', { ordinal: status.ordinal })}

@@ -8,6 +8,7 @@
 //! client, not an argument at the call site: a caller may shorten it and
 //! cannot omit it.
 
+mod body;
 mod client;
 mod deadline;
 mod error;

@@ -25,7 +25,7 @@ pub(crate) mod session;
 pub use account_routes::{
     PasswordChange, PasswordChanged, SessionView, change_password, list_sessions, revoke_session,
 };
-pub use budget::presents_credential;
+pub use budget::{presents_credential, spend_anonymous};
 pub use guard::{Administrator, Authenticated, Credential};
 pub(crate) use password_login::ABSENT_ACCOUNT_HASH;
 pub use password_login::{Credentials, SignedIn, log_in, log_out, whoami};

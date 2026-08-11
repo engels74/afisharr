@@ -173,12 +173,18 @@ pub async fn start_plex_pin(
     // that started it can do; the second is the token that completion has to
     // echo, because an attempt cookie is an ambient credential and every
     // ambient credential is judged (PRD §21.4.2).
+    //
+    // The `Max-Age` has a floor for the same reason the window it comes from
+    // does: a cookie emitted at zero is discarded on arrival, and the operator
+    // is then shown a live code whose every poll answers that the sign-in was
+    // started somewhere else. A second is enough to keep that shape impossible
+    // here, whatever arrives from upstream.
     let jar = jar
         .add(set(
             PLEX_PIN_COOKIE,
             stored.id.clone(),
             PLEX_PIN_COOKIE_PATH,
-            now.millis_until(stored.expires_at) / 1000,
+            (now.millis_until(stored.expires_at) / 1000).max(1),
             client.scheme,
             true,
         ))

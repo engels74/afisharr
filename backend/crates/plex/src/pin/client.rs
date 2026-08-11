@@ -15,6 +15,14 @@ use crate::{
 /// plex.tv's API root.
 const PLEX_TV_BASE: &str = "https://plex.tv/api/v2";
 
+/// What a pin reports as its client identifier when it reports none.
+///
+/// A placeholder rather than an empty string, because it is read by an operator
+/// in the refusal `PinError::ClientIdentifierMismatch` renders, and "under
+/// client identifier ''" reads as a bug in Afisharr rather than as an answer
+/// plex.tv did not give.
+const ABSENT_IDENTIFIER: &str = "(none given)";
+
 /// The plex.tv side of the login flow.
 ///
 /// Holds no token: a pin exchange is how a token is obtained, so a client that
@@ -89,10 +97,18 @@ impl PlexTvClient {
         let body: PinBody = response.json("plex.tv")?;
 
         let plex_pin_id = body.identifier().ok_or(PinError::NoIdentifier)?;
+        // An answer that does not say which client the pin belongs to is not a
+        // match, and defaulting it to our own identifier made the check below
+        // compare a value with itself: it could not fire, and the same
+        // substituted value went into `plex_pin_logins`, so the second guard on
+        // the poll passed too. plex.tv dropping the field — a version change on
+        // their side is enough — then meant the operator completed the whole
+        // sign-in and was handed a token every later call refuses, which is the
+        // opaque failure this variant exists to prevent (PRD §19.6).
         let recorded = body
             .client_identifier
             .clone()
-            .unwrap_or_else(|| self.identity.client_identifier().to_owned());
+            .unwrap_or_else(|| ABSENT_IDENTIFIER.to_owned());
         if recorded != self.identity.client_identifier() {
             return Err(PinError::ClientIdentifierMismatch {
                 expected: self.identity.client_identifier().to_owned(),

@@ -23,6 +23,19 @@
 	let refusal = $state<string | undefined>(undefined);
 	/** Whether `finish()` is in flight, so its wait is not read as its failure. */
 	let finishing = $state(false);
+	/**
+	 * Whether the administrator now exists, so the form must not render again.
+	 *
+	 * `status` is read once, in `load()`, and completing setup does not change
+	 * it — the server's answer to `finish()` is not a status. Without this the
+	 * page went on rendering the `admin` step for the whole of `finish()` and
+	 * after a refusal of it, so the pending branch and the retry branch below
+	 * were both unreachable: the operator watched the form they had just
+	 * submitted with no indication anything was happening, and a refused
+	 * completion left them on a form whose only button answers 409 "This
+	 * instance already has an administrator" for ever.
+	 */
+	let created = $state(false);
 	let elapsed = $state(0);
 
 	/**
@@ -32,7 +45,8 @@
 	 * that feeds the skeleton cannot outlive it (P7).
 	 */
 	const loading = $derived(
-		!blocked && (!status || (status.step !== 'admin' && !finishing && !refusal)),
+		!blocked &&
+			(!status || ((status.step !== 'admin' || created) && !finishing && !refusal)),
 	);
 
 	async function load() {
@@ -81,6 +95,9 @@
 	 * to `/login` without this lands on a page that cannot work.
 	 */
 	async function finish() {
+		// Set before the call and never cleared: by the time this runs the
+		// administrator exists, whatever the completion answers.
+		created = true;
 		refusal = undefined;
 		finishing = true;
 		const completed = await completeSetup();
@@ -123,17 +140,14 @@
 	<p class="text-xs text-[var(--muted-foreground)]">
 		{t('setup.step', { ordinal: status.ordinal })}
 	</p>
-	{#if status.step === 'admin'}
-		{#if refusal}
-			<ErrorState state={{ kind: 'error', summary: refusal }} />
-		{/if}
+	{#if status.step === 'admin' && !created}
 		<AdminForm oncreated={finish} onclaimlost={returnToClaim} />
 	{:else if finishing}
 		<PendingState state={{ kind: 'pending', operation: t('setup.finish.pending') }} />
 	{:else if refusal}
 		<!--
-			Past the administrator step, and `finish()` was refused. The form
-			must not render here: this instance already has an administrator, so
+			The administrator exists and `finish()` was refused. The form must
+			not render here: this instance already has an administrator, so
 			every submission answers 409 "Sign in instead", and `finish()` is
 			only reachable through the form's `oncreated` — which never fires.
 			The operator would be stuck on a page whose one control cannot

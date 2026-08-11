@@ -60,7 +60,15 @@
 		// operator was choosing a password in their manager surfaced here as a
 		// banner telling them to enter the token again, on a page with no token
 		// field, whose one button reproduces the same 403 for ever.
-		if (result.problem.code === 'setupRequired') {
+		//
+		// Both refusals, because the claim gate has two: `setupRequired` when
+		// the lease is unheld or the renewal lost its race, and `blocked` when
+		// another browser now holds it. Reading only the first left the second
+		// browser's case — the operator's lease lapses, somebody claims it with
+		// the console token — rendering "Another browser is holding the setup
+		// wizard." on this page for ever, which is the same dead end wearing the
+		// other code.
+		if (result.problem.code === 'setupRequired' || result.problem.code === 'blocked') {
 			refusal = undefined;
 			onclaimlost();
 			return;

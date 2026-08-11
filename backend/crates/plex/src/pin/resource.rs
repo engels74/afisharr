@@ -75,8 +75,21 @@ impl PinBody {
         }
     }
 
+    /// How long the pin lives, in seconds, as a window that can actually be
+    /// used.
+    ///
+    /// A zero or negative `expiresIn` is treated as absent rather than obeyed.
+    /// It is not a shorter window, it is a window that closed before it opened,
+    /// and it does not stay upstream: it becomes the attempt row's `expires_at`
+    /// and the `Max-Age` of the cookie that binds the attempt to this browser.
+    /// Emitted at zero, the browser discards that cookie on arrival, every poll
+    /// answers "that sign-in was started somewhere else", and starting again
+    /// reproduces it — Plex sign-in broken for good, by a message that blames
+    /// the browser for a value plex.tv sent.
     pub(crate) fn expires_in_seconds(&self) -> i64 {
-        self.expires_in.unwrap_or(DEFAULT_EXPIRY_SECONDS)
+        self.expires_in
+            .filter(|seconds| *seconds > 0)
+            .unwrap_or(DEFAULT_EXPIRY_SECONDS)
     }
 }
 
@@ -107,6 +120,23 @@ mod tests {
     fn an_absent_expiry_falls_back_to_the_documented_default() {
         let body: PinBody = serde_json::from_str(r#"{"id":1,"code":"abcd"}"#).expect("parses");
         assert_eq!(body.expires_in_seconds(), DEFAULT_EXPIRY_SECONDS);
+    }
+
+    #[test]
+    fn a_window_that_closed_before_it_opened_falls_back_too() {
+        // Obeyed, this reaches the attempt cookie as `Max-Age=0`: the browser
+        // discards it on arrival and every poll of the sign-in the operator is
+        // looking at answers that it was started somewhere else.
+        for expiry in ["0", "-1", "-900"] {
+            let body: PinBody =
+                serde_json::from_str(&format!(r#"{{"id":1,"code":"abcd","expiresIn":{expiry}}}"#))
+                    .expect("parses");
+            assert_eq!(
+                body.expires_in_seconds(),
+                DEFAULT_EXPIRY_SECONDS,
+                "expiresIn {expiry}"
+            );
+        }
     }
 
     #[test]

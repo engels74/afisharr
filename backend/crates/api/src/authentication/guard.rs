@@ -11,7 +11,7 @@ use afisharr_core::{
 };
 use axum::{
     extract::FromRequestParts,
-    http::{header::AUTHORIZATION, request::Parts},
+    http::{HeaderMap, header::AUTHORIZATION, request::Parts},
 };
 use axum_extra::extract::CookieJar;
 
@@ -86,14 +86,23 @@ impl FromRequestParts<ApiState> for Authenticated {
             .map(|context| context.address);
 
         let jar = CookieJar::from_headers(&parts.headers);
-        let resolved = if let Some(presented) = bearer_key(parts) {
+        let resolved = if let Some(presented) = bearer_key(&parts.headers) {
             from_api_key(state, &presented, now).await
         } else if let Some(cookie) = jar.get(SESSION_COOKIE) {
             from_session(state, cookie.value(), now).await
         } else {
-            // Nothing was presented, so `anonymous_rate_limit` has already
-            // counted this request against the address's budget. Counting it
-            // again here would charge one request twice.
+            // Nothing this extractor can read was presented, so
+            // `anonymous_rate_limit` has already counted the request against
+            // the address's budget. Counting it again here would charge one
+            // request twice.
+            //
+            // That holds because the layer branches on
+            // [`budget::presents_credential`], which is this same reader: an
+            // `Authorization` header the extractor cannot use — `Basic`, an
+            // empty bearer value — is not a presented credential to either of
+            // them. When the two disagreed, such a request was skipped by the
+            // layer for having a header and dropped here for having no usable
+            // one, and was counted by nothing at all.
             return Err(unauthenticated());
         };
 
@@ -151,8 +160,13 @@ impl FromRequestParts<ApiState> for Administrator {
 }
 
 /// The value of an `Authorization: Bearer` header, if there is one.
-fn bearer_key(parts: &Parts) -> Option<String> {
-    let raw = parts.headers.get(AUTHORIZATION)?.to_str().ok()?;
+///
+/// Taken by headers rather than by [`Parts`] because the rate-limit layer reads
+/// it too, through [`budget::presents_credential`], and it runs before there are
+/// any parts to read. One reader for both is what keeps "presents a credential"
+/// and "presents one this extractor will judge" the same statement.
+pub(super) fn bearer_key(headers: &HeaderMap) -> Option<String> {
+    let raw = headers.get(AUTHORIZATION)?.to_str().ok()?;
     let (scheme, value) = raw.split_once(' ')?;
     scheme
         .eq_ignore_ascii_case("bearer")
@@ -278,22 +292,23 @@ mod tests {
 
     use super::*;
 
-    fn parts_with(header: Option<&str>) -> Parts {
+    fn headers_with(header: Option<&str>) -> HeaderMap {
         let mut builder = Request::builder().uri("/");
         if let Some(value) = header {
             builder = builder.header(AUTHORIZATION, HeaderValue::from_str(value).expect("valid"));
         }
-        builder
+        let parts: Parts = builder
             .body(())
             .expect("the request must build")
             .into_parts()
-            .0
+            .0;
+        parts.headers
     }
 
     #[test]
     fn a_bearer_header_yields_its_key() {
         assert_eq!(
-            bearer_key(&parts_with(Some("Bearer abc123"))).as_deref(),
+            bearer_key(&headers_with(Some("Bearer abc123"))).as_deref(),
             Some("abc123")
         );
     }
@@ -301,24 +316,24 @@ mod tests {
     #[test]
     fn the_scheme_is_matched_case_insensitively() {
         assert_eq!(
-            bearer_key(&parts_with(Some("bearer abc123"))).as_deref(),
+            bearer_key(&headers_with(Some("bearer abc123"))).as_deref(),
             Some("abc123")
         );
     }
 
     #[test]
     fn another_scheme_is_not_read_as_a_key() {
-        assert_eq!(bearer_key(&parts_with(Some("Basic abc123"))), None);
+        assert_eq!(bearer_key(&headers_with(Some("Basic abc123"))), None);
     }
 
     #[test]
     fn an_empty_bearer_value_is_not_a_key() {
-        assert_eq!(bearer_key(&parts_with(Some("Bearer   "))), None);
+        assert_eq!(bearer_key(&headers_with(Some("Bearer   "))), None);
     }
 
     #[test]
     fn no_header_is_no_key() {
-        assert_eq!(bearer_key(&parts_with(None)), None);
+        assert_eq!(bearer_key(&headers_with(None)), None);
     }
 
     #[test]

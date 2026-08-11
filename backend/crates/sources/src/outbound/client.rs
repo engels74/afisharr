@@ -12,7 +12,7 @@ use reqwest::{
 use tracing::{info, warn};
 use url::Url;
 
-use crate::outbound::{Deadline, OutboundError};
+use crate::outbound::{Deadline, OutboundError, body};
 
 /// A body that answered, with the status it answered under.
 #[derive(Debug, Clone)]
@@ -153,28 +153,21 @@ impl OutboundClient {
         };
 
         let status = response.status();
-        // Headers are not an answer. A connection that drops or times out
-        // while the body streams has told us nothing, and turning that into an
-        // empty body would hand the adapter a "malformed response" it cannot
-        // act on while discarding the transport failure that actually
-        // happened — the answered-versus-unreachable distinction `I-SRC-1` is
-        // built on, collapsed exactly where it matters (P1).
-        let body = match response.text().await {
+        // Headers are not an answer, so the body is read here and not skipped —
+        // see [`body::within_cap`] for what a body that never finishes is
+        // reported as, and for the size this instance stops reading at.
+        let body = match body::within_cap(response, &host, timeout_millis).await {
             Ok(body) => body,
-            Err(source) => {
+            Err(error) => {
                 warn!(
                     %host,
                     %method,
                     status = status.as_u16(),
                     elapsed_ms = started.elapsed().as_millis(),
                     timeout_ms = timeout_millis,
-                    "outbound response body did not arrive"
+                    "outbound response body was not read: {error}"
                 );
-                return Err(OutboundError::Unreachable {
-                    host,
-                    timeout_millis,
-                    source,
-                });
+                return Err(error);
             }
         };
         // Measured after the body, because the body is the answer. A provider
@@ -199,24 +192,10 @@ impl OutboundClient {
             Err(OutboundError::Status {
                 host,
                 status: status.as_u16(),
-                body: truncated(&body),
+                body: body::truncated(&body),
             })
         }
     }
-}
-
-/// How much of a refusal body is worth keeping for the collapsed detail.
-const BODY_EXCERPT_BYTES: usize = 512;
-
-fn truncated(body: &str) -> String {
-    if body.len() <= BODY_EXCERPT_BYTES {
-        return body.to_owned();
-    }
-    let mut end = BODY_EXCERPT_BYTES;
-    while end > 0 && !body.is_char_boundary(end) {
-        end -= 1;
-    }
-    body[..end].to_owned()
 }
 
 #[cfg(test)]
@@ -227,20 +206,6 @@ mod tests {
     fn the_client_carries_the_default_deadline() {
         let client = OutboundClient::new("afisharr/test").expect("the transport must build");
         assert_eq!(client.deadline(), Deadline::DEFAULT);
-    }
-
-    #[test]
-    fn a_body_at_the_excerpt_boundary_is_kept_whole() {
-        let body = "a".repeat(BODY_EXCERPT_BYTES);
-        assert_eq!(truncated(&body).len(), BODY_EXCERPT_BYTES);
-    }
-
-    #[test]
-    fn a_long_body_is_cut_on_a_character_boundary() {
-        let body = "é".repeat(BODY_EXCERPT_BYTES);
-        let cut = truncated(&body);
-        assert!(cut.len() <= BODY_EXCERPT_BYTES);
-        assert!(body.starts_with(&cut));
     }
 
     #[test]
@@ -286,6 +251,59 @@ mod tests {
             // Dropped owing sixty more bytes.
         });
         (format!("http://{address}/"), serving)
+    }
+
+    /// A server that declares a body far larger than this client will hold.
+    ///
+    /// The shape a hostile or broken upstream produces, and the one the cap is
+    /// for: the answer starts arriving and never stops.
+    async fn a_server_that_promises_a_huge_body() -> (String, tokio::task::JoinHandle<()>) {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("a port must be bindable");
+        let address = listener.local_addr().expect("the port must be readable");
+        let serving = tokio::spawn(async move {
+            let Ok((mut socket, _)) = listener.accept().await else {
+                return;
+            };
+            let mut request = [0_u8; 1024];
+            let _ = socket.read(&mut request).await;
+            let _ = socket
+                .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 1073741824\r\n\r\n")
+                .await;
+            // A gigabyte promised, and never sent. Reading to completion here
+            // is what took the container down.
+        });
+        (format!("http://{address}/"), serving)
+    }
+
+    #[tokio::test]
+    async fn a_body_larger_than_the_cap_is_refused_rather_than_allocated() {
+        let (url, serving) = a_server_that_promises_a_huge_body().await;
+        let client = OutboundClient::new("afisharr/test").expect("the transport must build");
+
+        let error = client
+            .send(
+                Method::GET,
+                &Url::parse(&url).expect("a valid URL"),
+                &[],
+                None,
+                Deadline::DEFAULT,
+            )
+            .await
+            .expect_err("a body past the cap must not be read");
+
+        assert!(
+            matches!(error, OutboundError::Oversized { .. }),
+            "expected an oversized body, got {error}"
+        );
+        // It answered. An operator reading this must be able to tell a provider
+        // sending too much from a provider that never replied.
+        assert!(error.service_answered(), "{error}");
+
+        serving.abort();
     }
 
     #[tokio::test]
