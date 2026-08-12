@@ -5,7 +5,7 @@
 <script lang="ts">
 	import type { Problem } from '$lib/api/client';
 	import { BlockedState, ErrorState } from '$lib/components/state';
-	import { t } from '$lib/shared/i18n';
+	import { formatDuration, t } from '$lib/shared/i18n';
 	import { type ClaimStatus, claim, recover } from './setup-client';
 
 	interface Props {
@@ -66,7 +66,7 @@
 				kind: 'blocked',
 				reason: blocked.message,
 				retryAfter: blocked.retryAfterSeconds
-					? `${blocked.retryAfterSeconds}s`
+					? formatDuration(blocked.retryAfterSeconds)
 					: undefined,
 			}}
 		/>

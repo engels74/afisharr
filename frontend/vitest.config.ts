@@ -13,11 +13,14 @@ export default defineConfig({
 	plugins: [UnoCSS(), sveltekit()],
 	test: {
 		include: ['src/**/*.svelte.test.ts'],
-		// No `.svelte` component exists yet — the interface shell is Phase 1.
-		// The lane is wired now so the first component to land is covered by a
-		// lane that already runs, rather than by one somebody has to build
-		// alongside it.
-		passWithNoTests: true,
+		// Left at its default (`false`), deliberately. `bunfig.toml` sets
+		// `pathIgnorePatterns` for `*.svelte.test.ts`, so this lane is the only
+		// place a component is tested at all — and with the flag on, anything
+		// that made the glob above match nothing (a rename, a directory move, a
+		// plugin that fails to resolve the specs) reported success on zero
+		// specs. Both frontend jobs went green, and a sign-in page that
+		// rendered blank would have reached main with nothing saying the suite
+		// was empty.
 		setupFiles: ['vitest-browser-svelte'],
 		browser: {
 			enabled: true,

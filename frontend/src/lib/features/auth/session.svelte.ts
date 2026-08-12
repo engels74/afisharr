@@ -92,6 +92,15 @@ export function createSession(): Session {
 	// rendering entirely (P1).
 	let inFlight = 0;
 	let refreshing = $state(false);
+	// Which ask is the current one. Two refreshes can be out at once — the
+	// layout starts one on every navigation into the shell, and the
+	// `unreachable` retry starts another — and nothing makes the network
+	// answer them in the order they were sent. Without this, the *slower*
+	// response wrote the state last: a first ask that stalls through a
+	// container restart and comes back `unauthenticated` overwrote the
+	// `signedIn` a later ask had already recorded, and the layout's guard sent
+	// an operator who is signed in, mid-task, to the sign-in page (P1).
+	let latest = 0;
 
 	return {
 		get state() {
@@ -103,10 +112,18 @@ export function createSession(): Session {
 		},
 
 		async refresh(): Promise<void> {
+			latest += 1;
+			const ask = latest;
 			inFlight += 1;
 			refreshing = true;
 			try {
 				const result = await readSession();
+				// A newer ask has already answered, so this one is history and
+				// writing it would undo the newer answer. The `finally` below
+				// still runs, so the in-flight count stays honest.
+				if (ask !== latest) {
+					return;
+				}
 				if (result.outcome === 'ok') {
 					state = { kind: 'signedIn', account: result.value };
 					return;
@@ -152,11 +169,19 @@ export function createSession(): Session {
 			}
 		},
 
+		// Both retire whatever is in flight, for the same reason `refresh()`
+		// checks: each of these acted on evidence newer than any answer already
+		// on the wire. A sign-in adopted while the layout's ask was still out
+		// was overwritten by that ask's `unauthenticated` — the cookie it was
+		// sent without — and the operator was bounced straight back to the
+		// sign-in page they had just completed.
 		adopt(account: SignedIn): void {
+			latest += 1;
 			state = { kind: 'signedIn', account };
 		},
 
 		forget(): void {
+			latest += 1;
 			state = { kind: 'signedOut' };
 		},
 	};

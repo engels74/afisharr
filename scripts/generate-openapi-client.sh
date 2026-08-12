@@ -36,6 +36,17 @@ types="$generated/schema.d.ts"
 
 mkdir -p "$generated"
 
+# Both steps below write into the tracked generated directory, and this script
+# runs under `set -e`: a handler that failed to compile, a missing toolchain, or
+# a `bunx` that cannot resolve the pinned binary aborts between the two and
+# leaves `openapi.json.new` — possibly a truncated `schema.d.ts.new` beside it —
+# in the working tree. `biome.json` excludes that directory and the contract lane
+# treats it as machine-owned, so nothing flags the strays, and the next `git add
+# -A` commits a generator-crash artifact into the one directory documented as
+# the sole backend contract. The success path has already moved both files by
+# the time this runs, so it removes nothing.
+trap 'rm -f "$document.new" "$types.new"' EXIT
+
 # The document is a function of the compiled binary's annotations, so it is
 # printed by the binary rather than assembled by a second description of the
 # surface. `--quiet` keeps cargo's progress off stdout.
@@ -69,7 +80,6 @@ if [ "$check" = true ]; then
 			status=1
 		fi
 	done
-	rm -f "$document.new" "$types.new"
 	exit "$status"
 fi
 

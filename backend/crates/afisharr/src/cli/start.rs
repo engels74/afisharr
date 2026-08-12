@@ -5,18 +5,22 @@
 
 use std::sync::Arc;
 
-use afisharr_core::{settings::SettingsBody, setup::TokenStore, time::SystemClock};
+use afisharr_core::{setup::TokenStore, time::SystemClock};
 use anyhow::Result;
 use tracing::{info, warn};
 
-use crate::{bootstrap::print_setup_banner, configuration::DataPaths, interface, server, startup};
+use crate::{
+    bootstrap::print_setup_banner,
+    configuration::{Configuration, DataPaths},
+    interface, server, startup,
+};
 
 /// Boots the instance, serves it, and holds it open until it is asked to stop.
 ///
 /// # Errors
 /// Returns whatever the boot sequence refused to start on, or the failure that
 /// stopped the server.
-pub async fn run(paths: &DataPaths, configured: SettingsBody) -> Result<()> {
+pub async fn run(paths: &DataPaths, configured: Configuration) -> Result<()> {
     let booted = startup::boot(paths, configured).await?;
 
     // Everything after the database is open runs inside `serve`, and its

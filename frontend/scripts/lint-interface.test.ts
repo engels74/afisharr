@@ -36,6 +36,60 @@ describe('the hard-coded string rule', () => {
 		}
 	});
 
+	test('catches a sentence the formatter broke across lines', () => {
+		// The shape the gate was blind to, and the shape it is most likely to
+		// meet: the rule exists for sentences, sentences are long, and Biome
+		// wraps a long element. Reported on the line the sentence is on, not on
+		// the line the opening tag ends on.
+		const source = [
+			'<p class="text-sm text-[var(--muted-foreground)]">',
+			'\tYour account does not administer this instance.',
+			'</p>',
+		].join('\n');
+		const findings = check('a.svelte', source);
+		expect(rules(findings)).toEqual(['no-hardcoded-string']);
+		expect(findings[0]?.line).toBe(2);
+	});
+
+	test('catches wrapped prose sitting beside an interpolated value', () => {
+		const source = [
+			'<h2>',
+			'\tWaiting for {source.label} to answer',
+			'</h2>',
+		].join('\n');
+		expect(rules(check('a.svelte', source))).toEqual(['no-hardcoded-string']);
+	});
+
+	test('reports a wrapped sentence once, not twice', () => {
+		// The per-line rule and the wrapped rule scan the same file, so a run
+		// that both could see would be two findings for one sentence.
+		const source = ['<p>', '\tNothing has run yet.', '</p>'].join('\n');
+		expect(check('a.svelte', source)).toHaveLength(1);
+	});
+
+	test('an exemption above a wrapped sentence silences it', () => {
+		const source = [
+			'<!-- afisharr-lint-ignore: no-hardcoded-string a brand name -->',
+			'<p>',
+			'\tAfisharr keeps its own name.',
+			'</p>',
+		].join('\n');
+		expect(check('a.svelte', source)).toEqual([]);
+	});
+
+	test('passes a multi-line comparison in a script block', () => {
+		// Why the wrapped rule runs over the markup alone: between the `>` of
+		// one comparison and the `<` of the next lies a run with letters and
+		// spaces in it, which is everything `isUserFacing` asks for.
+		const source = [
+			'<script lang="ts">',
+			'\tconst wide = width > 3;',
+			'\tconst narrow = height < 4;',
+			'</script>',
+		].join('\n');
+		expect(check('a.svelte', source)).toEqual([]);
+	});
+
 	test('passes a script line whose braces open and close a block', () => {
 		// The reason the interpolation is removed rather than the pattern
 		// loosened: this scanner reads a `.svelte` file's script block on the

@@ -86,7 +86,7 @@ impl Edge {
         }
         // Every entry is a trusted address and the walk found no client, which
         // is not the same as the leftmost entry *being* the client. Returning
-        // it was the hole: a caller inside the trusted range — a second
+        // it was one hole: a caller inside the trusted range — a second
         // container on the same bridge network, a sidecar, the proxy host —
         // prepends `X-Forwarded-For: 10.1.2.3`, the edge appends the trusted
         // address it saw, and every entry passes. That caller then picks the
@@ -98,11 +98,22 @@ impl Edge {
         // Nothing here can separate that from an operator whose client LAN is
         // itself inside `trustProxy`, so the answer is the same one an entry
         // that will not parse gets: the chain is not provable, and the peer's
-        // own address is the safe reading (P2). The cost is stated rather than
-        // hidden — an operator who trusts a whole `/8` because their proxy
-        // lives in it has every client behind that proxy counted as one, which
-        // is the state an instance with no `trustProxy` at all is already in,
-        // and the fix is to name the proxy rather than the range it sits in.
+        // own address is the safe reading (P2).
+        //
+        // What this does *not* do, stated plainly because the neighbouring
+        // return says `proven: true` and that word is easy to over-read: the
+        // same caller prepending an address from *outside* the trusted range
+        // still gets it back as the client, because the walk stops at the first
+        // untrusted entry and that entry is the forged one. No walk can tell
+        // that apart from a real proxy reporting a real client — reporting one
+        // is precisely what a trusted proxy is trusted to do. `trustProxy` is
+        // therefore the whole boundary: every host inside it can choose the
+        // address this instance counts, logs, and stores, and an operator who
+        // trusts a `/8` because their proxy lives in it has trusted every
+        // container on that network with it. Naming the proxy rather than the
+        // range it sits in is the only thing that narrows this, which is why
+        // the cost of the narrow list — every client behind one proxy counted
+        // as one when the walk ends here — is stated rather than hidden.
         unprovable
     }
 

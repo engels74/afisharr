@@ -5,7 +5,7 @@
 
 use sqlx::SqliteConnection;
 
-use crate::{storage::WriteOperation, time::Timestamp};
+use crate::{leases::LeaseName, storage::WriteOperation, time::Timestamp};
 
 /// The acknowledgement the packs step writes.
 ///
@@ -84,7 +84,14 @@ impl WriteOperation for CompleteSetup {
         )
         .execute(&mut *transaction)
         .await?;
-        sqlx::query!("DELETE FROM leases WHERE name = 'setup:claim'")
+        // Named through `LeaseName` rather than spelled out, like every other
+        // path that touches this row (`setup::claim`). A literal here is a
+        // second copy of a wire string this crate owns: renaming the lease
+        // would update the enum and every reader, compile clean, and leave this
+        // DELETE matching nothing — an instance complete with its claim still
+        // held, which is the one state the guarantee above rules out.
+        let claim = LeaseName::SetupClaim.as_text();
+        sqlx::query!("DELETE FROM leases WHERE name = ?1", claim)
             .execute(&mut *transaction)
             .await?;
         transaction.commit().await

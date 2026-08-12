@@ -56,7 +56,7 @@ impl Cli {
         // stored settings row is the source of truth — the row lives in a
         // database this has not opened yet. `configuration::load` carries the
         // list of groups decided before the row can be read.
-        let _log_guard = observability::init(&paths.logs(), &configured.logging)?;
+        let _log_guard = observability::init(&paths.logs(), &configured.effective.logging)?;
 
         match self.command.unwrap_or(Command::Start) {
             Command::Start => start::run(&paths, configured).await,

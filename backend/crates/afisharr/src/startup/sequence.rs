@@ -19,7 +19,7 @@ use anyhow::{Context, Result, bail};
 use tracing::{info, warn};
 
 use crate::{
-    configuration::DataPaths,
+    configuration::{Configuration, DataPaths},
     startup::{
         migrations::{self, RunMigrations},
         reconcile,
@@ -66,7 +66,7 @@ impl std::fmt::Debug for Booted {
 /// Returns an error, and does not start, when the schema is newer than this
 /// binary knows, when the pre-migration backup cannot be written, or when the
 /// post-migration integrity checks report damage.
-pub async fn boot(paths: &DataPaths, configured: SettingsBody) -> Result<Booted> {
+pub async fn boot(paths: &DataPaths, configured: Configuration) -> Result<Booted> {
     let clock = SystemClock;
 
     let database = Database::open(paths.database())
@@ -81,7 +81,7 @@ pub async fn boot(paths: &DataPaths, configured: SettingsBody) -> Result<Booted>
     if state.pending.is_empty() {
         info!(schema_version = state.newest_known, "schema is up to date");
     } else {
-        migrate(paths, &database, &state, &configured, &clock).await?;
+        migrate(paths, &database, &state, &configured.effective, &clock).await?;
     }
 
     let settings = ensure_settings(&database, configured, &clock).await?;
@@ -190,12 +190,20 @@ async fn migrate(
 /// they have set, and the hosted Plex sign-in stays unavailable with nothing
 /// explaining why.
 ///
-/// Applied in memory rather than written back. The row is what the operator
-/// saved, and rewriting it on every boot would turn a compose variable into a
-/// silent edit of their saved document. That means a settings surface offering
-/// these fields has to show which of them the environment is currently holding
-/// — the same obligation `logging` and `backup.retainedPreMigration` already
-/// carry (`configuration::load`).
+/// Applied in memory rather than written back — on the first start as well as
+/// on every later one, which is why the seed is [`Configuration::seed`] and not
+/// the document this start is running with. The row is what the operator saved,
+/// and rewriting it on any boot would turn a compose variable into a silent
+/// edit of their saved document. Seeding the *effective* document was that edit
+/// in its worst form: the four deployment values went into the row on the day
+/// the container first booted, the overlay below only assigns where the
+/// variable is still set, and so a `AFISHARR_TRUST_PROXY` the operator later
+/// deleted from their compose file went on trusting the range it named, with no
+/// route on any surface that edits `settings` to take it back out (`I-SEC-1`).
+///
+/// That means a settings surface offering these fields has to show which of
+/// them the environment is currently holding — the same obligation `logging`
+/// and `backup.retainedPreMigration` already carry (`configuration::load`).
 ///
 /// `apply_deployment_environment` and not the whole override list, because "in
 /// memory" only held for the fields nothing writes back. [`ensure_instance`]
@@ -209,7 +217,7 @@ async fn migrate(
 /// operator's afterwards.
 async fn ensure_settings(
     database: &Database,
-    configured: SettingsBody,
+    configured: Configuration,
     clock: &SystemClock,
 ) -> Result<Settings> {
     if let Some(mut stored) = afisharr_core::settings::load(database.readers())
@@ -221,15 +229,21 @@ async fn ensure_settings(
         return Ok(stored);
     }
 
-    database
+    let mut seeded = database
         .writer()
         .submit(SaveSettings {
-            body: configured,
+            body: configured.seed,
             actor: None,
             at: clock.now(),
         })
         .await
-        .context("seeding settings on first start")
+        .context("seeding settings on first start")?;
+    // The same overlay the stored path gets, over the row that was just
+    // written. A first start has to run with the deployment variables too —
+    // it just must not keep them.
+    crate::configuration::apply_deployment_environment(&mut seeded.body)
+        .context("applying the environment over the seeded settings")?;
+    Ok(seeded)
 }
 
 /// Writes the instance row, minting its identifiers only on a first start.

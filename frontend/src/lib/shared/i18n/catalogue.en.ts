@@ -165,4 +165,8 @@ export const enPlurals = {
 		one: '{count} minute',
 		other: '{count} minutes',
 	},
+	'count.seconds': {
+		one: '{count} second',
+		other: '{count} seconds',
+	},
 } as const satisfies Record<string, PluralForms>;

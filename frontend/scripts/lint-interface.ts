@@ -68,6 +68,28 @@ interface Finding {
  */
 const TEMPLATE_TEXT = />([^<>{}\n]+)</g;
 
+/**
+ * The same run of text, allowed to span lines.
+ *
+ * The line-based rule above misses every element the formatter wraps, and the
+ * formatter wraps exactly the elements this rule exists for: a sentence is long,
+ * so Biome breaks `<p class="…">Your account does not administer this
+ * instance.</p>` across three lines, and the run then opens on one line and
+ * closes on another. `check()` returned nothing for it — the hook passed, `bun
+ * run lint:interface` passed, the `interface-rules` job passed, and the English
+ * shipped untranslated to every operator whose locale is not (`I-UX-7`).
+ *
+ * Requires a newline in the run, so this and {@link TEMPLATE_TEXT} can never
+ * report the same text twice. Run over {@link markupOnly} rather than over the
+ * file, because a multi-line run is not safe to look for inside a `<script>`
+ * block: `5 > 3;\nconst y = 2 < 4` is a run between `>` and `<` with two
+ * letters and a space in it, which is all {@link isUserFacing} asks for.
+ */
+const WRAPPED_TEMPLATE_TEXT = />([^<>{}]*\n[^<>{}]*)</g;
+
+/** A `<script>` or `<style>` block, opening tag through closing tag. */
+const CODE_BLOCK = /<(script|style)\b[^>]*>[\s\S]*?<\/\1>/g;
+
 /** A `{...}` expression, innermost first. */
 const INTERPOLATION = /\{[^{}]*\}/g;
 
@@ -89,6 +111,37 @@ function withoutInterpolation(line: string): string {
 	let text = line;
 	for (;;) {
 		const stripped = text.replace(INTERPOLATION, '');
+		if (stripped === text) {
+			return text;
+		}
+		text = stripped;
+	}
+}
+
+/**
+ * The file with every `<script>` and `<style>` body blanked out.
+ *
+ * Blanked rather than removed, and one space per character, so a line number
+ * counted over the result is the line number in the file.
+ */
+function markupOnly(contents: string): string {
+	return contents.replace(CODE_BLOCK, (block) => block.replace(/[^\n]/g, ' '));
+}
+
+/**
+ * The same as {@link withoutInterpolation}, blanking instead of removing.
+ *
+ * The wrapped-text pass reports a line number counted from a character offset,
+ * so anything it strips has to leave the offsets and the newlines where they
+ * were. An interpolation that spans lines — which the formatter produces for
+ * any long expression — would otherwise move every finding below it.
+ */
+function blankedInterpolation(markup: string): string {
+	let text = markup;
+	for (;;) {
+		const stripped = text.replace(INTERPOLATION, (expression) =>
+			expression.replace(/[^\n]/g, ' '),
+		);
 		if (stripped === text) {
 			return text;
 		}
@@ -202,6 +255,58 @@ function check(file: string, contents: string): Finding[] {
 			);
 		}
 	});
+
+	if (file.endsWith('.svelte')) {
+		findings.push(...wrappedText(file, contents, lines));
+	}
+
+	return findings;
+}
+
+/**
+ * Hard-coded sentences in elements the formatter broke across lines.
+ *
+ * Separate from the per-line pass because it cannot be one: the run it looks
+ * for spans lines by definition, and the offsets it counts a line number from
+ * only survive if nothing before it was removed rather than blanked.
+ */
+function wrappedText(
+	file: string,
+	contents: string,
+	lines: readonly string[],
+): Finding[] {
+	const findings: Finding[] = [];
+	const markup = blankedInterpolation(markupOnly(contents));
+
+	for (const match of markup.matchAll(WRAPPED_TEMPLATE_TEXT)) {
+		const text = match[1];
+		if (!isUserFacing(text)) {
+			continue;
+		}
+		// The line the sentence starts on, rather than the line carrying the
+		// `>` that opened the run: that is the line the author is looking at.
+		const offset =
+			(match.index ?? 0) + 1 + (text.length - text.trimStart().length);
+		const line = markup.slice(0, offset).split('\n').length;
+		// An exemption may sit anywhere from the line above the opening tag to
+		// the sentence itself, because a wrapped element gives the author two
+		// natural places to put it and neither is wrong.
+		const opened = markup.slice(0, match.index ?? 0).split('\n').length;
+		const exempted = lines
+			.slice(Math.max(0, opened - 2), line)
+			.map((candidate) => ALLOW.exec(candidate)?.[1])
+			.find((rule) => rule !== undefined);
+		if (exempted === 'no-hardcoded-string' || exempted === 'all') {
+			continue;
+		}
+		findings.push({
+			file,
+			line,
+			rule: 'no-hardcoded-string',
+			detail: `template text "${text.trim()}"`,
+			source: (lines[line - 1] ?? '').trim(),
+		});
+	}
 
 	return findings;
 }

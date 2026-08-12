@@ -5,7 +5,7 @@
 <script lang="ts">
 	import type { Problem } from '$lib/api/client';
 	import { BlockedState, ErrorState } from '$lib/components/state';
-	import { t } from '$lib/shared/i18n';
+	import { formatDuration, t } from '$lib/shared/i18n';
 	import { type SignedIn, signIn } from './auth-client';
 
 	interface Props {
@@ -47,7 +47,7 @@
 				kind: 'blocked',
 				reason: limited.message,
 				retryAfter: limited.retryAfterSeconds
-					? `${limited.retryAfterSeconds}s`
+					? formatDuration(limited.retryAfterSeconds)
 					: undefined,
 			}}
 		/>

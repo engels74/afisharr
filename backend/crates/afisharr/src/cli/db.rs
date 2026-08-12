@@ -3,12 +3,15 @@
 
 //! `afisharr db`.
 
-use afisharr_core::{integrity, projection, settings::SettingsBody};
+use afisharr_core::{integrity, projection};
 use anyhow::{Context, Result, bail};
 use clap::Subcommand;
 use tracing::info;
 
-use crate::{configuration::DataPaths, startup};
+use crate::{
+    configuration::{Configuration, DataPaths},
+    startup,
+};
 
 /// Database maintenance commands.
 #[derive(Debug, Subcommand)]
@@ -25,7 +28,7 @@ impl DbCommand {
     /// # Errors
     /// Returns an error when the boot sequence refuses, when a body cannot be
     /// projected, or when the integrity checks report damage.
-    pub async fn run(self, paths: &DataPaths, configured: SettingsBody) -> Result<()> {
+    pub async fn run(self, paths: &DataPaths, configured: Configuration) -> Result<()> {
         let booted = startup::boot(paths, configured).await?;
         let outcome = match self {
             Self::Reproject => reproject(&booted).await,

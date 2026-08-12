@@ -10,6 +10,7 @@
  * remembered.
  */
 
+export { formatDuration } from './duration';
 export type { Values } from './interpolate';
 export { interpolate, placeholdersOf } from './interpolate';
 export type { Catalogue, MessageKey, PluralKey } from './messages.svelte';
