@@ -72,17 +72,18 @@ impl From<&User> for SignedIn {
 
 /// Signs in with a username and a password.
 ///
-/// The limiter is consulted before the hash and recorded after it, and only on
-/// failure: a limit that counted successes would lock out the operator signing
-/// in from a fourth device (PRD §21.4.3).
+/// Both limits are taken before the hash and handed back after it, and only on
+/// success: a limit that kept counting after a correct password would lock out
+/// the operator signing in from a fourth device (PRD §21.4.3).
 ///
-/// That ordering is what makes the failure count honest, and it is also why the
-/// limiter cannot be the only thing standing in front of the hash: an attempt
-/// that has not finished has not failed, so a burst arriving inside one instant
-/// passes the check together and nothing here has counted any of it yet. The
-/// bound that holds for a burst is a bound on the work itself —
-/// `accounts::verify` admits a fixed number of Argon2id operations at a time,
-/// so extra requests wait for a permit instead of each allocating 64 MiB.
+/// That ordering is the whole of whether the limit is a bound. Read the other
+/// way round — consult the counter, hash, count the failure afterwards — an
+/// attempt that has not finished has not failed, so a burst arriving inside one
+/// instant reads the same empty counter and every guess in it runs. The
+/// semaphore in `accounts::verify` bounds the *memory* that costs, four
+/// Argon2id operations at a time, and bounds nothing about how many guesses the
+/// account gives up: the rest queue and run in turn. Taking the attempt first
+/// is what makes five guesses five guesses.
 #[utoipa::path(
     post,
     path = "/api/auth/login",
@@ -112,24 +113,23 @@ pub async fn log_in(
     // is the caller's to choose and the constructor is where its length stops
     // being the caller's to choose.
     let account_bucket = Bucket::login_account(&credentials.username);
-    refuse_if_limited(&state, &account_bucket, client)?;
-    refuse_if_limited(&state, &Bucket::LoginAddress, client)?;
+    take_attempt(&state, &account_bucket, client)?;
+    take_attempt(&state, &Bucket::LoginAddress, client)?;
 
     let now = state.clock().now();
     let user = accounts::find_by_username(state.database().readers(), &credentials.username)
         .await
         .map_err(AppError::internal)?;
 
+    // Nothing is recorded on either failure path below, because the attempt was
+    // already taken above. A second count here would charge one guess twice and
+    // halve the allowance the requirements state.
     let accepted = verify(user.as_ref(), credentials.password).await?;
     if !accepted {
-        record_failure(&state, &account_bucket, client);
-        record_failure(&state, &Bucket::LoginAddress, client);
         return Err(rejected());
     }
 
     let Some(user) = user.filter(User::is_active) else {
-        record_failure(&state, &account_bucket, client);
-        record_failure(&state, &Bucket::LoginAddress, client);
         return Err(rejected());
     };
 
@@ -256,16 +256,12 @@ async fn verify(user: Option<&User>, password: String) -> AppResult<bool> {
     }
 }
 
-fn refuse_if_limited(state: &ApiState, bucket: &Bucket, client: ClientContext) -> AppResult<()> {
-    state.limiter().refuse_if_spent(
+fn take_attempt(state: &ApiState, bucket: &Bucket, client: ClientContext) -> AppResult<()> {
+    state.limiter().spend(
         bucket,
         Some(client.address),
         "Too many sign-in attempts. Try again later.",
     )
-}
-
-fn record_failure(state: &ApiState, bucket: &Bucket, client: ClientContext) {
-    let _ = state.limiter().record(bucket, Some(client.address));
 }
 
 /// One refusal for a wrong password, an unknown account, and a disabled one.

@@ -28,8 +28,7 @@ use crate::{
     ratelimit::Bucket,
     setup::{
         claim_lease::{
-            ClaimGranted, grant, held_elsewhere, mint_cookie_value, refuse_if_limited,
-            spend_attempt,
+            ClaimGranted, grant, held_elsewhere, mint_cookie_value, spend_attempt, take_attempt,
         },
         events::record_step,
     },
@@ -96,8 +95,12 @@ pub async fn recover(
     // is a residential proxy away. `LoginAccount` is the bucket that does not
     // move with them, and its escalating lockout is why `log_in` spends it for
     // the identical check (PRD §21.4.3).
+    //
+    // Both are taken here, before the verification, for the reason `log_in`
+    // gives: a counter read before the hash and written after it lets a burst
+    // through whole, because none of the attempts in it has failed yet.
     let account_bucket = Bucket::login_account(&request.username);
-    refuse_if_limited(&state, &account_bucket, client)?;
+    take_attempt(&state, &account_bucket, client)?;
     spend_attempt(&state, client)?;
 
     let account = accounts::find_by_username(state.database().readers(), &request.username)
@@ -106,16 +109,13 @@ pub async fn recover(
         .filter(|user| user.is_admin && user.is_active());
 
     if !verify_admin(account.as_ref(), request.password).await? {
-        // Recorded on failure only, for the reason `log_in` records it that
-        // way: a limit that counted successes would lock an operator out of
-        // their own interrupted setup for signing in twice.
-        let _ = state
-            .limiter()
-            .record(&account_bucket, Some(client.address));
-        // The same refusal for an unknown username and a wrong password: a
+        // Nothing is counted here: the attempt was taken above. The same
+        // refusal for an unknown username and a wrong password, because a
         // different one tells a guesser which of the two they achieved.
         return Err(credentials_refused());
     }
+    // Handed back on success only, so an operator recovering their own
+    // interrupted setup is not locked out for doing it twice.
     state
         .limiter()
         .forget(&account_bucket, Some(client.address));

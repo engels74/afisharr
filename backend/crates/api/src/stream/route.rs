@@ -15,7 +15,7 @@ use tokio_stream::{
 };
 
 use crate::{
-    authentication::Administrator,
+    authentication::{Administrator, EventsRead},
     state::ApiState,
     stream::{HEARTBEAT_SECONDS, Topic},
 };
@@ -51,13 +51,13 @@ pub struct StreamOpened {
     responses(
         (status = 200, description = "The event stream, multiplexed by topic", content_type = "text/event-stream"),
         (status = 401, description = "No accepted credential was presented", body = crate::error::Problem),
-        (status = 403, description = "That account does not administer this instance, or setup has not been completed", body = crate::error::Problem),
+        (status = 403, description = "That account does not administer this instance, that key was not issued with the scope this route needs, or setup has not been completed", body = crate::error::Problem),
         (status = 429, description = "Too many requests", body = crate::error::Problem),
     ),
 )]
 pub async fn stream(
     State(state): State<ApiState>,
-    _caller: Administrator,
+    _caller: Administrator<EventsRead>,
 ) -> Sse<impl Stream<Item = Result<Event, Infallible>>> {
     let opened = Event::default().event(Topic::Stream.as_event_name()).data(
         serde_json::to_string(&StreamOpened {

@@ -5,7 +5,12 @@
 
 use sqlx::{SqliteConnection, SqlitePool};
 
-use crate::{api_keys::ApiKeyRecord, identifier::Id, storage::WriteOperation, time::Timestamp};
+use crate::{
+    api_keys::{ApiKeyRecord, ScopeSet},
+    identifier::Id,
+    storage::WriteOperation,
+    time::Timestamp,
+};
 
 /// Reads the key stored under this digest, if one exists.
 ///
@@ -20,7 +25,7 @@ pub async fn find_by_digest(
     digest: &str,
 ) -> Result<Option<ApiKeyRecord>, sqlx::Error> {
     Ok(
-        sqlx::query_as!(Row, "SELECT id, name, prefix, created_at, created_by, last_used_at, revoked_at FROM api_keys WHERE key_hash = ?1", digest)
+        sqlx::query_as!(Row, "SELECT id, name, prefix, scopes, created_at, created_by, last_used_at, revoked_at FROM api_keys WHERE key_hash = ?1", digest)
             .fetch_optional(readers)
             .await?
             .map(ApiKeyRecord::from),
@@ -33,7 +38,7 @@ pub async fn find_by_digest(
 /// Returns the underlying `sqlx` failure.
 pub async fn list(readers: &SqlitePool) -> Result<Vec<ApiKeyRecord>, sqlx::Error> {
     Ok(
-        sqlx::query_as!(Row, "SELECT id, name, prefix, created_at, created_by, last_used_at, revoked_at FROM api_keys ORDER BY created_at DESC")
+        sqlx::query_as!(Row, "SELECT id, name, prefix, scopes, created_at, created_by, last_used_at, revoked_at FROM api_keys ORDER BY created_at DESC")
             .fetch_all(readers)
             .await?
             .into_iter()
@@ -53,6 +58,8 @@ pub struct CreateApiKey {
     pub digest: String,
     /// The leading characters, for display.
     pub prefix: String,
+    /// What the key may reach. Written once, at creation.
+    pub scopes: ScopeSet,
     /// The account issuing the key.
     pub created_by: Option<String>,
     /// The instant of the write.
@@ -65,13 +72,15 @@ impl WriteOperation for CreateApiKey {
     async fn execute(self, conn: &mut SqliteConnection) -> Result<ApiKeyRecord, sqlx::Error> {
         let id = self.id.as_str().to_owned();
         let at = self.at.as_millis();
+        let scopes = self.scopes.stored();
         sqlx::query!(
-            "INSERT INTO api_keys (id, name, key_hash, prefix, created_at, created_by)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            "INSERT INTO api_keys (id, name, key_hash, prefix, scopes, created_at, created_by)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
             id,
             self.name,
             self.digest,
             self.prefix,
+            scopes,
             at,
             self.created_by
         )
@@ -79,7 +88,7 @@ impl WriteOperation for CreateApiKey {
         .await?;
 
         Ok(ApiKeyRecord::from(
-            sqlx::query_as!(Row, "SELECT id, name, prefix, created_at, created_by, last_used_at, revoked_at FROM api_keys WHERE id = ?1", id)
+            sqlx::query_as!(Row, "SELECT id, name, prefix, scopes, created_at, created_by, last_used_at, revoked_at FROM api_keys WHERE id = ?1", id)
                 .fetch_one(&mut *conn)
                 .await?,
         ))
@@ -142,6 +151,7 @@ struct Row {
     id: String,
     name: String,
     prefix: String,
+    scopes: String,
     created_at: i64,
     created_by: Option<String>,
     last_used_at: Option<i64>,
@@ -154,6 +164,7 @@ impl From<Row> for ApiKeyRecord {
             id: row.id,
             name: row.name,
             prefix: row.prefix,
+            scopes: ScopeSet::parse_stored(&row.scopes),
             created_at: Timestamp::from_millis(row.created_at),
             created_by: row.created_by,
             last_used_at: row.last_used_at.map(Timestamp::from_millis),

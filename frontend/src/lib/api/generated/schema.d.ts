@@ -15,17 +15,18 @@ export interface paths {
         put?: never;
         /**
          * Signs in with a username and a password.
-         * @description The limiter is consulted before the hash and recorded after it, and only on
-         *     failure: a limit that counted successes would lock out the operator signing
-         *     in from a fourth device (PRD §21.4.3).
+         * @description Both limits are taken before the hash and handed back after it, and only on
+         *     success: a limit that kept counting after a correct password would lock out
+         *     the operator signing in from a fourth device (PRD §21.4.3).
          *
-         *     That ordering is what makes the failure count honest, and it is also why the
-         *     limiter cannot be the only thing standing in front of the hash: an attempt
-         *     that has not finished has not failed, so a burst arriving inside one instant
-         *     passes the check together and nothing here has counted any of it yet. The
-         *     bound that holds for a burst is a bound on the work itself —
-         *     `accounts::verify` admits a fixed number of Argon2id operations at a time,
-         *     so extra requests wait for a permit instead of each allocating 64 MiB.
+         *     That ordering is the whole of whether the limit is a bound. Read the other
+         *     way round — consult the counter, hash, count the failure afterwards — an
+         *     attempt that has not finished has not failed, so a burst arriving inside one
+         *     instant reads the same empty counter and every guess in it runs. The
+         *     semaphore in `accounts::verify` bounds the *memory* that costs, four
+         *     Argon2id operations at a time, and bounds nothing about how many guesses the
+         *     account gives up: the rest queue and run in turn. Taking the attempt first
+         *     is what makes five guesses five guesses.
          */
         post: operations["log_in"];
         delete?: never;
@@ -443,6 +444,8 @@ export interface components {
              * @description When it was revoked, in epoch milliseconds.
              */
             revokedAt?: number | null;
+            /** @description What this key may reach, as the names it was issued with. */
+            scopes: string[];
         };
         /** @description A claim now held by this browser. */
         ClaimGranted: {
@@ -585,10 +588,20 @@ export interface components {
             /** @description What the field should have held, in the operator's terms. */
             expected: string;
         };
-        /** @description What the operator names a new key. */
+        /** @description What the operator names a new key, and what they let it reach. */
         NewApiKey: {
             /** @description A name the operator will recognise later. */
             name: string;
+            /**
+             * @description The capabilities the key is issued with.
+             *
+             *     Required, and required to be non-empty. There is no default and there is
+             *     deliberately no "everything": the field existing but being optional is
+             *     how a caller ends up with an unscoped key without ever deciding to have
+             *     one, and an unscoped key is the whole instance in a string an
+             *     integration keeps in a config file.
+             */
+            scopes: string[];
         };
         /** @description What a password change sends. */
         PasswordChange: {
@@ -1121,7 +1134,7 @@ export interface operations {
                     "application/json": components["schemas"]["Problem"];
                 };
             };
-            /** @description The path is not inside the root, that account does not administer this instance, or setup has not been completed */
+            /** @description The path is not inside the root, that account does not administer this instance, that key was not issued with the scope this route needs, or setup has not been completed */
             403: {
                 headers: {
                     [name: string]: unknown;
@@ -1177,7 +1190,7 @@ export interface operations {
                     "application/json": components["schemas"]["Problem"];
                 };
             };
-            /** @description That account does not administer this instance, or setup has not been completed */
+            /** @description That account does not administer this instance, that key was not issued with the scope this route needs, or setup has not been completed */
             403: {
                 headers: {
                     [name: string]: unknown;
@@ -1253,7 +1266,7 @@ export interface operations {
                     "application/json": components["schemas"]["Problem"];
                 };
             };
-            /** @description That account does not administer this instance, or setup has not been completed */
+            /** @description That account does not administer this instance, that key was not issued with the scope this route needs, or setup has not been completed */
             403: {
                 headers: {
                     [name: string]: unknown;
@@ -1313,7 +1326,7 @@ export interface operations {
                     "application/json": components["schemas"]["Problem"];
                 };
             };
-            /** @description That account does not administer this instance, or setup has not been completed */
+            /** @description That account does not administer this instance, that key was not issued with the scope this route needs, or setup has not been completed */
             403: {
                 headers: {
                     [name: string]: unknown;
@@ -1361,7 +1374,7 @@ export interface operations {
                     "application/json": components["schemas"]["Problem"];
                 };
             };
-            /** @description That account does not administer this instance, or setup has not been completed */
+            /** @description That account does not administer this instance, that key was not issued with the scope this route needs, or setup has not been completed */
             403: {
                 headers: {
                     [name: string]: unknown;
@@ -1430,7 +1443,7 @@ export interface operations {
                     "application/json": components["schemas"]["Problem"];
                 };
             };
-            /** @description Setup has not been completed on this instance */
+            /** @description That key was not issued with the scope this route needs, or setup has not been completed on this instance */
             403: {
                 headers: {
                     [name: string]: unknown;
@@ -1486,7 +1499,7 @@ export interface operations {
                     "application/json": components["schemas"]["Problem"];
                 };
             };
-            /** @description Setup has not been completed on this instance */
+            /** @description That key was not issued with the scope this route needs, or setup has not been completed on this instance */
             403: {
                 headers: {
                     [name: string]: unknown;
@@ -1534,7 +1547,7 @@ export interface operations {
                     "application/json": components["schemas"]["Problem"];
                 };
             };
-            /** @description Setup has not been completed on this instance */
+            /** @description That key was not issued with the scope this route needs, or setup has not been completed on this instance */
             403: {
                 headers: {
                     [name: string]: unknown;
@@ -1911,7 +1924,7 @@ export interface operations {
                     "application/json": components["schemas"]["Problem"];
                 };
             };
-            /** @description That account does not administer this instance, or setup has not been completed */
+            /** @description That account does not administer this instance, that key was not issued with the scope this route needs, or setup has not been completed */
             403: {
                 headers: {
                     [name: string]: unknown;

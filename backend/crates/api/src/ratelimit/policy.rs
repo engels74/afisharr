@@ -135,16 +135,6 @@ impl Bucket {
         }
     }
 
-    /// Whether this bucket counts every request or only the failures.
-    ///
-    /// A login limit that counted successes would lock out the operator who
-    /// signs in from four devices; an API limit that counted only failures
-    /// would not be a rate limit at all.
-    #[must_use]
-    pub const fn counts_failures_only(&self) -> bool {
-        matches!(self, Self::LoginAccount { .. } | Self::LoginAddress)
-    }
-
     /// Whether this bucket is counted separately per client address.
     ///
     /// `LoginAccount` is not, and that is the whole of its value: the bucket
@@ -278,21 +268,6 @@ mod tests {
         // flood that spent `Api` would answer 429 to the operator's own
         // dashboard for the rest of the window.
         assert_ne!(Bucket::Anonymous, Bucket::api(""));
-    }
-
-    #[test]
-    fn only_the_login_buckets_count_failures_only() {
-        assert!(
-            Bucket::LoginAccount {
-                username: "operator".to_owned()
-            }
-            .counts_failures_only()
-        );
-        assert!(Bucket::LoginAddress.counts_failures_only());
-        assert!(!Bucket::api("session").counts_failures_only());
-        assert!(!Bucket::Anonymous.counts_failures_only());
-        assert!(!Bucket::Provider.counts_failures_only());
-        assert!(!Bucket::SetupAttempt.counts_failures_only());
     }
 
     #[test]

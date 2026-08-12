@@ -19,7 +19,7 @@
           "authentication"
         ],
         "summary": "Signs in with a username and a password.",
-        "description": "The limiter is consulted before the hash and recorded after it, and only on\nfailure: a limit that counted successes would lock out the operator signing\nin from a fourth device (PRD §21.4.3).\n\nThat ordering is what makes the failure count honest, and it is also why the\nlimiter cannot be the only thing standing in front of the hash: an attempt\nthat has not finished has not failed, so a burst arriving inside one instant\npasses the check together and nothing here has counted any of it yet. The\nbound that holds for a burst is a bound on the work itself —\n`accounts::verify` admits a fixed number of Argon2id operations at a time,\nso extra requests wait for a permit instead of each allocating 64 MiB.",
+        "description": "Both limits are taken before the hash and handed back after it, and only on\nsuccess: a limit that kept counting after a correct password would lock out\nthe operator signing in from a fourth device (PRD §21.4.3).\n\nThat ordering is the whole of whether the limit is a bound. Read the other\nway round — consult the counter, hash, count the failure afterwards — an\nattempt that has not finished has not failed, so a burst arriving inside one\ninstant reads the same empty counter and every guess in it runs. The\nsemaphore in `accounts::verify` bounds the *memory* that costs, four\nArgon2id operations at a time, and bounds nothing about how many guesses the\naccount gives up: the rest queue and run in turn. Taking the attempt first\nis what makes five guesses five guesses.",
         "operationId": "log_in",
         "requestBody": {
           "content": {
@@ -393,7 +393,7 @@
             }
           },
           "403": {
-            "description": "The path is not inside the root, that account does not administer this instance, or setup has not been completed",
+            "description": "The path is not inside the root, that account does not administer this instance, that key was not issued with the scope this route needs, or setup has not been completed",
             "content": {
               "application/json": {
                 "schema": {
@@ -457,7 +457,7 @@
             }
           },
           "403": {
-            "description": "That account does not administer this instance, or setup has not been completed",
+            "description": "That account does not administer this instance, that key was not issued with the scope this route needs, or setup has not been completed",
             "content": {
               "application/json": {
                 "schema": {
@@ -543,7 +543,7 @@
             }
           },
           "403": {
-            "description": "That account does not administer this instance, or setup has not been completed",
+            "description": "That account does not administer this instance, that key was not issued with the scope this route needs, or setup has not been completed",
             "content": {
               "application/json": {
                 "schema": {
@@ -612,7 +612,7 @@
             }
           },
           "403": {
-            "description": "That account does not administer this instance, or setup has not been completed",
+            "description": "That account does not administer this instance, that key was not issued with the scope this route needs, or setup has not been completed",
             "content": {
               "application/json": {
                 "schema": {
@@ -667,7 +667,7 @@
             }
           },
           "403": {
-            "description": "That account does not administer this instance, or setup has not been completed",
+            "description": "That account does not administer this instance, that key was not issued with the scope this route needs, or setup has not been completed",
             "content": {
               "application/json": {
                 "schema": {
@@ -749,7 +749,7 @@
             }
           },
           "403": {
-            "description": "Setup has not been completed on this instance",
+            "description": "That key was not issued with the scope this route needs, or setup has not been completed on this instance",
             "content": {
               "application/json": {
                 "schema": {
@@ -813,7 +813,7 @@
             }
           },
           "403": {
-            "description": "Setup has not been completed on this instance",
+            "description": "That key was not issued with the scope this route needs, or setup has not been completed on this instance",
             "content": {
               "application/json": {
                 "schema": {
@@ -868,7 +868,7 @@
             }
           },
           "403": {
-            "description": "Setup has not been completed on this instance",
+            "description": "That key was not issued with the scope this route needs, or setup has not been completed on this instance",
             "content": {
               "application/json": {
                 "schema": {
@@ -1295,7 +1295,7 @@
             }
           },
           "403": {
-            "description": "That account does not administer this instance, or setup has not been completed",
+            "description": "That account does not administer this instance, that key was not issued with the scope this route needs, or setup has not been completed",
             "content": {
               "application/json": {
                 "schema": {
@@ -1327,6 +1327,7 @@
           "id",
           "name",
           "prefix",
+          "scopes",
           "createdAt"
         ],
         "properties": {
@@ -1362,6 +1363,13 @@
             ],
             "format": "int64",
             "description": "When it was revoked, in epoch milliseconds."
+          },
+          "scopes": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "What this key may reach, as the names it was issued with."
           }
         }
       },
@@ -1599,14 +1607,22 @@
       },
       "NewApiKey": {
         "type": "object",
-        "description": "What the operator names a new key.",
+        "description": "What the operator names a new key, and what they let it reach.",
         "required": [
-          "name"
+          "name",
+          "scopes"
         ],
         "properties": {
           "name": {
             "type": "string",
             "description": "A name the operator will recognise later."
+          },
+          "scopes": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "The capabilities the key is issued with.\n\nRequired, and required to be non-empty. There is no default and there is\ndeliberately no \"everything\": the field existing but being optional is\nhow a caller ends up with an unscoped key without ever deciding to have\none, and an unscoped key is the whole instance in a string an\nintegration keeps in a config file."
           }
         },
         "additionalProperties": false

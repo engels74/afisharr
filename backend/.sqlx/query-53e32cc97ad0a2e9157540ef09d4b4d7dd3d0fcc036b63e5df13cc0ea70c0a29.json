@@ -1,6 +1,6 @@
 {
   "db_name": "SQLite",
-  "query": "SELECT id, name, prefix, created_at, created_by, last_used_at, revoked_at FROM api_keys WHERE key_hash = ?1",
+  "query": "SELECT id, name, prefix, scopes, created_at, created_by, last_used_at, revoked_at FROM api_keys WHERE key_hash = ?1",
   "describe": {
     "columns": [
       {
@@ -37,8 +37,19 @@
         }
       },
       {
-        "name": "created_at",
+        "name": "scopes",
         "ordinal": 3,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "api_keys",
+            "name": "scopes"
+          }
+        }
+      },
+      {
+        "name": "created_at",
+        "ordinal": 4,
         "type_info": "Integer",
         "origin": {
           "Table": {
@@ -49,7 +60,7 @@
       },
       {
         "name": "created_by",
-        "ordinal": 4,
+        "ordinal": 5,
         "type_info": "Text",
         "origin": {
           "Table": {
@@ -60,7 +71,7 @@
       },
       {
         "name": "last_used_at",
-        "ordinal": 5,
+        "ordinal": 6,
         "type_info": "Integer",
         "origin": {
           "Table": {
@@ -71,7 +82,7 @@
       },
       {
         "name": "revoked_at",
-        "ordinal": 6,
+        "ordinal": 7,
         "type_info": "Integer",
         "origin": {
           "Table": {
@@ -89,10 +100,11 @@
       false,
       false,
       false,
+      false,
       true,
       true,
       true
     ]
   },
-  "hash": "b2449347b6620fd9fc20ad53cd10170ce212f0ba8cb7bc82ef913bf5ad01992f"
+  "hash": "53e32cc97ad0a2e9157540ef09d4b4d7dd3d0fcc036b63e5df13cc0ea70c0a29"
 }

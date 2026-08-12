@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2026 Afisharr contributors
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-//! One counted window, and the three questions asked of it.
+//! One counted window, and what is asked of it.
 //!
 //! Separated from the map that holds them because they are different concerns:
 //! the limiter decides who is counted and when the map is swept, and this
@@ -43,27 +43,6 @@ impl Counter {
             consecutive_lockouts: 0,
         }
     }
-}
-
-/// Reads a counter without changing it.
-pub(super) fn judge(counter: &Counter, policy: Policy, now: Timestamp) -> Decision {
-    if let Some(locked_until) = counter.locked_until
-        && now < locked_until
-    {
-        return Decision::Refused {
-            retry_after_seconds: seconds_until(now, locked_until),
-        };
-    }
-    if counter.window_started_at.millis_until(now) >= policy.window_millis {
-        return Decision::Allowed;
-    }
-    if counter.hits >= policy.allowance {
-        let window_ends = counter.window_started_at.plus_millis(policy.window_millis);
-        return Decision::Refused {
-            retry_after_seconds: seconds_until(now, window_ends),
-        };
-    }
-    Decision::Allowed
 }
 
 /// Starts or escalates the lockout, returning how long the caller must wait.
@@ -172,20 +151,4 @@ mod tests {
         assert_eq!(spent.locked_until, None);
     }
 
-    #[test]
-    fn a_live_lockout_refuses_and_a_lapsed_one_does_not() {
-        let now = Timestamp::from_millis(1_000);
-        let policy = policy_with_lockout();
-        let mut locked = counter(now);
-        let _ = engage_lockout(&mut locked, policy, now);
-
-        assert!(matches!(
-            judge(&locked, policy, now),
-            Decision::Refused { .. }
-        ));
-        assert_eq!(
-            judge(&locked, policy, now.plus_millis(15 * 60 * 1000)),
-            Decision::Allowed
-        );
-    }
 }

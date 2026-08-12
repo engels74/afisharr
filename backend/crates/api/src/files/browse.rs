@@ -16,7 +16,7 @@ use serde::{Deserialize, Serialize};
 use utoipa::{IntoParams, ToSchema};
 
 use crate::{
-    authentication::Administrator,
+    authentication::{Administrator, FilesRead},
     error::{AppError, AppResult, ErrorCode, Problem, QueryParams},
     state::ApiState,
 };
@@ -95,13 +95,13 @@ pub struct DirectoryListing {
     responses(
         (status = 200, description = "Every enabled root", body = Vec<RootView>),
         (status = 401, description = "No accepted credential was presented", body = Problem),
-        (status = 403, description = "That account does not administer this instance, or setup has not been completed", body = Problem),
+        (status = 403, description = "That account does not administer this instance, that key was not issued with the scope this route needs, or setup has not been completed", body = Problem),
         (status = 429, description = "Too many requests", body = Problem),
     ),
 )]
 pub async fn roots(
     State(state): State<ApiState>,
-    _caller: Administrator,
+    _caller: Administrator<FilesRead>,
 ) -> AppResult<Json<Vec<RootView>>> {
     Ok(Json(
         enabled(&state)
@@ -127,14 +127,14 @@ pub async fn roots(
         (status = 200, description = "The directory's contents", body = DirectoryListing),
         (status = 400, description = "The query was not readable", body = Problem),
         (status = 401, description = "No accepted credential was presented", body = Problem),
-        (status = 403, description = "The path is not inside the root, that account does not administer this instance, or setup has not been completed", body = Problem),
+        (status = 403, description = "The path is not inside the root, that account does not administer this instance, that key was not issued with the scope this route needs, or setup has not been completed", body = Problem),
         (status = 404, description = "No such root", body = Problem),
         (status = 429, description = "Too many requests", body = Problem),
     ),
 )]
 pub async fn browse(
     State(state): State<ApiState>,
-    _caller: Administrator,
+    _caller: Administrator<FilesRead>,
     QueryParams(query): QueryParams<BrowseQuery>,
 ) -> AppResult<Json<DirectoryListing>> {
     let root = enabled(&state)

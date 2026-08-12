@@ -4,7 +4,7 @@
 //! What a spent budget answers, stated once.
 //!
 //! Apart from the counters, because it is the only part of the limit a caller
-//! ever sees. [`RateLimiter::record`] and [`RateLimiter::check`] report a
+//! ever sees. [`RateLimiter::record`] reports a
 //! [`Decision`], and every handler that acted on one used to write the same
 //! `match` around the same `Problem` — six of them, two sharing a name and
 //! differing in their body, so a change to how a refusal is rendered reached
@@ -20,7 +20,15 @@ use crate::{
 };
 
 impl RateLimiter {
-    /// Counts one request against `bucket`, or refuses it in `message`'s terms.
+    /// Takes one attempt from `bucket`, or refuses it in `message`'s terms.
+    ///
+    /// The only way a handler consults a limit. There was a second — one that
+    /// asked whether the bucket was spent without spending it, for the sign-in
+    /// path where a failure is only known after the password hash — and it is
+    /// gone, because a question that changes nothing bounds nothing: a burst
+    /// arriving inside one instant was answered "not spent" all the way down.
+    /// A caller takes its attempt first and calls [`RateLimiter::forget`] when
+    /// the attempt turns out to have been the operator's own.
     ///
     /// # Errors
     /// Returns the `rateLimited` refusal, carrying the retry time, when the
@@ -32,23 +40,6 @@ impl RateLimiter {
         message: &str,
     ) -> Result<(), AppError> {
         refuse(self.record(bucket, address), message)
-    }
-
-    /// Refuses when `bucket` is already spent, without spending it again.
-    ///
-    /// [`Self::spend`]'s counterpart for the buckets that count failures only:
-    /// a sign-in has to be allowed to run before anyone knows whether it
-    /// failed, so the attempt is checked here and recorded afterwards.
-    ///
-    /// # Errors
-    /// As [`Self::spend`].
-    pub fn refuse_if_spent(
-        &self,
-        bucket: &Bucket,
-        address: Option<IpAddr>,
-        message: &str,
-    ) -> Result<(), AppError> {
-        refuse(self.check(bucket, address), message)
     }
 }
 

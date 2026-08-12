@@ -3,7 +3,7 @@
 
 //! The key an operator copies once, and the record that outlives it.
 
-use crate::{digest, entropy, time::Timestamp};
+use crate::{api_keys::ScopeSet, digest, entropy, time::Timestamp};
 
 /// How many leading characters of a key are stored in the clear.
 ///
@@ -72,6 +72,12 @@ pub struct ApiKeyRecord {
     pub name: String,
     /// The leading characters, for display.
     pub prefix: String,
+    /// What this key may reach.
+    ///
+    /// Chosen when the key was issued and never widened afterwards: a key that
+    /// needs another capability is a new key, so that the credential an
+    /// integration already holds cannot grow while it holds it.
+    pub scopes: ScopeSet,
     /// When the key was issued.
     pub created_at: Timestamp,
     /// The account that issued it, if that account still exists.

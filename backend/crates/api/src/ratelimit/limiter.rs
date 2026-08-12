@@ -1,7 +1,20 @@
 // SPDX-FileCopyrightText: 2026 Afisharr contributors
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-//! The limiter itself: one lock, three questions.
+//! The limiter itself: one lock, two questions.
+//!
+//! Both questions change the counter, and that is deliberate. There was a third
+//! — "is this bucket spent?", asked without spending it — and the sign-in path
+//! was built on it: check the allowance, run the password hash, count the
+//! failure afterwards. A check that changes nothing cannot bound work that has
+//! not finished, so every request in a burst that arrived before the first hash
+//! completed read the same empty counter and was let through together. Twenty
+//! guesses against a five-guess account all ran, and the counters recorded them
+//! honestly a quarter of a second later, by which time the answer was known.
+//!
+//! So a caller takes its attempt *before* the work, and hands the whole counter
+//! back with [`RateLimiter::forget`] when the attempt turns out not to have been
+//! one worth counting — which for a sign-in means it succeeded.
 
 use std::{
     net::IpAddr,
@@ -12,7 +25,7 @@ use afisharr_core::time::Clock;
 
 use crate::ratelimit::{
     Bucket, Decision,
-    counter::{Counter, engage_lockout, judge, seconds_until},
+    counter::{Counter, engage_lockout, seconds_until},
     counters::{Counters, Key},
 };
 
@@ -46,27 +59,12 @@ impl RateLimiter {
         }
     }
 
-    /// Whether `address` may make one more request in `bucket`, without
-    /// counting it.
+    /// Takes one attempt from `bucket` and reports whether it was there to
+    /// take.
     ///
-    /// Used by the buckets that count failures only: a sign-in has to be
-    /// allowed to run before anyone knows whether it failed.
-    #[must_use]
-    pub fn check(&self, bucket: &Bucket, address: Option<IpAddr>) -> Decision {
-        let now = self.clock.now();
-        let key = Key::of(bucket, address);
-        let policy = bucket.policy();
-        let counters = self
-            .counters
-            .read()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
-        counters
-            .entries
-            .get(&key)
-            .map_or(Decision::Allowed, |counter| judge(counter, policy, now))
-    }
-
-    /// Counts one request against `bucket` and reports whether it is allowed.
+    /// The increment and the judgement happen under one write lock, which is
+    /// what makes the count a bound rather than a report: two callers cannot
+    /// both read the last remaining attempt.
     #[must_use]
     pub fn record(&self, bucket: &Bucket, address: Option<IpAddr>) -> Decision {
         let now = self.clock.now();
@@ -107,20 +105,13 @@ impl RateLimiter {
         }
 
         counter.hits += 1;
-        // A lockout bucket engages the moment its allowance is *spent*, not
-        // one request after it is exceeded. The difference is the whole of
-        // whether the escalation ever runs: the failure-only path checks
-        // before each attempt and records after it, so the attempt that would
-        // have carried the count past the allowance is refused by `check` and
-        // never recorded. `consecutive_lockouts` then never grows, and every
-        // attack wave gets the fixed window instead of the doubling lockout
-        // PRD §21.4.3 asks for.
-        let spent = if policy.lockout.is_some() {
-            counter.hits >= policy.allowance
-        } else {
-            counter.hits > policy.allowance
-        };
-        if spent {
+        // One rule for every bucket: the allowance is what the window permits,
+        // and the request that would exceed it is the one refused. Because this
+        // is the gate and not a report written afterwards, the refusal lands on
+        // the caller it describes — the sixth guess against a five-guess
+        // account is refused here, and it is here that the escalating lockout
+        // engages, once per wave rather than once per request.
+        if counter.hits > policy.allowance {
             return Decision::Refused {
                 retry_after_seconds: engage_lockout(counter, policy, now),
             };
@@ -144,8 +135,10 @@ impl RateLimiter {
 
     /// Clears the counter for one bucket.
     ///
-    /// A successful sign-in runs this: the failure count exists to slow a
-    /// guesser down, and the operator who just proved who they are is not one.
+    /// A successful sign-in runs this, and it is the other half of taking the
+    /// attempt up front: the count exists to slow a guesser down, the operator
+    /// who just proved who they are is not one, and the attempt they reserved
+    /// on the way in goes back with everything else in the bucket.
     pub fn forget(&self, bucket: &Bucket, address: Option<IpAddr>) {
         let key = Key::of(bucket, address);
         let mut counters = self
@@ -224,28 +217,43 @@ mod tests {
             let _ = limiter.record(&bucket, address(&format!("203.0.113.{n}")));
         }
         assert!(matches!(
-            limiter.check(&bucket, address("203.0.113.99")),
+            limiter.record(&bucket, address("203.0.113.99")),
             Decision::Refused { .. }
         ));
     }
 
     #[test]
-    fn the_lockout_engages_when_the_allowance_is_spent_rather_than_never() {
-        // `check` runs before an attempt and the failure is recorded after it,
-        // so a lockout that waited for `hits > allowance` would be refused into
-        // existence by `check` and never engage.
+    fn the_allowance_bounds_the_attempts_that_run_rather_than_the_failures_counted() {
+        // The bypass this closes. Every one of these calls stands for a request
+        // that arrived before any of the others had finished its password hash,
+        // so under a limiter consulted read-only they all read an empty counter
+        // and all ran. Here the counter is taken, not read, so exactly the
+        // allowance gets through however tightly they arrive.
+        let (_clock, limiter) = limiter();
+        let bucket = Bucket::login_account("operator");
+        let allowed = (0..20)
+            .filter(|_| limiter.record(&bucket, address("1.2.3.4")) == Decision::Allowed)
+            .count();
+        assert_eq!(allowed, 5, "a burst must not get more than the allowance");
+    }
+
+    #[test]
+    fn the_lockout_engages_on_the_attempt_that_exceeds_the_allowance() {
         let (_clock, limiter) = limiter();
         let bucket = Bucket::LoginAccount {
             username: "operator".to_owned(),
         };
         for _ in 0..5 {
-            let _ = limiter.record(&bucket, address("1.2.3.4"));
+            assert_eq!(
+                limiter.record(&bucket, address("1.2.3.4")),
+                Decision::Allowed
+            );
         }
         let Decision::Refused {
             retry_after_seconds,
-        } = limiter.check(&bucket, address("1.2.3.4"))
+        } = limiter.record(&bucket, address("1.2.3.4"))
         else {
-            panic!("the account must be locked out once the allowance is spent");
+            panic!("the sixth attempt must be refused");
         };
         assert_eq!(retry_after_seconds, 15 * 60);
     }
@@ -283,7 +291,7 @@ mod tests {
     }
 
     #[test]
-    fn a_successful_sign_in_clears_the_failure_count() {
+    fn a_successful_sign_in_clears_the_attempts_it_took() {
         let (_clock, limiter) = limiter();
         let bucket = Bucket::LoginAccount {
             username: "operator".to_owned(),
@@ -293,28 +301,16 @@ mod tests {
         }
         limiter.forget(&bucket, address("1.2.3.4"));
         assert_eq!(
-            limiter.check(&bucket, address("1.2.3.4")),
+            limiter.record(&bucket, address("1.2.3.4")),
             Decision::Allowed
         );
     }
 
-    #[test]
-    fn check_reports_the_refusal_without_spending_an_attempt() {
-        let (_clock, limiter) = limiter();
-        for _ in 0..5 {
-            let _ = limiter.record(&Bucket::SetupAttempt, address("1.2.3.4"));
-        }
-        // Five spent; the sixth is over. `check` must say so twice without the
-        // second call making it worse.
-        let first = limiter.check(&Bucket::SetupAttempt, address("1.2.3.4"));
-        let second = limiter.check(&Bucket::SetupAttempt, address("1.2.3.4"));
-        assert!(matches!(first, Decision::Refused { .. }));
-        assert_eq!(first, second);
-    }
-
     fn spend_to_lockout(limiter: &RateLimiter, bucket: &Bucket) -> u64 {
         let mut last = Decision::Allowed;
-        for _ in 0..5 {
+        // One past the allowance: the attempt that exceeds it is the one the
+        // lockout engages on.
+        for _ in 0..6 {
             last = limiter.record(bucket, address("1.2.3.4"));
         }
         match last {
@@ -361,7 +357,7 @@ mod tests {
 
         assert!(
             matches!(
-                limiter.check(&Bucket::SetupAttempt, address("1.2.3.4")),
+                limiter.record(&Bucket::SetupAttempt, address("1.2.3.4")),
                 Decision::Refused { .. }
             ),
             "the sweep must not hand a spent allowance back"

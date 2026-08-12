@@ -4,7 +4,7 @@
 //! The extractor every protected route takes.
 
 use afisharr_core::{
-    api_keys::{self, TouchApiKey},
+    api_keys::{self, Scope, ScopeSet, TouchApiKey},
     digest,
     sessions::{self, TouchSession, Validity},
     time::Timestamp,
@@ -47,6 +47,8 @@ pub enum Credential {
     ApiKey {
         /// The key's identifier.
         id: String,
+        /// What the key was issued to reach.
+        scopes: ScopeSet,
     },
 }
 
@@ -68,6 +70,24 @@ impl Authenticated {
         match &self.credential {
             Credential::Session { digest } => Some(digest),
             Credential::ApiKey { .. } => None,
+        }
+    }
+
+    /// Whether the credential presented reaches `scope`.
+    ///
+    /// A session holds every scope, and that is not a special case for
+    /// browsers: a scope narrows a *key* below the account behind it, and a
+    /// session already is the account. The operator sitting at the interface
+    /// can reach everything their account can reach, which is what signing in
+    /// means; the key they hand to an integration reaches what they chose.
+    ///
+    /// This is a ceiling and never a grant — [`Administrator`] still asks the
+    /// account's own rights, and a scope cannot add any.
+    #[must_use]
+    pub fn may(&self, scope: Scope) -> bool {
+        match &self.credential {
+            Credential::Session { .. } => true,
+            Credential::ApiKey { scopes, .. } => scopes.contains(scope),
         }
     }
 }
@@ -118,44 +138,6 @@ impl FromRequestParts<ApiState> for Authenticated {
             // and the API budget is never reached because they hold nothing.
             Err(refusal) => Err(budget::spend_anonymous(state, address).unwrap_or(refusal)),
         }
-    }
-}
-
-/// A caller who has proved who they are **and** holds administrator rights.
-///
-/// Tier 0 is an admin-only product (D-007): the filesystem browser, the
-/// instance's API keys, the Plex connection, and the event stream are one
-/// operator's control panel over their own server, and none of them is scoped
-/// to the account that asked. `users.is_admin` can still be `0` — a Plex
-/// account linked for viewing, a row edited by hand — and such an account holds
-/// a session this surface accepts. Without this extractor the whole documented
-/// admin-only surface is ordinary authenticated access.
-///
-/// A second extractor rather than a check inside [`Authenticated`], because
-/// "who is calling" and "may they do this" are different questions: signing
-/// out, reading one's own session, and changing one's own password are
-/// self-scoped and need the first without the second.
-#[derive(Debug, Clone)]
-pub struct Administrator(
-    /// The caller, once their rights are established.
-    pub Authenticated,
-);
-
-impl FromRequestParts<ApiState> for Administrator {
-    type Rejection = AppError;
-
-    async fn from_request_parts(
-        parts: &mut Parts,
-        state: &ApiState,
-    ) -> Result<Self, Self::Rejection> {
-        let caller = Authenticated::from_request_parts(parts, state).await?;
-        if !caller.is_admin {
-            return Err(AppError::of(
-                ErrorCode::Forbidden,
-                "That account does not administer this instance.",
-            ));
-        }
-        Ok(Self(caller))
     }
 }
 
@@ -227,10 +209,18 @@ async fn from_api_key(
         return Err(unauthenticated());
     }
 
+    // Two facts, and both are needed. `is_admin` is the account's, and it is
+    // still a ceiling: a key an administrator issued stops working the day that
+    // account is demoted. The scopes are the key's own, and they are the other
+    // ceiling — the one that was missing, which is why a key issued to let one
+    // integration read the filesystem could also mint its own replacement.
     Ok(Authenticated {
         user_id,
         is_admin: user.is_admin,
-        credential: Credential::ApiKey { id: record.id },
+        credential: Credential::ApiKey {
+            id: record.id,
+            scopes: record.scopes,
+        },
     })
 }
 
@@ -348,9 +338,47 @@ mod tests {
         let key = Authenticated {
             user_id: "U".to_owned(),
             is_admin: true,
-            credential: Credential::ApiKey { id: "K".to_owned() },
+            credential: Credential::ApiKey {
+                id: "K".to_owned(),
+                scopes: ScopeSet::NONE,
+            },
         };
         assert_eq!(session.session_digest(), Some("d"));
         assert_eq!(key.session_digest(), None);
+    }
+
+    #[test]
+    fn a_key_reaches_the_scopes_it_was_issued_with_and_no_others() {
+        // The escalation this closes: the key below was issued to read the
+        // filesystem, and `is_admin` was the only question asked of it — so it
+        // reached the route that issues keys, and could mint one that survives
+        // revoking it.
+        let key = Authenticated {
+            user_id: "U".to_owned(),
+            is_admin: true,
+            credential: Credential::ApiKey {
+                id: "K".to_owned(),
+                scopes: ScopeSet::of([Scope::FilesRead]),
+            },
+        };
+        assert!(key.may(Scope::FilesRead));
+        assert!(!key.may(Scope::KeysManage));
+        assert!(!key.may(Scope::AccountManage));
+    }
+
+    #[test]
+    fn a_session_reaches_everything_the_account_behind_it_reaches() {
+        // Not a special case for browsers: a scope narrows a key below its
+        // account, and a session already is the account.
+        let session = Authenticated {
+            user_id: "U".to_owned(),
+            is_admin: true,
+            credential: Credential::Session {
+                digest: "d".to_owned(),
+            },
+        };
+        for scope in Scope::ALL {
+            assert!(session.may(scope), "{scope:?}");
+        }
     }
 }

@@ -96,13 +96,13 @@ pub(super) fn spend_attempt(state: &ApiState, client: ClientContext) -> AppResul
     )
 }
 
-/// Refuses when `bucket` is already spent, without spending it again.
-pub(super) fn refuse_if_limited(
+/// Takes one attempt from `bucket` before the work it bounds begins.
+pub(super) fn take_attempt(
     state: &ApiState,
     bucket: &Bucket,
     client: ClientContext,
 ) -> AppResult<()> {
-    state.limiter().refuse_if_spent(
+    state.limiter().spend(
         bucket,
         Some(client.address),
         "Too many attempts against that account. Try again later.",

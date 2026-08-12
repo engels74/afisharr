@@ -72,7 +72,7 @@ async fn a_database_read_never_yields_a_working_session_or_key() {
     let issued: serde_json::Value = client
         .post(format!("{}/api/settings/api-keys", running.base_url))
         .header("x-afisharr-csrf", &csrf)
-        .json(&serde_json::json!({ "name": "Home Assistant" }))
+        .json(&serde_json::json!({ "name": "Home Assistant", "scopes": ["files:read"] }))
         .send()
         .await
         .expect("the key route must answer")
@@ -137,7 +137,7 @@ async fn a_revoked_api_key_is_refused_on_its_next_use() {
     let issued: serde_json::Value = client
         .post(format!("{}/api/settings/api-keys", running.base_url))
         .header("x-afisharr-csrf", &csrf)
-        .json(&serde_json::json!({ "name": "Scripted" }))
+        .json(&serde_json::json!({ "name": "Scripted", "scopes": ["files:read"] }))
         .send()
         .await
         .expect("the key route must answer")
@@ -374,7 +374,7 @@ async fn a_state_changing_request_without_the_csrf_token_is_refused() {
 
     let refused = client
         .post(format!("{}/api/settings/api-keys", running.base_url))
-        .json(&serde_json::json!({ "name": "No token" }))
+        .json(&serde_json::json!({ "name": "No token", "scopes": ["files:read"] }))
         .send()
         .await
         .expect("the key route must answer");
@@ -461,7 +461,7 @@ async fn an_account_without_administrator_rights_reaches_none_of_the_admin_surfa
     let refused = client
         .post(format!("{}/api/settings/api-keys", running.base_url))
         .header("x-afisharr-csrf", &csrf)
-        .json(&serde_json::json!({ "name": "Escalation" }))
+        .json(&serde_json::json!({ "name": "Escalation", "scopes": ["files:read"] }))
         .send()
         .await
         .expect("the key route must answer");
@@ -535,7 +535,7 @@ async fn signing_out_with_an_api_key_is_refused_rather_than_reported_as_done() {
     let issued: serde_json::Value = client
         .post(format!("{}/api/settings/api-keys", running.base_url))
         .header("x-afisharr-csrf", &csrf)
-        .json(&serde_json::json!({ "name": "Home Assistant" }))
+        .json(&serde_json::json!({ "name": "Home Assistant", "scopes": ["files:read"] }))
         .send()
         .await
         .expect("the key route must answer")

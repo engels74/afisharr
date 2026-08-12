@@ -129,6 +129,64 @@ async fn rotating_the_source_address_does_not_buy_more_attempts_at_one_account()
 }
 
 #[tokio::test]
+async fn a_burst_arriving_at_once_does_not_outrun_the_account_allowance() {
+    // The bypass this closes. The limit used to be *read* before the password
+    // hash and *written* after it, on the reasoning that an attempt has not
+    // failed until it finishes. Every request in a burst that arrives before
+    // the first hash completes therefore read the same empty counter, and all
+    // of them ran: twenty guesses against a five-guess account, each one
+    // faithfully recorded a quarter of a second after the answer was known.
+    //
+    // The Argon2 semaphore is not the missing bound either. It admits four
+    // operations at a time, which caps the memory a burst costs and caps
+    // nothing about how many guesses the account gives up — the rest queue and
+    // run in turn.
+    /// Four times the allowance, all in flight together.
+    const BURST: usize = ACCOUNT_ALLOWANCE * 4;
+
+    let instance = TempInstance::new();
+    let running = RunningInstance::start(&instance).await;
+    let _wizard = Wizard::set_up(&running, "operator", PASSWORD).await;
+
+    let client = client();
+    let statuses = futures_util::future::join_all((0..BURST).map(|_| {
+        let client = client.clone();
+        let url = format!("{}/api/auth/login", running.base_url);
+        async move {
+            client
+                .post(url)
+                .json(&serde_json::json!({ "username": "operator", "password": "not the password" }))
+                .send()
+                .await
+                .expect("the login route must answer")
+                .status()
+        }
+    }))
+    .await;
+
+    let guesses = statuses
+        .iter()
+        .filter(|status| **status == StatusCode::UNAUTHORIZED)
+        .count();
+    let refused = statuses
+        .iter()
+        .filter(|status| **status == StatusCode::TOO_MANY_REQUESTS)
+        .count();
+    assert!(
+        guesses <= ACCOUNT_ALLOWANCE,
+        "{guesses} of {BURST} simultaneous guesses reached the password, \
+         and the account allows {ACCOUNT_ALLOWANCE}"
+    );
+    assert_eq!(
+        guesses + refused,
+        BURST,
+        "every attempt is either a guess or a refusal: {statuses:?}"
+    );
+
+    running.stop().await;
+}
+
+#[tokio::test]
 async fn a_protected_route_is_counted_against_the_api_allowance() {
     // `Bucket::Api` with nothing spending it is a table entry, not a limit: a
     // caller could drive the database, the filesystem browser, and the stream

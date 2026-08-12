@@ -37,7 +37,7 @@ impl Credential {
     pub fn budget_key(&self) -> &str {
         match self {
             Credential::Session { digest } => digest,
-            Credential::ApiKey { id } => id,
+            Credential::ApiKey { id, .. } => id,
         }
     }
 }
@@ -157,7 +157,10 @@ mod tests {
         let session = Credential::Session {
             digest: "d".to_owned(),
         };
-        let key = Credential::ApiKey { id: "K".to_owned() };
+        let key = Credential::ApiKey {
+            id: "K".to_owned(),
+            scopes: afisharr_core::api_keys::ScopeSet::NONE,
+        };
         assert_eq!(session.budget_key(), "d");
         assert_eq!(key.budget_key(), "K");
     }

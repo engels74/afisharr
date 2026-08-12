@@ -72,6 +72,22 @@ impl OutboundClient {
             // spending the whole request budget.
             .timeout(deadline.as_duration())
             .connect_timeout(Duration::from_secs(10))
+            // Every caller of this transport sends credentials in headers it
+            // chose — `PlexTvClient` sends the operator's token as
+            // `X-Plex-Token` — and the default policy follows a redirect up to
+            // ten times. Its cross-origin scrub list is `Authorization`,
+            // `Cookie`, `Proxy-Authorization`, and `WWW-Authenticate`; a
+            // provider's own credential header is not on it and is not
+            // something reqwest can know about. So an endpoint answering `302
+            // Location: https://elsewhere.example/` handed the operator's Plex
+            // token to whatever host it named, and nothing in this process saw
+            // a failure worth logging. Nothing here needs a redirect followed:
+            // every URL this client is given is an API endpoint an adapter
+            // built, so a redirect is the provider changing an address, and the
+            // honest answer is the `OutboundError::Status` a 3xx now produces —
+            // an operator reading "plex.tv answered 302" can fix the address,
+            // and cannot be silently robbed while they read it.
+            .redirect(reqwest::redirect::Policy::none())
             .build()
             .map_err(|source| OutboundError::Unreachable {
                 host: "the outbound transport".to_owned(),

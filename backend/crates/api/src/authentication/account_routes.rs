@@ -24,7 +24,7 @@ use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 
 use crate::{
-    authentication::{Authenticated, session},
+    authentication::{AccountManage, Authenticated, Scoped, SessionsManage, session},
     error::{AppError, AppResult, ErrorCode, JsonBody, Problem},
     proxy::ClientContext,
     state::ApiState,
@@ -98,7 +98,7 @@ pub struct SessionView {
         (status = 200, description = "The password is changed", body = PasswordChanged),
         (status = 400, description = "The new password was refused", body = Problem),
         (status = 401, description = "The current password was not accepted", body = Problem),
-        (status = 403, description = "Setup has not been completed on this instance", body = Problem),
+        (status = 403, description = "That key was not issued with the scope this route needs, or setup has not been completed on this instance", body = Problem),
         (status = 409, description = "That account has no password to change, or another change reached it first", body = Problem),
         (status = 429, description = "Too many requests", body = Problem),
     ),
@@ -106,7 +106,7 @@ pub struct SessionView {
 pub async fn change_password(
     State(state): State<ApiState>,
     client: ClientContext,
-    caller: Authenticated,
+    Scoped(caller, _): Scoped<AccountManage>,
     jar: CookieJar,
     headers: axum::http::HeaderMap,
     JsonBody(request): JsonBody<PasswordChange>,
@@ -237,13 +237,13 @@ fn replacement_for(caller: &Authenticated) -> Option<SessionToken> {
     responses(
         (status = 200, description = "Every session, newest first", body = Vec<SessionView>),
         (status = 401, description = "No accepted credential was presented", body = Problem),
-        (status = 403, description = "Setup has not been completed on this instance", body = Problem),
+        (status = 403, description = "That key was not issued with the scope this route needs, or setup has not been completed on this instance", body = Problem),
         (status = 429, description = "Too many requests", body = Problem),
     ),
 )]
 pub async fn list_sessions(
     State(state): State<ApiState>,
-    caller: Authenticated,
+    Scoped(caller, _): Scoped<SessionsManage>,
 ) -> AppResult<Json<Vec<SessionView>>> {
     let current = caller.session_digest().map(str::to_owned);
     let sessions = sessions::list_for_user(state.database().readers(), &caller.user_id)
@@ -266,14 +266,14 @@ pub async fn list_sessions(
     responses(
         (status = 204, description = "The session is revoked"),
         (status = 401, description = "No accepted credential was presented", body = Problem),
-        (status = 403, description = "Setup has not been completed on this instance", body = Problem),
+        (status = 403, description = "That key was not issued with the scope this route needs, or setup has not been completed on this instance", body = Problem),
         (status = 404, description = "No such session on this account", body = Problem),
         (status = 429, description = "Too many requests", body = Problem),
     ),
 )]
 pub async fn revoke_session(
     State(state): State<ApiState>,
-    caller: Authenticated,
+    Scoped(caller, _): Scoped<SessionsManage>,
     Path(id): Path<String>,
 ) -> AppResult<StatusCode> {
     // Scoped to the caller's own sessions: an admin-only surface is still not
@@ -371,7 +371,8 @@ mod tests {
         // a 30-day administrator credential landed in its response log.
         assert!(
             replacement_for(&caller(crate::authentication::Credential::ApiKey {
-                id: "k".to_owned()
+                id: "k".to_owned(),
+                scopes: afisharr_core::api_keys::ScopeSet::NONE,
             }))
             .is_none()
         );
