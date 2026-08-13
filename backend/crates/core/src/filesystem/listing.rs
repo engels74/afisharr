@@ -50,8 +50,9 @@ pub struct Entry {
 ///
 /// # Errors
 /// Returns [`ContainmentError::Outside`] when the requested path escapes the
-/// root, and [`ContainmentError::Unreadable`] when the resolved directory
-/// cannot be read.
+/// root — including when it is replaced by a link out between the check and the
+/// open — [`ContainmentError::Unresolvable`] when a component is not there, and
+/// [`ContainmentError::Unreadable`] when the resolved directory cannot be read.
 pub async fn list(root: &Root, requested: &str) -> Result<Vec<Entry>, ContainmentError> {
     let root_label = root.label.clone();
     let root = root.clone();

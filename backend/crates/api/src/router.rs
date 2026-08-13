@@ -228,7 +228,7 @@ async fn envelope(
     next: Next,
 ) -> Response {
     let client = ClientContext::resolve(peer, request.headers(), state.trusted_proxies())
-        .at_configured_origin(request.headers(), state.public_origin());
+        .at_configured_origin(request.headers(), request.uri(), state.public_origin());
     request.extensions_mut().insert(client);
 
     let mut response = next.run(request).await;

@@ -42,6 +42,62 @@ export type ErrorCode = components['schemas']['ErrorCode'];
 const UNREACHABLE_STATUS = 503;
 
 /**
+ * The status a 2xx this client could not read is reported under.
+ *
+ * 502, matching the backend's own `upstream` code: something answered on this
+ * origin, and it was not this API.
+ */
+const UNREADABLE_STATUS = 502;
+
+/** A refusal this client synthesised, in the shape every route answers with. */
+function problemResponse(message: string, status: number): Response {
+	return new Response(
+		JSON.stringify({ code: 'upstream', message } satisfies Problem),
+		{ status, headers: { 'content-type': 'application/json' } },
+	);
+}
+
+/**
+ * Turns a 2xx that is not JSON into a refusal, before anything tries to parse it.
+ *
+ * The `onError` middleware below covers one failure only, and it is narrower
+ * than it looks: `openapi-fetch` runs the error chain inside the `try` around
+ * `fetch` itself, so it catches a request the browser could not make and
+ * nothing else. Body parsing happens afterwards and unguarded — for a 2xx it
+ * runs `JSON.parse` on the text — so a success status carrying something that
+ * is not JSON throws a `SyntaxError` straight out of every wrapper in
+ * `$lib/features`, past the promise-of-a-value contract they all document.
+ *
+ * The deployment that produces it is ordinary: `/api/*` is not routed to the
+ * backend — an nginx `location /` SPA fallback, a captive portal, a stale
+ * service worker — so `GET /api/auth/session` answers `200 text/html` with the
+ * shell. `session.refresh()` has a `finally` and no `catch`, so the rejection
+ * escapes as an unhandled rejection, the session stays `unknown`, and the shell
+ * renders its skeleton for ever with no navigation and no retry — the `I-UX-2`
+ * dead end the session module says it exists to prevent. Out of
+ * `startPlexPin()` the same throw skips the line that clears `starting`, and
+ * both start buttons stay disabled for the life of the page.
+ *
+ * A refusal is returned rather than a repaired body, because that is what
+ * happened: the call was made, an answer came back, and nothing in it was this
+ * API. Bodiless successes are left alone — 204 is what sign-out and revocation
+ * answer with, and it is not an answer this has anything to say about.
+ */
+api.use({
+	onResponse: ({ response }) => {
+		const bodiless =
+			response.status === 204 || response.headers.get('content-length') === '0';
+		const json = (response.headers.get('content-type') ?? '')
+			.toLowerCase()
+			.includes('json');
+		if (!response.ok || bodiless || json) {
+			return undefined;
+		}
+		return problemResponse(t('api.unreadable'), UNREADABLE_STATUS);
+	},
+});
+
+/**
  * Turns a transport failure into the failure shape every route answers with.
  *
  * The browser rejects `fetch` when it cannot reach the instance at all — a
@@ -58,17 +114,7 @@ const UNREACHABLE_STATUS = 503;
  * will write without catching.
  */
 api.use({
-	onError: () =>
-		new Response(
-			JSON.stringify({
-				code: 'upstream',
-				message: t('api.unreachable'),
-			} satisfies Problem),
-			{
-				status: UNREACHABLE_STATUS,
-				headers: { 'content-type': 'application/json' },
-			},
-		),
+	onError: () => problemResponse(t('api.unreachable'), UNREACHABLE_STATUS),
 });
 
 /**

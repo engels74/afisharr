@@ -9,7 +9,7 @@
 //! statement about the instance, and the second is only ever read where the
 //! first left the question open.
 
-use axum::http::{HeaderMap, header::HOST};
+use axum::http::{HeaderMap, Uri, header::HOST, uri::Authority};
 
 use crate::proxy::{
     ClientContext, PublicOrigin, Scheme,
@@ -85,6 +85,7 @@ impl ClientContext {
     pub fn at_configured_origin(
         mut self,
         headers: &HeaderMap,
+        uri: &Uri,
         configured: Option<&PublicOrigin>,
     ) -> Self {
         let stated = self.stated;
@@ -94,16 +95,35 @@ impl ClientContext {
         let Some(origin) = configured.filter(|origin| origin.is_secure()) else {
             return self;
         };
-        let arrived_at_it = headers
-            .get(HOST)
-            .and_then(|value| value.to_str().ok())
-            .is_some_and(|host| origin.matches_host(host));
+        let arrived_at_it =
+            declared_authority(headers, uri).is_some_and(|host| origin.matches_host(host));
         if arrived_at_it {
             self.scheme = Scheme::Https;
             self.scheme_inferred = !stated.is_tls();
         }
         self
     }
+}
+
+/// The address the request says it was made to, in either protocol's spelling.
+///
+/// HTTP/1.1 writes it as `Host`, and that is the only place this looked. HTTP/2
+/// has no `Host` header: the authority is the `:authority` pseudo-header, which
+/// hyper puts in the request's URI and does not copy into the header map. A
+/// reverse proxy configured to speak h2c to its backend — `reverse_proxy
+/// h2c://afisharr:8484` in Caddy, an h2c service in Traefik — therefore reached
+/// this with nothing to match, so the upgrade never fired and the session cookie
+/// was set without `Secure` on a connection carrying TLS. That is the exact gap
+/// this module exists to close, silently reopened by the wire format.
+///
+/// The two are read as one because they are one fact, and neither is more
+/// trustworthy than the other: both are written by whoever is calling, which is
+/// why nothing here decides anything on the authority alone.
+fn declared_authority<'r>(headers: &'r HeaderMap, uri: &'r Uri) -> Option<&'r str> {
+    headers
+        .get(HOST)
+        .and_then(|value| value.to_str().ok())
+        .or_else(|| uri.authority().map(Authority::as_str))
 }
 
 /// Whether anything in front of this instance forwarded this request.
@@ -145,7 +165,44 @@ mod tests {
             &headers(entries),
             &TrustedProxies::default(),
         )
-        .at_configured_origin(&headers(entries), Some(&origin))
+        .at_configured_origin(&headers(entries), &Uri::default(), Some(&origin))
+    }
+
+    #[test]
+    fn an_http2_request_is_read_from_the_authority_it_carries_instead() {
+        // The wire format silently reopening the gap: HTTP/2 has no `Host`
+        // header, so a proxy speaking h2c to this instance — Caddy's
+        // `reverse_proxy h2c://…`, an h2c service in Traefik — left nothing to
+        // match and the session cookie went out without `Secure` on a
+        // connection carrying TLS.
+        let origin = PublicOrigin::parse("https://media.example").expect("a valid origin");
+        let entries = headers(&[(FORWARDED_FOR, "1.2.3.4")]);
+        let uri: Uri = "https://media.example/api/auth/login"
+            .parse()
+            .expect("a valid absolute-form target");
+        let context =
+            ClientContext::resolve(peer("10.0.0.5"), &entries, &TrustedProxies::default())
+                .at_configured_origin(&entries, &uri, Some(&origin));
+
+        assert_eq!(context.scheme, Scheme::Https);
+        assert!(
+            context.scheme_inferred,
+            "no hop stated the scheme, so the year-long header is still withheld"
+        );
+    }
+
+    #[test]
+    fn an_authority_that_is_not_the_configured_origin_upgrades_nothing() {
+        let origin = PublicOrigin::parse("https://media.example").expect("a valid origin");
+        let entries = headers(&[(FORWARDED_FOR, "1.2.3.4")]);
+        let uri: Uri = "https://evil.example/api/auth/login"
+            .parse()
+            .expect("a valid absolute-form target");
+        let context =
+            ClientContext::resolve(peer("10.0.0.5"), &entries, &TrustedProxies::default())
+                .at_configured_origin(&entries, &uri, Some(&origin));
+
+        assert_eq!(context.scheme, Scheme::Http);
     }
 
     #[test]
@@ -274,7 +331,7 @@ mod tests {
             (FORWARDED_PROTO, "http, https"),
         ]);
         let context = ClientContext::resolve(peer("10.0.0.5"), &entries, &trusted)
-            .at_configured_origin(&entries, Some(&origin));
+            .at_configured_origin(&entries, &Uri::default(), Some(&origin));
 
         assert_eq!(context.address.to_string(), "1.2.3.4");
         assert_eq!(context.scheme, Scheme::Http);
@@ -294,7 +351,7 @@ mod tests {
             (FORWARDED_PROTO, "https, http"),
         ]);
         let context = ClientContext::resolve(peer("10.0.0.5"), &entries, &trusted)
-            .at_configured_origin(&entries, Some(&origin));
+            .at_configured_origin(&entries, &Uri::default(), Some(&origin));
 
         assert_eq!(context.scheme, Scheme::Https);
         assert!(!context.scheme_inferred);

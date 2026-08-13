@@ -122,8 +122,22 @@ impl Counters {
         if !overdue && !grown {
             return;
         }
+        let before = self.entries.len();
         self.entries
             .retain(|key, counter| now < forgotten_at(counter, key.bucket.policy()));
+        // `retain` empties slots and never gives the table back, so a sweep that
+        // dropped a flood bounded the entry count and nothing else: the peak
+        // allocation stayed resident for the life of the process, and `held()`
+        // reported zero over it. A flood of distinct usernames reaches this —
+        // `log_in` spends `Bucket::login_account` before the per-address bucket,
+        // so a fresh entry is minted for every name tried — and the sweep is
+        // meant to be the difference between a limiter and a leak, which it is
+        // only if the memory goes too. Shrunk only when most of the table went,
+        // because a steady-state map re-growing its table every sweep is the
+        // opposite trade.
+        if self.entries.len() * 2 < before {
+            self.entries.shrink_to_fit();
+        }
         self.swept_at = now;
         self.swept_len = self.entries.len();
     }

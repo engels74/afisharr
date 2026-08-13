@@ -113,11 +113,17 @@
 		if (!attempt || expired) {
 			return;
 		}
-		// One poll in flight at a time. Two overlapping polls both reach
-		// plex.tv, and the second is answered by the attempt this one already
-		// consumed — which is a refusal the operator would see beside the
-		// sign-in that just succeeded.
+		// One poll in flight at a time. Two overlapping polls both reach plex.tv,
+		// and the second is answered by the attempt this one already consumed —
+		// a refusal the operator would see beside the sign-in that succeeded.
 		let inFlight = false;
+		// Whether this run is still the live one. `inFlight` is scoped to one
+		// run, so a poll still on the wire at teardown resolves afterwards and
+		// writes into whatever attempt is live by then: a stale `forgetAttempt()`
+		// drops the entry `begin()` has just parked for the hosted sign-in, a
+		// stale `expired` renders a brand-new pin as expired, and a stale
+		// `authorized` signs the operator in after they navigated away.
+		let cancelled = false;
 		// Polling is a side effect on a timer, which is what `$effect` is for;
 		// the state it produces is assigned, never derived from elapsed time.
 		const timer = setInterval(async () => {
@@ -125,8 +131,19 @@
 				return;
 			}
 			inFlight = true;
-			const result = await pollPlexPin(attempt.id);
-			inFlight = false;
+			let result: Awaited<ReturnType<typeof pollPlexPin>>;
+			try {
+				result = await pollPlexPin(attempt.id);
+			} finally {
+				// In a `finally`, never after the `await`: a rejection there left
+				// this stuck `true`, so every later tick returned at the guard
+				// above and the panel showed "Waiting for Plex…" for the life of
+				// the page, with nothing to recover with.
+				inFlight = false;
+			}
+			if (cancelled) {
+				return;
+			}
 			if (result.outcome === 'refused') {
 				refusal = result.problem;
 				// A spent budget is not a dead attempt. The pin is still open
@@ -186,7 +203,10 @@
 			}
 		}, POLL_INTERVAL_MS);
 
-		return () => clearInterval(timer);
+		return () => {
+			cancelled = true;
+			clearInterval(timer);
+		};
 	});
 </script>
 

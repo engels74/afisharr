@@ -24,6 +24,7 @@ use utoipa::ToSchema;
 use crate::{
     authentication::{Administrator, KeysManage},
     error::{AppError, AppResult, ErrorCode, JsonBody, Problem},
+    keys::ceiling::within_the_callers_reach,
     state::ApiState,
 };
 
@@ -143,7 +144,7 @@ pub async fn create(
             Problem::new(ErrorCode::Invalid, "A name is required.").at("/name"),
         ));
     }
-    let scopes = requested_scopes(&request.scopes)?;
+    let scopes = within_the_callers_reach(&caller, requested_scopes(&request.scopes)?)?;
 
     let issued = IssuedApiKey::generate();
     let record = state

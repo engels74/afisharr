@@ -109,6 +109,39 @@ describe('reading a refusal that is not the documented shape', () => {
 		expect(problem.message.length).toBeGreaterThan(0);
 	});
 
+	test('a 2xx that is not JSON is a refusal rather than an exception', async () => {
+		// The deployment this closes: `/api/*` is not routed to the backend — an
+		// nginx `location /` SPA fallback, a captive portal, a stale service
+		// worker — so a read answers `200 text/html` with the shell.
+		// `openapi-fetch` runs `JSON.parse` on a 2xx body unguarded, and the
+		// `SyntaxError` escapes past every wrapper's promise of a value: the
+		// session stays `unknown` and the shell waits on a skeleton for ever.
+		transport = () =>
+			Promise.resolve(
+				new Response('<!doctype html><html><body>app</body></html>', {
+					status: 200,
+					headers: { 'content-type': 'text/html' },
+				}),
+			);
+
+		const { data, error } = await api.GET('/api/auth/session');
+
+		expect(data).toBeUndefined();
+		expect(asProblem(error).code).toBe('upstream');
+		expect(asProblem(error).message.length).toBeGreaterThan(0);
+	});
+
+	test('a bodiless success is still a success', async () => {
+		// 204 is what sign-out and revocation answer with, and it carries no
+		// content type to judge. Reading it as unreadable would report every
+		// successful sign-out as a failure.
+		transport = () => Promise.resolve(new Response(null, { status: 204 }));
+
+		const { error } = await api.POST('/api/auth/logout');
+
+		expect(error).toBeUndefined();
+	});
+
 	test('a refusal the API really sent is passed through unchanged', () => {
 		const refusal = {
 			code: 'unauthenticated' as const,

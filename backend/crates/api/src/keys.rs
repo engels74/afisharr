@@ -7,6 +7,7 @@
 //! Everything the list surface shows — the name, the prefix, the last-used
 //! timestamp — is deliberately not enough to authenticate with.
 
+mod ceiling;
 pub(crate) mod routes;
 
 pub use routes::{ApiKeyView, IssuedKey, NewApiKey, create, list, revoke};

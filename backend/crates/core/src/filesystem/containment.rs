@@ -82,16 +82,19 @@ impl Contained {
     ///
     /// Handle-relative, so the directory that was checked is the directory
     /// that is opened, however the tree changes in between.
+    ///
+    /// Classified through [`ContainmentError::from_failed_open`], because this
+    /// is the open that races: anything with write access inside the root can
+    /// replace the checked name with a link out before it runs. cap-std refuses
+    /// that open, and calling the refusal "could not be read" answers 404 —
+    /// what a mistyped directory gets — for the escape this module catches.
     pub(crate) fn open_directory(&self) -> Result<Dir, ContainmentError> {
         let opened = match self.name.as_deref() {
             Some(name) => self.parent.open_dir(name),
             // The root itself: the handle already names it.
             None => self.parent.try_clone(),
         };
-        opened.map_err(|source| ContainmentError::Unreadable {
-            root_label: self.root_label.clone(),
-            source,
-        })
+        opened.map_err(|source| ContainmentError::from_failed_open(&self.root_label, source))
     }
 }
 

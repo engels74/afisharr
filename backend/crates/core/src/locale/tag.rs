@@ -62,6 +62,19 @@ impl LocaleTag {
             {
                 return Err(malformed());
             }
+            // The first subtag carries its own rule, and it is the one that
+            // decides whether a formatter will take the tag at all. BCP 47's
+            // primary language subtag is two or three letters, or five to
+            // eight; one letter, four letters, and anything with a digit in it
+            // are reserved or simply not language subtags. Accepting them made
+            // this type's promise false: `engl`, `e`, and `123` all parsed,
+            // were stored in `instance.locale`, reached
+            // `new Intl.PluralRules(locale)` in the browser, and threw the
+            // `RangeError` this validation exists to turn into a settings-form
+            // refusal.
+            if index == 0 && !is_language_subtag(subtag) {
+                return Err(malformed());
+            }
             if index > 0 {
                 canonical.push('-');
             }
@@ -94,6 +107,16 @@ impl<'de> Deserialize<'de> for LocaleTag {
         let text = String::deserialize(deserializer)?;
         Self::parse(&text).map_err(serde::de::Error::custom)
     }
+}
+
+/// Whether `subtag` is a primary language subtag (BCP 47 §2.2.1).
+///
+/// `alpha{2,3}` is every living language and every ISO 639-2/5 code;
+/// `alpha{5,8}` is the registered-language range. Four letters are reserved and
+/// name nothing, one letter is a singleton that only ever introduces an
+/// extension, and a digit cannot appear at all.
+fn is_language_subtag(subtag: &str) -> bool {
+    matches!(subtag.len(), 2..=3 | 5..=8) && subtag.bytes().all(|byte| byte.is_ascii_alphabetic())
 }
 
 /// Subtag case, by position: language, script, then everything else.
