@@ -14,7 +14,7 @@ repository.workspace = true
 authors.workspace = true
 
 [dependencies]
-afisharr-api = { workspace = true }
+afisharr-api.workspace = true
 afisharr-core = { workspace = true }
 afisharr-packs = { workspace = true }
 afisharr-plex = { workspace = true }
@@ -22,7 +22,10 @@ afisharr-render = { workspace = true }
 afisharr-sources = { workspace = true }
 
 anyhow = { workspace = true }
+axum.workspace = true
 clap = { workspace = true }
+mime_guess.workspace = true
+rust-embed.workspace = true
 sqlx = { workspace = true }
 tokio = { workspace = true, features = ["rt-multi-thread", "macros", "signal"] }
 toml = { workspace = true }
@@ -31,7 +34,13 @@ tracing-appender = { workspace = true }
 tracing-subscriber = { workspace = true }
 
 [dev-dependencies]
+axum.workspace = true
+futures-util.workspace = true
+reqwest = { workspace = true, features = ["cookies", "json", "query", "stream"] }
+serde_json.workspace = true
+sqlx = { workspace = true, features = ["sqlite", "runtime-tokio", "macros"] }
 tempfile = "3.27.0"
+tokio-util = { workspace = true }
 
 [lints]
 workspace = true

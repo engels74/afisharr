@@ -3,3 +3,6 @@ node_modules
 /.svelte-kit
 /dist
 /coverage
+# Vitest browser mode writes these on a failure, to look at once.
+__screenshots__
+.vitest-attachments

@@ -1,0 +1,86 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT id, run_id, at, level, scope, message\n         FROM job_run_events WHERE run_id = ?1 ORDER BY at, id",
+  "describe": {
+    "columns": [
+      {
+        "name": "id",
+        "ordinal": 0,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "job_run_events",
+            "name": "id"
+          }
+        }
+      },
+      {
+        "name": "run_id",
+        "ordinal": 1,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "job_run_events",
+            "name": "run_id"
+          }
+        }
+      },
+      {
+        "name": "at",
+        "ordinal": 2,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "job_run_events",
+            "name": "at"
+          }
+        }
+      },
+      {
+        "name": "level",
+        "ordinal": 3,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "job_run_events",
+            "name": "level"
+          }
+        }
+      },
+      {
+        "name": "scope",
+        "ordinal": 4,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "job_run_events",
+            "name": "scope"
+          }
+        }
+      },
+      {
+        "name": "message",
+        "ordinal": 5,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "job_run_events",
+            "name": "message"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      true,
+      false
+    ]
+  },
+  "hash": "462a11fdfae58b9a1514074f2833cc7636b39bc1ef4f4404243f22559d06cc7f"
+}

@@ -3,6 +3,8 @@
 
 //! The boot sequence itself.
 
+use std::sync::Arc;
+
 use afisharr_core::{
     backup,
     identifier::Id,
@@ -17,7 +19,7 @@ use anyhow::{Context, Result, bail};
 use tracing::{info, warn};
 
 use crate::{
-    configuration::DataPaths,
+    configuration::{Configuration, DataPaths},
     startup::{
         migrations::{self, RunMigrations},
         reconcile,
@@ -27,13 +29,20 @@ use crate::{
 /// Everything a started instance holds.
 pub struct Booted {
     /// The open database.
-    pub database: Database,
+    ///
+    /// Behind an `Arc` because the HTTP surface holds one too, and the write
+    /// actor inside it must be the same actor (D-024) rather than a second one
+    /// opened alongside.
+    pub database: Arc<Database>,
     /// This installation's identity.
     pub instance: Instance,
     /// The effective settings document.
     pub settings: Settings,
     /// The key that seals every credential.
-    pub secret_key: SecretKey,
+    ///
+    /// Behind an `Arc` because `SecretKey` is deliberately not `Clone` and the
+    /// HTTP surface needs the same key, not a copy of it.
+    pub secret_key: Arc<SecretKey>,
 }
 
 impl std::fmt::Debug for Booted {
@@ -57,7 +66,7 @@ impl std::fmt::Debug for Booted {
 /// Returns an error, and does not start, when the schema is newer than this
 /// binary knows, when the pre-migration backup cannot be written, or when the
 /// post-migration integrity checks report damage.
-pub async fn boot(paths: &DataPaths, configured: SettingsBody) -> Result<Booted> {
+pub async fn boot(paths: &DataPaths, configured: Configuration) -> Result<Booted> {
     let clock = SystemClock;
 
     let database = Database::open(paths.database())
@@ -72,7 +81,7 @@ pub async fn boot(paths: &DataPaths, configured: SettingsBody) -> Result<Booted>
     if state.pending.is_empty() {
         info!(schema_version = state.newest_known, "schema is up to date");
     } else {
-        migrate(paths, &database, &state, &configured, &clock).await?;
+        migrate(paths, &database, &state, &configured.effective, &clock).await?;
     }
 
     let settings = ensure_settings(&database, configured, &clock).await?;
@@ -94,10 +103,10 @@ pub async fn boot(paths: &DataPaths, configured: SettingsBody) -> Result<Booted>
     );
 
     Ok(Booted {
-        database,
+        database: Arc::new(database),
         instance,
         settings,
-        secret_key,
+        secret_key: Arc::new(secret_key),
     })
 }
 
@@ -169,28 +178,72 @@ async fn migrate(
     Ok(())
 }
 
-/// Seeds `settings` on a first start; afterwards the stored row is the truth.
+/// Seeds `settings` on a first start; afterwards the stored row is the truth,
+/// with the environment's deployment variables laid back over it.
+///
+/// The row alone is not enough, and the gap is not theoretical: `publicOrigin`,
+/// `trustProxy`, `bindAddress` and `port` describe how *this* deployment is
+/// reached, an operator states them in their compose file, and a row written on
+/// the day the container first booted cannot know any of it. Returning the row
+/// verbatim makes `AFISHARR_PUBLIC_ORIGIN` dead on every instance that has
+/// started once — so the operator who sets it is told to set the very thing
+/// they have set, and the hosted Plex sign-in stays unavailable with nothing
+/// explaining why.
+///
+/// Applied in memory rather than written back — on the first start as well as
+/// on every later one, which is why the seed is [`Configuration::seed`] and not
+/// the document this start is running with. The row is what the operator saved,
+/// and rewriting it on any boot would turn a compose variable into a silent
+/// edit of their saved document. Seeding the *effective* document was that edit
+/// in its worst form: the four deployment values went into the row on the day
+/// the container first booted, the overlay below only assigns where the
+/// variable is still set, and so a `AFISHARR_TRUST_PROXY` the operator later
+/// deleted from their compose file went on trusting the range it named, with no
+/// route on any surface that edits `settings` to take it back out (`I-SEC-1`).
+///
+/// That means a settings surface offering these fields has to show which of
+/// them the environment is currently holding — the same obligation `logging`
+/// and `backup.retainedPreMigration` already carry (`configuration::load`).
+///
+/// `apply_deployment_environment` and not the whole override list, because "in
+/// memory" only held for the fields nothing writes back. [`ensure_instance`]
+/// UPSERTs `instance.timezone`, `instance.locale` and `instance.device_name`
+/// from this document into a persisted row on every start, so laying those
+/// three over the stored settings *was* the silent edit this promises not to
+/// make: an `AFISHARR_TIMEZONE=UTC` left in a compose template reverted the
+/// operator's saved zone at every restart, the engine's day-aligned operators
+/// then ran in it, and the settings page went on showing the value they chose.
+/// Those three seed a first start through `configuration::load` and are the
+/// operator's afterwards.
 async fn ensure_settings(
     database: &Database,
-    configured: SettingsBody,
+    configured: Configuration,
     clock: &SystemClock,
 ) -> Result<Settings> {
-    if let Some(stored) = afisharr_core::settings::load(database.readers())
+    if let Some(mut stored) = afisharr_core::settings::load(database.readers())
         .await
         .context("reading settings")?
     {
+        crate::configuration::apply_deployment_environment(&mut stored.body)
+            .context("applying the environment over the stored settings")?;
         return Ok(stored);
     }
 
-    database
+    let mut seeded = database
         .writer()
         .submit(SaveSettings {
-            body: configured,
+            body: configured.seed,
             actor: None,
             at: clock.now(),
         })
         .await
-        .context("seeding settings on first start")
+        .context("seeding settings on first start")?;
+    // The same overlay the stored path gets, over the row that was just
+    // written. A first start has to run with the deployment variables too —
+    // it just must not keep them.
+    crate::configuration::apply_deployment_environment(&mut seeded.body)
+        .context("applying the environment over the seeded settings")?;
+    Ok(seeded)
 }
 
 /// Writes the instance row, minting its identifiers only on a first start.

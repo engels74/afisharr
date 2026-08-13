@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT INTO users (\n                 id, kind, username, email, plex_account_id, plex_uuid, avatar_url,\n                 is_admin, created_at, updated_at)\n             VALUES (?1, 'Plex', ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?8)\n             ON CONFLICT(plex_account_id) WHERE plex_account_id IS NOT NULL DO UPDATE SET\n                 username   = CASE\n                                  WHEN NOT EXISTS (\n                                      SELECT 1 FROM users AS other\n                                      WHERE other.username = excluded.username\n                                        AND other.id <> users.id)\n                                  THEN excluded.username\n                                  ELSE users.username\n                              END,\n                 email      = excluded.email,\n                 plex_uuid  = excluded.plex_uuid,\n                 avatar_url = excluded.avatar_url,\n                 updated_at = excluded.updated_at",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 8
+    },
+    "nullable": []
+  },
+  "hash": "89f05e178bedbad0d46623050b5b64d8529c44ee622d6dbb8ab3d6cdcb145198"
+}

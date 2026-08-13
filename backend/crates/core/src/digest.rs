@@ -10,7 +10,9 @@
 //! useless and the render cache miss for no reason.
 
 mod canonical_json;
+mod csp_hash;
 mod sha256;
 
 pub use canonical_json::canonicalize;
+pub use csp_hash::csp_source;
 pub use sha256::hex;

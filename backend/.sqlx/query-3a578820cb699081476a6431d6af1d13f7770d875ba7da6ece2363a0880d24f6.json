@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "UPDATE plex_pin_logins SET consumed_at = COALESCE(consumed_at, ?2), result = ?3\n             WHERE id = ?1 AND result IS NULL",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 3
+    },
+    "nullable": []
+  },
+  "hash": "3a578820cb699081476a6431d6af1d13f7770d875ba7da6ece2363a0880d24f6"
+}

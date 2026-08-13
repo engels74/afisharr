@@ -1,0 +1,15 @@
+-- SPDX-FileCopyrightText: 2026 Afisharr contributors
+-- SPDX-License-Identifier: AGPL-3.0-or-later
+--
+-- What a key may do, which until now was answered from whoever issued it.
+--
+-- Task 1.3 asks for scoped API keys. Without this column the guard read the
+-- creator's `users.is_admin` instead, so every key an administrator issued was
+-- an administrator on every route -- including the one that issues more keys.
+--
+-- Space-separated scope names, exactly as `ScopeSet::stored` writes them. The
+-- default is the empty string, which grants nothing: a key that predates this
+-- column was issued without anybody choosing what it could reach, and reading
+-- that silence as "everything" is the failure the column exists to end. Such a
+-- key stops working and is re-issued with the scopes its integration needs.
+ALTER TABLE api_keys ADD COLUMN scopes TEXT NOT NULL DEFAULT '';

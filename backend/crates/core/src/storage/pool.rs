@@ -6,6 +6,7 @@
 use std::{
     num::NonZeroUsize,
     path::{Path, PathBuf},
+    sync::Mutex,
     thread,
 };
 
@@ -31,7 +32,10 @@ pub struct Database {
     path: PathBuf,
     readers: SqlitePool,
     writer: WriteHandle,
-    writer_task: JoinHandle<()>,
+    // Taken once by `close`. Behind a `Mutex<Option<_>>` because the database
+    // is shared through an `Arc` — the HTTP surface holds one and so does the
+    // boot sequence — and awaiting a `JoinHandle` needs to own it.
+    writer_task: Mutex<Option<JoinHandle<()>>>,
 }
 
 impl Database {
@@ -81,7 +85,7 @@ impl Database {
             path,
             readers,
             writer,
-            writer_task,
+            writer_task: Mutex::new(Some(writer_task)),
         })
     }
 
@@ -104,10 +108,43 @@ impl Database {
     }
 
     /// Closes both halves, waiting for the write actor to finish its queue.
-    pub async fn close(self) {
+    ///
+    /// Takes `&self` and not `self`, because the database is shared through an
+    /// `Arc` — the HTTP surface holds one and so does the boot sequence — and
+    /// no holder can consume what the others still reference. That gives up a
+    /// guarantee the old signature made for free: with `self`, "a query after
+    /// close" was unrepresentable. Here it is a rule instead, and the rule is
+    /// that the server drains first. `cli::start` is the one place that keeps
+    /// it, and it keeps it as far as a shutdown can be kept: `serving.run`
+    /// returns when the graceful drain finishes, or when the drain deadline
+    /// elapses, and it returns only after nothing new can be accepted.
+    ///
+    /// The deadline is the case worth stating plainly, because it is the one
+    /// the doc used to claim away. `docker stop` kills the container ten
+    /// seconds after `SIGTERM`, so the drain is bounded — a response this
+    /// instance cannot end from here must not cost the whole shutdown. When
+    /// that bound is reached, a handler still running is still holding this
+    /// database: its next read answers `PoolClosed` and its next write
+    /// `WriterStopped`, so the operator's last request answers 500 rather than
+    /// the listing or the session it was about to produce. `listener.rs` logs
+    /// that it happened, naming the window, which is the only honest report
+    /// available — the alternative is a shutdown the orchestrator kills instead.
+    ///
+    /// Take-once rather than merely harmless to repeat: the first caller takes
+    /// the write actor's handle and does the work, and a second returns without
+    /// closing a pool the first is still draining.
+    pub async fn close(&self) {
+        let task = self
+            .writer_task
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .take();
+        let Some(task) = task else {
+            return;
+        };
         self.readers.close().await;
         self.writer.shutdown().await;
-        drop(self.writer_task.await);
+        drop(task.await);
     }
 }
 

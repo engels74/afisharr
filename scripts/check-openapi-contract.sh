@@ -10,10 +10,9 @@
 # edit. This script is what makes "the client was regenerated in this PR" a
 # machine-checked fact rather than a reviewer's trust.
 #
-# There is no OpenAPI surface yet — the HTTP routes arrive with the API crate —
-# so today the script asserts that, and fails the moment the surface appears
-# without a generator to keep it honest. It reports its own obsolescence rather
-# than passing quietly through the change that makes it wrong.
+# It regenerates from the current annotations and diffs against what is
+# committed. A non-empty diff fails the lane, and the fix is to run
+# `scripts/generate-openapi-client.sh` and commit what it writes.
 
 set -euo pipefail
 
@@ -34,8 +33,10 @@ if ! grep -q '^utoipa' backend/crates/api/Cargo.toml 2>/dev/null; then
 	exit 0
 fi
 
-echo "backend/crates/api now declares utoipa, so this lane must regenerate the" >&2
-echo "client and diff it against the committed one. Extend" >&2
-echo "scripts/check-openapi-contract.sh in the change that introduced the OpenAPI" >&2
-echo "surface (§A.5, §24.5)." >&2
-exit 1
+if [ ! -e "$generated_client/schema.d.ts" ]; then
+	echo "backend/crates/api declares utoipa but no client is committed at" >&2
+	echo "$generated_client. Run scripts/generate-openapi-client.sh (§24.5)." >&2
+	exit 1
+fi
+
+exec "$root/scripts/generate-openapi-client.sh" --check

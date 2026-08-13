@@ -355,3 +355,141 @@ async fn a_retention_of_zero_still_leaves_this_migration_its_backup() {
         "a forward-only migration may never run with nothing behind it (I-DATA-8)"
     );
 }
+
+/// A deployment variable has to survive the first boot, or it does nothing.
+///
+/// The failure this pins: `ensure_settings` returned the stored `settings` row
+/// verbatim, so every `AFISHARR_*` deployment variable was read exactly once —
+/// on the very first start a container ever made — and ignored on every start
+/// after it. An operator upgrading an existing instance, adding
+/// `AFISHARR_PUBLIC_ORIGIN` to their compose file and restarting, was told by
+/// the hosted Plex sign-in to set the setting they had just set;
+/// `AFISHARR_TRUST_PROXY` behind a reverse proxy was ignored the same way, so
+/// every request kept being attributed to the proxy's own address and twenty
+/// failed sign-ins from any one visitor rate-limited the whole instance.
+///
+/// Driven through the real binary and a real socket, because the claim is about
+/// what a container operator gets: the port is the observable that no library
+/// call can fake, and it answers only if the environment beat the stored row.
+#[tokio::test]
+async fn an_environment_override_is_honoured_on_every_start_and_not_only_the_first() {
+    let instance = TempInstance::new();
+
+    // A first start, which is what writes the `settings` row. It stores the
+    // default port, and from here on that row is the one being overridden.
+    instance.boot().await.database.close().await;
+
+    let port = free_port();
+    let mut child = std::process::Command::new(env!("CARGO_BIN_EXE_afisharr"))
+        .arg("start")
+        .env("AFISHARR_DATA_DIR", instance.paths().root())
+        .env("AFISHARR_BIND_ADDRESS", "127.0.0.1")
+        .env("AFISHARR_PORT", port.to_string())
+        .spawn()
+        .expect("the afisharr binary must start");
+
+    let answered = wait_for_health(port).await;
+
+    let _ = child.kill();
+    let _ = child.wait();
+
+    assert!(
+        answered,
+        "nothing answered on port {port}: the stored settings row won over \
+         AFISHARR_PORT, so every deployment variable is dead after the first boot"
+    );
+}
+
+/// A deployment variable may not edit what the operator saved.
+///
+/// The other half of the rule above, and the half that made the promise false.
+/// `ensure_settings` laid the *whole* override list back over the stored row,
+/// and three of those overrides are not deployment shape at all: `timezone`,
+/// `locale` and `device_name` are written into the persisted `instance` row by
+/// `ensure_instance` on every start. So an `AFISHARR_TIMEZONE=UTC` left in a
+/// compose template — a common default — reverted the operator's saved zone at
+/// every restart, the engine's day-aligned date operators then ran in it, and
+/// the settings page went on showing the value they had chosen. The same path
+/// renamed the instance in their plex.tv device list.
+///
+/// Driven through the real binary, because the claim is about what a restart
+/// with that variable still set actually leaves behind in the database.
+#[tokio::test]
+async fn an_environment_seed_does_not_revert_an_instance_field_the_operator_saved() {
+    let instance = TempInstance::new();
+
+    // The saved state: a first start seeds `settings` and `instance` with a
+    // zone that is not the default, standing in for the operator choosing one.
+    let mut saved = SettingsBody::default();
+    saved.instance.timezone = "Europe/Copenhagen".to_owned();
+    let booted = instance.boot_with(saved).await;
+    assert_eq!(booted.instance.timezone, "Europe/Copenhagen");
+    booted.database.close().await;
+
+    let port = free_port();
+    let mut child = std::process::Command::new(env!("CARGO_BIN_EXE_afisharr"))
+        .arg("start")
+        .env("AFISHARR_DATA_DIR", instance.paths().root())
+        .env("AFISHARR_BIND_ADDRESS", "127.0.0.1")
+        .env("AFISHARR_PORT", port.to_string())
+        .env("AFISHARR_TIMEZONE", "UTC")
+        .spawn()
+        .expect("the afisharr binary must start");
+
+    let answered = wait_for_health(port).await;
+
+    let _ = child.kill();
+    let _ = child.wait();
+    assert!(answered, "nothing answered on port {port}");
+
+    // Read out of the file rather than through another boot. A boot rewrites
+    // the `instance` row from the stored settings, so it would repair exactly
+    // the damage this is looking for and the assertion could never fail.
+    let opened = sqlx::SqlitePool::connect(&format!(
+        "sqlite://{}?mode=ro",
+        instance.paths().database().display()
+    ))
+    .await
+    .expect("the database must open");
+    let timezone: String = sqlx::query_scalar("SELECT timezone FROM instance WHERE id = 1")
+        .fetch_one(&opened)
+        .await
+        .expect("the instance row must exist");
+    opened.close().await;
+
+    assert_eq!(
+        timezone, "Europe/Copenhagen",
+        "a compose variable overwrote a persisted field the operator saved"
+    );
+}
+
+/// A port nothing is listening on, as far as the operating system knows.
+fn free_port() -> u16 {
+    let listener =
+        std::net::TcpListener::bind("127.0.0.1:0").expect("binding an ephemeral port must succeed");
+    let port = listener
+        .local_addr()
+        .expect("a bound listener has an address")
+        .port();
+    drop(listener);
+    port
+}
+
+/// Whether the health route answers on `port` within a bounded wait.
+///
+/// Polled rather than slept on: a fixed sleep is either longer than the test
+/// needs on every run or shorter than it needs on a loaded machine, and the
+/// second of those is a test that fails for a reason nobody can reproduce.
+async fn wait_for_health(port: u16) -> bool {
+    let client = reqwest::Client::new();
+    let url = format!("http://127.0.0.1:{port}/api/health");
+    for _ in 0..100 {
+        if let Ok(response) = client.get(&url).send().await
+            && response.status().is_success()
+        {
+            return true;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+    }
+    false
+}

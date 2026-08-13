@@ -22,18 +22,59 @@ afisharr-render = { path = "crates/render", version = "0.1.0" }
 afisharr-sources = { path = "crates/sources", version = "0.1.0" }
 
 anyhow = "1.0"
+argon2 = "0.5.3"
+axum = "0.8.9"
+axum-extra = { version = "0.12.6", features = ["cookie"] }
+base64 = "0.23.1"
 chacha20poly1305 = "0.11"
+# The filesystem jail. `I-SEC-3` is a boundary a path string cannot hold: a
+# directory checked by path and reopened by path is two resolutions with a gap
+# between them, and anything that can write inside an enabled root can swap a
+# component in that gap. cap-std resolves every component against an open
+# directory handle instead — `openat2(RESOLVE_BENEATH)` on Linux, the same rule
+# hand-rolled on macOS and Windows — so the check and the open are one act.
+cap-std = "4.0.2"
+# The cookie crate axum-extra 0.12 builds on, named directly so `Max-Age` can be
+# expressed in the `time::Duration` its API takes. Pinned to the same minor
+# version: two copies in the graph would be two `Cookie` types that do not
+# convert.
+cookie = "0.18.2"
 clap = { version = "4.6", features = ["derive"] }
+futures-util = "0.3.33"
 getrandom = "0.4"
 hex = "0.4"
+ipnet = "2.12.1"
+mime_guess = "2.0.5"
+# `Uri::path()` hands back the target as the browser wrote it, still
+# percent-encoded, and the embedded bundle is keyed on the literal filenames
+# `adapter-static` wrote. Decoding is the only thing that makes the two agree.
+# Already in the graph under `url` and `reqwest`; named here so the one place
+# that depends on it says so.
+percent-encoding = "2.3.2"
+# rustls rather than the platform's TLS: PRD §21.5 supports Linux, macOS, and
+# Windows from one build, and a native-tls dependency makes the container image
+# carry an OpenSSL the base layer may not ship.
+reqwest = { version = "0.13.4", default-features = false, features = [
+  "json",
+  "rustls",
+] }
 # rusqlite is present for exactly one thing: SQLite's online backup API, which
 # PRD §19.3 requires instead of a file copy and which sqlx does not expose
 # without raw FFI (forbidden by `unsafe_code = "forbid"`). Pinned to the release
 # that shares `libsqlite3-sys` 0.35 with sqlx 0.9 — `links` permits only one
 # build of the C library in the graph.
 rusqlite = { version = "0.37", features = ["backup"] }
+# `debug-embed` so a debug build serves the same bytes a release build does.
+# Without it rust-embed reads `frontend/build` off disk in debug, and the one
+# thing that must not differ between the two is the document the CSP hash is
+# computed from (§21.4.4).
+rust-embed = { version = "8.12.0", features = [
+  "debug-embed",
+  "interpolate-folder-path",
+] }
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.151"
+serde_urlencoded = "0.7.1"
 sha2 = "0.11"
 sqlx = { version = "0.9", default-features = false, features = [
   "macros",
@@ -41,13 +82,27 @@ sqlx = { version = "0.9", default-features = false, features = [
   "runtime-tokio",
   "sqlite",
 ] }
+subtle = "2.6.1"
 thiserror = "2.0"
-tokio = { version = "1.52", features = ["macros", "rt-multi-thread", "sync"] }
+tokio = { version = "1.52", features = [
+  "macros",
+  "rt-multi-thread",
+  "sync",
+  "time",
+] }
+# `time` for the stream's heartbeat: the browser's `EventSource` never
+# dispatches an SSE comment to a listener, so the heartbeat has to be a real
+# event on a real interval rather than a keep-alive comment.
+tokio-stream = { version = "0.1.19", features = ["sync", "time"] }
+tokio-util = { version = "0.7.19", features = ["io"] }
 toml = "1.1"
+tower = "0.5.3"
 tracing = "0.1"
 tracing-appender = "0.2"
 tracing-subscriber = { version = "0.3.23", features = ["env-filter", "json"] }
 ulid = "3.0"
+url = "2.5.8"
+utoipa = { version = "5.5.0", features = ["axum_extras"] }
 
 [workspace.lints.rust]
 unsafe_code = "forbid"

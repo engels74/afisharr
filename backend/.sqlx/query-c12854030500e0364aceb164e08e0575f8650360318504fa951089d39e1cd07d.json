@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "UPDATE users SET password_hash = ?2, updated_at = ?3\n             WHERE id = ?1 AND kind = 'Local' AND disabled_at IS NULL\n               AND password_hash = ?4",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 4
+    },
+    "nullable": []
+  },
+  "hash": "c12854030500e0364aceb164e08e0575f8650360318504fa951089d39e1cd07d"
+}

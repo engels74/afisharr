@@ -322,12 +322,12 @@ the eight-step journey on top of it.
 - **Build:** the HTTP surface's spine — routing, a structured error model, and the health route.
 - **Where:** `backend/crates/api`.
 - **Subtasks:**
-  - [ ] 1. Stand up Axum with a router that groups routes by the six primary destinations plus settings.
-  - [ ] 2. Define one structured error type carrying a JSON pointer, expected-versus-actual, and an HTTP
+  - [x] 1. Stand up Axum with a router that groups routes by the six primary destinations plus settings.
+  - [x] 2. Define one structured error type carrying a JSON pointer, expected-versus-actual, and an HTTP
      status mapping, so every error surface downstream reuses it rather than inventing shapes.
-  - [ ] 3. Implement the health route with no authentication requirement.
-  - [ ] 4. Wire OpenAPI generation via utoipa and the generated TypeScript client build step.
-- [ ] **Done when:** the health route returns 200 with no credentials; every other route returns the one
+  - [x] 3. Implement the health route with no authentication requirement.
+  - [x] 4. Wire OpenAPI generation via utoipa and the generated TypeScript client build step.
+- [x] **Done when:** the health route returns 200 with no credentials; every other route returns the one
   structured error shape on failure; and the generated TypeScript client builds from the OpenAPI
   document with zero manual edits.
 
@@ -336,15 +336,15 @@ the eight-step journey on top of it.
 - **Where:** `backend/crates/api` (routes); `backend/crates/core` (`users`, `plex_pin_logins`); `backend/crates/plex` (the
   plex.tv PIN and OAuth calls).
 - **Subtasks:**
-  - [ ] 1. Implement local login: Argon2id password hashing at PHC-string parameters tuned to roughly 250 ms
+  - [x] 1. Implement local login: Argon2id password hashing at PHC-string parameters tuned to roughly 250 ms
      on the reference machine.
-  - [ ] 2. Implement the first-run rule: no default credentials, nothing reachable until the admin account
+  - [x] 2. Implement the first-run rule: no default credentials, nothing reachable until the admin account
      exists, and no admin account creatable without the setup claim built in Task 1.12.
-  - [ ] 3. Implement the Plex PIN login flow: create a pin resource, present the code, poll until a token
+  - [x] 3. Implement the Plex PIN login flow: create a pin resource, present the code, poll until a token
      appears or the pin expires, checking `client_identifier` against the instance value.
-  - [ ] 4. Implement the Plex OAuth variant of the same flow, sharing the polling machinery.
-  - [ ] 5. Store the returned token in `secrets`, never in `plex_pin_logins`.
-- [ ] **Done when:** a fresh instance rejects every route except health and the claim endpoint, and
+  - [x] 4. Implement the Plex OAuth variant of the same flow, sharing the polling machinery.
+  - [x] 5. Store the returned token in `secrets`, never in `plex_pin_logins`.
+- [x] **Done when:** a fresh instance rejects every route except health and the claim endpoint, and
   rejects first-run admin creation itself without an active claim; a completed PIN or OAuth flow
   produces a working session; and a pin issued under a mismatched `client_identifier` fails visibly
   rather than yielding a token that silently does not work.
@@ -353,15 +353,15 @@ the eight-step journey on top of it.
 - **Build:** session lifecycle and revocable, scoped API keys.
 - **Where:** `backend/crates/api`; `backend/crates/core` (`sessions`, `api_keys`).
 - **Subtasks:**
-  - [ ] 1. Store sessions by the SHA-256 of the cookie value, never the value itself; set `Secure`,
+  - [x] 1. Store sessions by the SHA-256 of the cookie value, never the value itself; set `Secure`,
      `HttpOnly`, `SameSite=Lax`.
-  - [ ] 2. Implement a 7-day idle timeout sliding on `last_seen_at` and a 30-day absolute timeout with no
+  - [x] 2. Implement a 7-day idle timeout sliding on `last_seen_at` and a 30-day absolute timeout with no
      extension.
-  - [ ] 3. Rotate the session id on privilege change and on password change; revoke every session for a user
+  - [x] 3. Rotate the session id on privilege change and on password change; revoke every session for a user
      on password change, with individual revocation available from Settings.
-  - [ ] 4. Implement API keys hashed at rest, individually revocable, showing the plaintext once at creation
+  - [x] 4. Implement API keys hashed at rest, individually revocable, showing the plaintext once at creation
      and a last-used timestamp thereafter.
-- [ ] **Done when:** a database read never yields a working session id or API key in plaintext; a password
+- [x] **Done when:** a database read never yields a working session id or API key in plaintext; a password
   change revokes every existing session for that user; and a revoked API key is rejected on its next
   use.
 
@@ -369,14 +369,14 @@ the eight-step journey on top of it.
 - **Build:** per-IP and per-account rate limiting that cannot be defeated by a forged forwarded header.
 - **Where:** `backend/crates/api`.
 - **Subtasks:**
-  - [ ] 1. Implement the limit table: login per account (5 failures / 15 min, exponential lockout to 24 h),
+  - [x] 1. Implement the limit table: login per account (5 failures / 15 min, exponential lockout to 24 h),
      login per IP (20 failures / 15 min), authenticated API (600 req/min), provider-calling endpoints
      (60 req/min).
-  - [ ] 2. Implement `trustProxy` as a list of trusted proxy addresses or CIDR ranges, never a boolean.
-  - [ ] 3. Honour `X-Forwarded-For` only when the immediate peer is in that list; use the peer address
+  - [x] 2. Implement `trustProxy` as a list of trusted proxy addresses or CIDR ranges, never a boolean.
+  - [x] 3. Honour `X-Forwarded-For` only when the immediate peer is in that list; use the peer address
      otherwise.
-  - [ ] 4. Return 429 with `Retry-After` on exceed.
-- [ ] **Done when:** `I-SEC-1` passes — a request carrying a forged `X-Forwarded-For` from a peer outside
+  - [x] 4. Return 429 with `Retry-After` on exceed.
+- [x] **Done when:** `I-SEC-1` passes — a request carrying a forged `X-Forwarded-For` from a peer outside
   the trusted list is rate-limited against its real address, not the forged one, and the same request
   from a trusted proxy honours the forwarded value.
 
@@ -384,14 +384,14 @@ the eight-step journey on top of it.
 - **Build:** the fixed response-header set and always-on CSRF protection.
 - **Where:** `backend/crates/api` (middleware).
 - **Subtasks:**
-  - [ ] 1. Apply `Strict-Transport-Security`, `Content-Security-Policy` (`default-src 'self'`, no inline
+  - [x] 1. Apply `Strict-Transport-Security`, `Content-Security-Policy` (`default-src 'self'`, no inline
      script, `frame-ancestors 'none'`), `X-Content-Type-Options: nosniff`, `Referrer-Policy:
      no-referrer`, and a `Permissions-Policy` denying camera, microphone, and geolocation — as
      middleware, not per-handler.
-  - [ ] 2. Emit `Strict-Transport-Security` only over HTTPS, trusting the forwarded-protocol header only from
+  - [x] 2. Emit `Strict-Transport-Security` only over HTTPS, trusting the forwarded-protocol header only from
      an address on the trusted-proxy list.
-  - [ ] 3. Implement CSRF protection with no toggle, per D-002-class decisions on this surface.
-- [ ] **Done when:** `I-SEC-2` passes — every route, including ones added after this task, carries the full
+  - [x] 3. Implement CSRF protection with no toggle, per D-002-class decisions on this surface.
+- [x] **Done when:** `I-SEC-2` passes — every route, including ones added after this task, carries the full
   header set on every response, verified by a test that asserts headers at the middleware layer rather
   than per-route.
 
@@ -399,12 +399,12 @@ the eight-step journey on top of it.
 - **Build:** the jailed browser used by the asset picker and placeholder roots.
 - **Where:** `backend/crates/api` (routes); `backend/crates/core` (path canonicalisation and containment check).
 - **Subtasks:**
-  - [ ] 1. Canonicalise every requested path and resolve symbolic links before checking containment within
+  - [x] 1. Canonicalise every requested path and resolve symbolic links before checking containment within
      an enabled root — never before.
-  - [ ] 2. Refuse traversal sequences, absolute paths, and links resolving outside a root with one message
+  - [x] 2. Refuse traversal sequences, absolute paths, and links resolving outside a root with one message
      naming the root, never the resolved path.
-  - [ ] 3. Apply the same containment rule to placeholder writes against `placeholderRoots`.
-- [ ] **Done when:** `I-SEC-3` passes — traversal sequences, absolute paths, and symlinks pointing outside
+  - [x] 3. Apply the same containment rule to placeholder writes against `placeholderRoots`.
+- [x] **Done when:** `I-SEC-3` passes — traversal sequences, absolute paths, and symlinks pointing outside
   a configured root are all refused with the root named in the message; `I-SEC-4`'s placeholder-write
   path reuses the identical containment function rather than a second implementation.
 
@@ -413,11 +413,11 @@ the eight-step journey on top of it.
   production.
 - **Where:** `frontend/`; `backend/crates/afisharr` (embedding).
 - **Subtasks:**
-  - [ ] 1. Configure `adapter-static` prerendering with no server load functions, form actions, server
+  - [x] 1. Configure `adapter-static` prerendering with no server load functions, form actions, server
      hooks, or server-side database access — these are structurally unavailable on this stack.
-  - [ ] 2. Embed the built SPA into the `afisharr` binary so the release artefact is one file.
-  - [ ] 3. Wire the generated OpenAPI TypeScript client as the SPA's only data-access path.
-- [ ] **Done when:** the release binary serves the SPA with no separate static-file directory required at
+  - [x] 2. Embed the built SPA into the `afisharr` binary so the release artefact is one file.
+  - [x] 3. Wire the generated OpenAPI TypeScript client as the SPA's only data-access path.
+- [x] **Done when:** the release binary serves the SPA with no separate static-file directory required at
   runtime, and every SPA data call goes through the generated typed client.
 
 ### Task 1.8 The nine-state component vocabulary
@@ -425,17 +425,17 @@ the eight-step journey on top of it.
   the API already distinguishes.
 - **Where:** `frontend/` (shared component library).
 - **Subtasks:**
-  - [ ] 1. Build one component each for Loading, Empty, Error, Frozen, Degraded, Stale, Pending, Blocked,
+  - [x] 1. Build one component each for Loading, Empty, Error, Frozen, Degraded, Stale, Pending, Blocked,
      and Non-convergent, each independently importable.
-  - [ ] 2. Implement the Loading sub-policy: nothing under 300 ms, skeleton from 300 ms to ~3 s, progress
+  - [x] 2. Implement the Loading sub-policy: nothing under 300 ms, skeleton from 300 ms to ~3 s, progress
      text beyond ~3 s, SSE progress for long operations, partial data rendering as it arrives.
-  - [ ] 3. Implement the three Empty sub-kinds (nothing created yet, nothing matched, nothing yet but
+  - [x] 3. Implement the three Empty sub-kinds (nothing created yet, nothing matched, nothing yet but
      pending) as distinct treatments, never conflated with a failed fetch.
-  - [ ] 4. Implement destructive-action affordances: preview with named counts, confirmation proportional to
+  - [x] 4. Implement destructive-action affordances: preview with named counts, confirmation proportional to
      consequence, an afterward report — never a default, focused, or single-step destructive action.
-  - [ ] 5. Add a lint rule that fails the build if a page branches on an HTTP status code to choose a display
+  - [x] 5. Add a lint rule that fails the build if a page branches on an HTTP status code to choose a display
      state instead of reading the state the API returned alongside the data.
-- [ ] **Done when:** `I-UX-1`, `I-UX-2`, and `I-UX-3` pass — every data-bearing page renders one of the nine
+- [x] **Done when:** `I-UX-1`, `I-UX-2`, and `I-UX-3` pass — every data-bearing page renders one of the nine
   states from what the API returned, no page infers a state from response shape or timing, and the
   lint rule catches an attempt to do so.
 
@@ -444,12 +444,12 @@ the eight-step journey on top of it.
   after auth.
 - **Where:** `backend/crates/api` (SSE endpoint); `frontend/` (client, reconnection logic).
 - **Subtasks:**
-  - [ ] 1. Implement one connection per client, multiplexed by topic, established after authentication.
-  - [ ] 2. Implement backoff reconnection; on reconnect, refetch state rather than replay missed events.
-  - [ ] 3. Implement a small, non-modal disconnection indicator distinct from every other state.
-  - [ ] 4. Ensure every SSE-fed surface is correct after a plain page load with no stream connected at all —
+  - [x] 1. Implement one connection per client, multiplexed by topic, established after authentication.
+  - [x] 2. Implement backoff reconnection; on reconnect, refetch state rather than replay missed events.
+  - [x] 3. Implement a small, non-modal disconnection indicator distinct from every other state.
+  - [x] 4. Ensure every SSE-fed surface is correct after a plain page load with no stream connected at all —
      the stream accelerates, it is never the only source of truth.
-- [ ] **Done when:** `I-UX-9` passes — with SSE blocked, every surface the stream feeds still renders
+- [x] **Done when:** `I-UX-9` passes — with SSE blocked, every surface the stream feeds still renders
   correct data on load and the disconnection is visible; a client that misses events during a
   disconnect and then reconnects ends up identical to a client that loaded the page fresh, verified by
   a reconnect-and-refetch test; the disconnection indicator appears within one missed heartbeat.
@@ -458,11 +458,11 @@ the eight-step journey on top of it.
 - **Build:** the message-catalogue framework, shipping English, with interpolation and plural rules.
 - **Where:** `frontend/` (catalogue, lint rule); `backend/crates/core` (locale as a data concept for formatters).
 - **Subtasks:**
-  - [ ] 1. Wire a message-catalogue library with interpolation and plural-rule support.
-  - [ ] 2. Add a lint rule, active from the first commit, that fails on a hard-coded user-facing string.
-  - [ ] 3. Thread locale through as a first-class setting the way the formatter registry will expect it in
+  - [x] 1. Wire a message-catalogue library with interpolation and plural-rule support.
+  - [x] 2. Add a lint rule, active from the first commit, that fails on a hard-coded user-facing string.
+  - [x] 3. Thread locale through as a first-class setting the way the formatter registry will expect it in
      Phase 3.
-- [ ] **Done when:** `I-UX-7` passes — the lint rule rejects a hard-coded user-facing string at commit time,
+- [x] **Done when:** `I-UX-7` passes — the lint rule rejects a hard-coded user-facing string at commit time,
   and English ships as a complete catalogue with no untranslated-key fallback needed anywhere in the
   shell.
 
@@ -471,17 +471,17 @@ the eight-step journey on top of it.
   first-run and login flows that make the shell reachable.
 - **Where:** `frontend/src/routes`.
 - **Subtasks:**
-  - [ ] 1. Route Dashboard, Collections, Design, Home Screen, Lifecycle, and Doctor, plus a Settings area
+  - [x] 1. Route Dashboard, Collections, Design, Home Screen, Lifecycle, and Doctor, plus a Settings area
      with its sub-page navigation, organised around the object the operator is thinking about rather
      than the owning subsystem.
-  - [ ] 2. Build the claim page — the token field, the recovery affordance once an admin exists, and the
+  - [x] 2. Build the claim page — the token field, the recovery affordance once an admin exists, and the
      Blocked treatment carrying the retry time — against the endpoints from Task 1.12.
-  - [ ] 3. Build the first-run admin-account creation page, reachable only with an active claim and only
+  - [x] 3. Build the first-run admin-account creation page, reachable only with an active claim and only
      when no admin exists.
-  - [ ] 4. Build the login page covering both local credentials and the Plex PIN/OAuth flow from Task 1.2.
-  - [ ] 5. Render every shell page in the "nothing created yet" Empty treatment, since no page carries real
+  - [x] 4. Build the login page covering both local credentials and the Plex PIN/OAuth flow from Task 1.2.
+  - [x] 5. Render every shell page in the "nothing created yet" Empty treatment, since no page carries real
      data until a later phase populates it.
-- [ ] **Done when:** a fresh instance boots directly to the claim page, refuses every other route until
+- [x] **Done when:** a fresh instance boots directly to the claim page, refuses every other route until
   the instance is claimed and an admin exists, and every one of the six destinations plus Settings
   resolves to a routed page rather than a 404.
 
@@ -492,35 +492,35 @@ the eight-step journey on top of it.
 - **Where:** `backend/crates/afisharr` (banner, token state); `backend/crates/api` (claim, recovery, and the claim
   gate); `backend/crates/core` (`setup:claim` lease, derived resume step).
 - **Subtasks:**
-  - [ ] 1. Implement token generation: three four-character segments from a 36-character lowercase
+  - [x] 1. Implement token generation: three four-character segments from a 36-character lowercase
      alphanumeric alphabet, drawn from the OS CSPRNG with rejection sampling — discard and redraw any
      byte at or above 252 rather than reducing modulo 36, or the 62-bit claim is false.
-  - [ ] 2. Hold the token in process memory with a 15-minute expiry, replacing any predecessor. Assert by
+  - [x] 2. Hold the token in process memory with a 15-minute expiry, replacing any predecessor. Assert by
      test that it reaches no table, no response body, and no line of `logs/afisharr.log`.
-  - [ ] 3. Print the banner from the startup sequence built in Task 0.3, only when
+  - [x] 3. Print the banner from the startup sequence built in Task 0.3, only when
      `instance.setup_completed_at` is `NULL`: the token, the setup URL composed from the configured
      host and port, and the three events that end the token's life.
-  - [ ] 4. Implement validation as check-and-keep, not consume: exists, unexpired, length matches, then a
+  - [x] 4. Implement validation as check-and-keep, not consume: exists, unexpired, length matches, then a
      constant-time comparison. One error response covers wrong, expired, malformed, and empty.
-  - [ ] 5. Implement the claim as a `setup:claim` lease whose `owner` is the SHA-256 of the cookie value,
+  - [x] 5. Implement the claim as a `setup:claim` lease whose `owner` is the SHA-256 of the cookie value,
      with a 10-minute expiry, and set `afisharr_setup_claim` with `HttpOnly`, `Secure` over HTTPS,
      `SameSite=Lax`, `Path=/api/setup`, and `Max-Age=600`.
-  - [ ] 6. Implement the claim gate as middleware over every setup endpoint: renew on success, refuse with
+  - [x] 6. Implement the claim gate as middleware over every setup endpoint: renew on success, refuse with
      the Blocked response and the claim's expiry time otherwise. Renewal moves both the lease expiry
      and the cookie's `Max-Age`.
-  - [ ] 7. Order the claim endpoint as: holder renews and succeeds; held-elsewhere returns Blocked before
+  - [x] 7. Order the claim endpoint as: holder renews and succeeds; held-elsewhere returns Blocked before
      the rate limiter is consulted; then the limiter from Task 1.4 at 5 attempts per IP per 15
      minutes; then the token comparison.
-  - [ ] 8. Implement recovery: admin credentials mint a claim when setup is incomplete, an admin exists,
+  - [x] 8. Implement recovery: admin credentials mint a claim when setup is incomplete, an admin exists,
      and no claim is active. Verify the password with the Argon2id path from Task 1.2; return the
      same response for an unknown username and a wrong password.
-  - [ ] 9. Implement the derived resume step from the table in PRD §7.14, reading `instance.setup_acked_steps`
+  - [x] 9. Implement the derived resume step from the table in PRD §7.14, reading `instance.setup_acked_steps`
      for the two acknowledgement-only steps, and reject any client-supplied step index outright.
-  - [ ] 10. Append one `job_run_events` row per setup step under a single `Api`-triggered `job_runs` row —
+  - [x] 10. Append one `job_run_events` row per setup step under a single `Api`-triggered `job_runs` row —
       not the lifecycle audit record, which PRD §21.4.8 reserves for what the engine did.
-  - [ ] 11. Implement release: completing setup writes `instance.setup_completed_at`, deletes the lease,
+  - [x] 11. Implement release: completing setup writes `instance.setup_completed_at`, deletes the lease,
       clears the in-memory token, and expires the cookie. The setup endpoints answer 404 thereafter.
-- [ ] **Done when:** `I-SEC-8` passes — every wizard endpoint refuses without a claim on a fresh
+- [x] **Done when:** `I-SEC-8` passes — every wizard endpoint refuses without a claim on a fresh
   instance; wrong, expired, malformed, and empty tokens are indistinguishable in the response; a
   second cookie's claim attempt against a held claim returns the retry time and changes no state; the
   token appears in no table, no response, and no log file; and a restart with setup incomplete

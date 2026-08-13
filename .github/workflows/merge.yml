@@ -67,12 +67,23 @@ jobs:
   rust-test:
     name: rust-test
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 15
     defaults:
       run:
         working-directory: backend
+    env:
+      # Turns the embedded-interface tests' "no SPA in this build" skip into a
+      # failure. Without it a CI job that forgot to build the frontend would
+      # report green while never exercising the one-file claim at all.
+      AFISHARR_REQUIRE_SPA: "1"
     steps:
       - uses: actions/checkout@v5
+      # The SPA is embedded at compile time, so it has to exist before cargo
+      # builds anything. This is what makes the embedded-interface tests assert
+      # rather than skip.
+      - uses: ./.github/actions/frontend
+      - run: bun run --cwd frontend build
+        working-directory: .
       - uses: ./.github/actions/rust
         with:
           tools: nextest
@@ -178,6 +189,19 @@ jobs:
       - uses: ./.github/actions/frontend
       - run: bun run --cwd frontend lint
 
+  frontend-interface-rules:
+    name: frontend-interface-rules
+    runs-on: ubuntu-latest
+    needs: frontend-install
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v5
+      - uses: ./.github/actions/frontend
+      # The two rules no general linter can see: no hard-coded user-facing
+      # string (I-UX-7), and no display state inferred from an HTTP status or
+      # an array length (I-UX-2).
+      - run: bun run --cwd frontend lint:interface
+
   frontend-typecheck:
     name: frontend-typecheck
     runs-on: ubuntu-latest
@@ -227,9 +251,13 @@ jobs:
   contract-check:
     name: contract-check
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v5
+      # Both toolchains: the document is printed by the compiled binary, and
+      # the client is generated from it with bun.
+      - uses: ./.github/actions/rust
+      - uses: ./.github/actions/frontend
       - run: ./scripts/check-openapi-contract.sh
 
   nightly-status:
@@ -269,6 +297,7 @@ jobs:
       - structure
       - frontend-install
       - frontend-format-lint
+      - frontend-interface-rules
       - frontend-typecheck
       - frontend-test-unit
       - frontend-test-browser

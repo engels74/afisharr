@@ -1,0 +1,21 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT 1 FROM users\n                 WHERE id = ?1 AND kind = 'Local' AND disabled_at IS NULL",
+  "describe": {
+    "columns": [
+      {
+        "name": "1",
+        "ordinal": 0,
+        "type_info": "Integer",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "06a21d858a19b42b9ae6a99dcfdaf9212d4eebbd3651f7a1023a4e926f177f26"
+}

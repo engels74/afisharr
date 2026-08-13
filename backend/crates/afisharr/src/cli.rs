@@ -4,6 +4,7 @@
 //! The command line.
 
 mod db;
+mod openapi;
 mod start;
 
 use anyhow::Result;
@@ -28,6 +29,8 @@ enum Command {
         #[command(subcommand)]
         command: db::DbCommand,
     },
+    /// Print the `OpenAPI` document the `TypeScript` client is generated from.
+    Openapi,
 }
 
 impl Cli {
@@ -37,6 +40,13 @@ impl Cli {
     /// Returns whatever the command failed with, with the context that names
     /// which step of the start it was.
     pub async fn run(self) -> Result<()> {
+        // Before anything touches the filesystem: the document is a property
+        // of this binary's annotations, and CI generates it with no data
+        // directory and no database to open.
+        if matches!(self.command, Some(Command::Openapi)) {
+            return openapi::run();
+        }
+
         let paths = DataPaths::from_env()?;
         let configured = crate::configuration::load(&paths.config_file())?;
 
@@ -46,11 +56,13 @@ impl Cli {
         // stored settings row is the source of truth — the row lives in a
         // database this has not opened yet. `configuration::load` carries the
         // list of groups decided before the row can be read.
-        let _log_guard = observability::init(&paths.logs(), &configured.logging)?;
+        let _log_guard = observability::init(&paths.logs(), &configured.effective.logging)?;
 
         match self.command.unwrap_or(Command::Start) {
             Command::Start => start::run(&paths, configured).await,
             Command::Db { command } => command.run(&paths, configured).await,
+            // Answered above, before the data directory was resolved.
+            Command::Openapi => openapi::run(),
         }
     }
 }
@@ -70,6 +82,12 @@ mod tests {
     fn no_subcommand_means_start() {
         let cli = Cli::try_parse_from(["afisharr"]).expect("the bare invocation must parse");
         assert!(cli.command.is_none());
+    }
+
+    #[test]
+    fn openapi_parses() {
+        let cli = Cli::try_parse_from(["afisharr", "openapi"]).expect("openapi must parse");
+        assert!(matches!(cli.command, Some(Command::Openapi)));
     }
 
     #[test]

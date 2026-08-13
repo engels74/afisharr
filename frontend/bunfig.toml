@@ -7,12 +7,25 @@ exact = true
 
 [test]
 preload = ["./test-setup.ts"]
-# `*.svelte.test.ts` is the browser lane's suffix, whatever it covers —
-# components and rune modules alike. That lane is `vitest.config.ts`, which is
-# where `vitest-browser-svelte` is set up. `bun test` matches any `*.test.ts`,
-# so without this the first such file runs twice: once in chromium and once
+# `*.svelte.test.ts` is the browser lane's suffix, and it means one thing: the
+# test renders a component. That lane is `vitest.config.ts`, where
+# `vitest-browser-svelte` is set up. `bun test` matches any `*.test.ts`, so
+# without this a component test would run twice — once in chromium and once
 # here under happy-dom, where rendering was never wired.
+#
+# A rune module's test keeps the plain `.test.ts` suffix even though the module
+# it covers is `x.svelte.ts`, because it belongs in this lane (§24.3.10) and the
+# suffix is what the two lanes divide on.
 pathIgnorePatterns = ["**/*.svelte.test.ts"]
 coverage = true
 coverageReporter = ["text", "lcov"]
+# Generated output is exempt from every structural rule (§24.6.4), and the
+# coverage threshold is one of them: the OpenAPI client is a description of the
+# backend's annotations, and testing it would be testing the generator.
+#
+# `scripts/` holds the build-gate tools. Their rules are unit-tested — a lint
+# rule nobody tested is a lint rule that catches nothing — but their `main`
+# shells are argument parsing and printing, and driving those to a line count
+# would measure the wrong thing.
+coveragePathIgnorePatterns = ["src/lib/api/generated/**", "scripts/**"]
 coverageThreshold = { lines = 0.85, functions = 0.90, statements = 0.80 }

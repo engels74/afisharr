@@ -1,0 +1,26 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT setup_acked_steps FROM instance WHERE id = 1",
+  "describe": {
+    "columns": [
+      {
+        "name": "setup_acked_steps",
+        "ordinal": 0,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "instance",
+            "name": "setup_acked_steps"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "2f95eca1588d134c126d76461ef0246dabf61805b5b11bdd3ae0305c153ce580"
+}

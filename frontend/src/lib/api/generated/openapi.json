@@ -1,0 +1,2062 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Afisharr",
+    "description": "Plex collections, posters, and overlay manager.",
+    "contact": {
+      "name": "Afisharr contributors"
+    },
+    "license": {
+      "name": "AGPL-3.0-or-later",
+      "identifier": "AGPL-3.0-or-later"
+    },
+    "version": "0.1.0"
+  },
+  "paths": {
+    "/api/auth/login": {
+      "post": {
+        "tags": [
+          "authentication"
+        ],
+        "summary": "Signs in with a username and a password.",
+        "description": "Both limits are taken before the hash and handed back after it, and only on\nsuccess: a limit that kept counting after a correct password would lock out\nthe operator signing in from a fourth device (PRD §21.4.3).\n\nThat ordering is the whole of whether the limit is a bound. Read the other\nway round — consult the counter, hash, count the failure afterwards — an\nattempt that has not finished has not failed, so a burst arriving inside one\ninstant reads the same empty counter and every guess in it runs. The\nsemaphore in `accounts::verify` bounds the *memory* that costs, four\nArgon2id operations at a time, and bounds nothing about how many guesses the\naccount gives up: the rest queue and run in turn. Taking the attempt first\nis what makes five guesses five guesses.",
+        "operationId": "log_in",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Credentials"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Signed in",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SignedIn"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The request body was not readable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "The credentials were not accepted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Setup has not been completed on this instance",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Too many attempts",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/auth/logout": {
+      "post": {
+        "tags": [
+          "authentication"
+        ],
+        "summary": "Signs out, revoking the session that made the request.",
+        "operationId": "log_out",
+        "responses": {
+          "204": {
+            "description": "Signed out"
+          },
+          "401": {
+            "description": "No session to sign out of",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Setup has not been completed on this instance",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Too many requests",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/auth/plex/pin": {
+      "post": {
+        "tags": [
+          "authentication"
+        ],
+        "summary": "Starts a Plex sign-in.",
+        "operationId": "start_plex_pin",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/StartPin"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "A pin was created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PinStarted"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The request body was not readable, or the return target is not this instance's configured origin",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Setup has not been completed on this instance",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "plex.tv issued the sign-in under a different client identifier",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Too many attempts",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "plex.tv could not be reached",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/auth/plex/pin/{id}": {
+      "post": {
+        "tags": [
+          "authentication"
+        ],
+        "summary": "Polls a Plex sign-in, and signs the operator in when the token arrives.",
+        "operationId": "poll_plex_pin",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "The attempt returned by the start call",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The attempt's current state",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PinState"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The attempt belongs to another browser, the Plex account is not linked to an Afisharr account, or setup has not been completed on this instance",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such attempt",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The client identifier changed, or the attempt was already completed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Too many calls to plex.tv",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "plex.tv could not be reached",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/auth/session": {
+      "get": {
+        "tags": [
+          "authentication"
+        ],
+        "summary": "Reports the signed-in account.",
+        "operationId": "whoami",
+        "responses": {
+          "200": {
+            "description": "The signed-in account",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SignedIn"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Nobody is signed in",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Setup has not been completed on this instance",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Too many requests",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/files": {
+      "get": {
+        "tags": [
+          "files"
+        ],
+        "summary": "Lists one directory inside one root.",
+        "description": "Every refusal names the root and never the resolved path (`I-SEC-3`).",
+        "operationId": "browse",
+        "parameters": [
+          {
+            "name": "root",
+            "in": "path",
+            "description": "The identifier of the root to walk.",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "path",
+            "in": "path",
+            "description": "The path inside the root. Empty means the root itself.",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The directory's contents",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DirectoryListing"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The query was not readable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No accepted credential was presented",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The path is not inside the root, that account does not administer this instance, that key was not issued with the scope this route needs, or setup has not been completed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such root",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Too many requests",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/files/roots": {
+      "get": {
+        "tags": [
+          "files"
+        ],
+        "summary": "Lists the roots the operator has enabled.",
+        "operationId": "roots",
+        "responses": {
+          "200": {
+            "description": "Every enabled root",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/RootView"
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No accepted credential was presented",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "That account does not administer this instance, that key was not issued with the scope this route needs, or setup has not been completed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Too many requests",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/health": {
+      "get": {
+        "tags": [
+          "health"
+        ],
+        "summary": "Reports that the instance is up.",
+        "description": "The 429 is declared because the group carries a rate limit, and a layer\nanswering on a route's behalf must be in that route's own annotations: the\ngenerated client is built from them and nothing else, so an undeclared answer\nis one the interface simply does not handle (§24.5).",
+        "operationId": "health",
+        "responses": {
+          "200": {
+            "description": "The instance is serving",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Health"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Too many requests",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/settings/api-keys": {
+      "get": {
+        "tags": [
+          "settings"
+        ],
+        "summary": "Lists every key.",
+        "operationId": "list",
+        "responses": {
+          "200": {
+            "description": "Every key, newest first",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/ApiKeyView"
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No accepted credential was presented",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "That account does not administer this instance, that key was not issued with the scope this route needs, or setup has not been completed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Too many requests",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "settings"
+        ],
+        "summary": "Issues a key and returns its plaintext, once.",
+        "operationId": "create",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/NewApiKey"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "The key, with its plaintext",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IssuedKey"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The name was refused",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No accepted credential was presented",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "That account does not administer this instance, that key was not issued with the scope this route needs, or setup has not been completed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Too many requests",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/settings/api-keys/{id}": {
+      "delete": {
+        "tags": [
+          "settings"
+        ],
+        "summary": "Revokes one key. It is refused on its next use.",
+        "operationId": "revoke",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "The key to revoke",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "The key is revoked"
+          },
+          "401": {
+            "description": "No accepted credential was presented",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "That account does not administer this instance, that key was not issued with the scope this route needs, or setup has not been completed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such key, or it was already revoked",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Too many requests",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/settings/password": {
+      "post": {
+        "tags": [
+          "settings"
+        ],
+        "summary": "Changes the signed-in account's password.",
+        "description": "Everything PRD §21.4.2 asks for happens here and happens together, in one\ntransaction: the current password is re-verified, the new hash is written,\nevery session for the account is revoked, and a replacement is inserted for\nthe browser that asked. Rotation is not decoration — a session identifier\nthat survives a password change survives the theft the change was made to\nend — and a rotation split across separate commits has a window in which\nexactly that is true.",
+        "operationId": "change_password",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PasswordChange"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "The password is changed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PasswordChanged"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The new password was refused",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "The current password was not accepted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "That key was not issued with the scope this route needs, or setup has not been completed on this instance",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "That account has no password to change, or another change reached it first",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Too many requests",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/settings/sessions": {
+      "get": {
+        "tags": [
+          "settings"
+        ],
+        "summary": "Lists the signed-in account's sessions.",
+        "operationId": "list_sessions",
+        "responses": {
+          "200": {
+            "description": "Every session, newest first",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/SessionView"
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No accepted credential was presented",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "That key was not issued with the scope this route needs, or setup has not been completed on this instance",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Too many requests",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/settings/sessions/{id}": {
+      "delete": {
+        "tags": [
+          "settings"
+        ],
+        "summary": "Revokes one of the signed-in account's sessions.",
+        "operationId": "revoke_session",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "The session to revoke",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "The session is revoked"
+          },
+          "401": {
+            "description": "No accepted credential was presented",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "That key was not issued with the scope this route needs, or setup has not been completed on this instance",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such session on this account",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Too many requests",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/setup/admin": {
+      "post": {
+        "tags": [
+          "setup"
+        ],
+        "summary": "Creates the administrator account.",
+        "description": "Reachable only behind the claim gate, and only while no administrator\nexists. The moment this page is reachable on an instance that may face the\ninternet it is an unauthenticated grant of administrator, which is why the\ngate arrives with it rather than eleven phases later (D-045).",
+        "operationId": "create_admin",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateAdmin"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "The administrator account now exists",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SignedIn"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The username or password was refused",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The claim on this wizard has expired",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "An administrator already exists",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Too many requests",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/setup/claim": {
+      "get": {
+        "tags": [
+          "setup"
+        ],
+        "summary": "Reports what the claim page needs, without a claim.",
+        "description": "`/api/setup/status` sits behind the claim gate, so an unclaimed browser can\nnever read it — which is correct for the derived step and useless for the\npage that has to be drawn *before* a claim exists. Left to guess, the\ninterface fabricates: a hard-coded `recoveryAvailable: false` hides the\nrecovery form from the operator whose token has died with a restart, and a\nhard-coded `tokenLive: true` offers a token field on an instance that has\nno live token to accept.\n\nNeither fact is a disclosure. \"An administrator exists\" is already the\ndifference between `/api/setup/recover` accepting credentials and refusing\nthem, and \"a token is live\" is already the difference between a claim\nattempt being refused and being possible at all.",
+        "operationId": "claim_status",
+        "responses": {
+          "200": {
+            "description": "What the claim page renders",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ClaimStatus"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Setup has already been completed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Too many requests",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "setup"
+        ],
+        "summary": "Takes the wizard for this browser, on the strength of the console token.",
+        "operationId": "claim",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ClaimRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "The wizard is now held by this browser",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ClaimGranted"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The request body was not readable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "The token was not accepted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The request was refused as cross-site",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Another browser holds the wizard",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Too many attempts",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/setup/complete": {
+      "post": {
+        "tags": [
+          "setup"
+        ],
+        "summary": "Finishes setup.",
+        "description": "Four things happen together and none is optional (PRD §19.6.1):\n`instance.setup_completed_at` is written, the `setup:claim` lease is\ndeleted, the in-memory token is cleared, and the cookie is expired. From\nthen on the banner prints nothing on restart and these endpoints answer 404.\n\nAll four are irreversible, which is why the prerequisite is checked first.",
+        "operationId": "complete",
+        "responses": {
+          "200": {
+            "description": "Setup is finished",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SetupStatus"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The claim on this wizard has expired",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Setup has already been completed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Another browser holds the wizard, or no administrator exists yet",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Too many requests",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/setup/recover": {
+      "post": {
+        "tags": [
+          "setup"
+        ],
+        "summary": "Takes the wizard on administrator credentials, once an account exists.",
+        "description": "The recovery path (PRD §19.6.1): the token dies with the process, the\naccount does not, so an interrupted setup survives a restart.",
+        "operationId": "recover",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RecoverRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "The wizard is now held by this browser",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ClaimGranted"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The request body was not readable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "The credentials were not accepted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The request was refused as cross-site",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Another browser holds the wizard",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Too many attempts",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/setup/status": {
+      "get": {
+        "tags": [
+          "setup"
+        ],
+        "summary": "Reports the step this instance resumes at.",
+        "description": "The step is computed here and never accepted from the caller. A step index\nin a query string, a cookie, or a client-held draft would let a caller name\nthe step they would like to be on, which on the claim step means naming\nstep 2 (D-046, `I-UX-10`). There is no parameter on this route to supply\none with.",
+        "operationId": "status",
+        "responses": {
+          "200": {
+            "description": "The derived step",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SetupStatus"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The claim on this wizard has expired",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Setup has already been completed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Another browser holds the wizard",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Too many requests",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/stream": {
+      "get": {
+        "tags": [
+          "stream"
+        ],
+        "summary": "Opens the multiplexed event stream.",
+        "description": "Requires authentication, like every other route on this surface — the\nstream carries job progress and source health, which name the operator's\nlibraries and integrations.\n\nThe stream never replays. A client that reconnects has missed events and\nknows it; the answer is to refetch the surfaces it feeds, which is what a\nfresh page load does anyway (PRD §9). Building a replay buffer would make\ntwo paths to the same state, and the one that is exercised less would be\nthe one that is wrong (P7).",
+        "operationId": "stream",
+        "responses": {
+          "200": {
+            "description": "The event stream, multiplexed by topic",
+            "content": {
+              "text/event-stream": {}
+            }
+          },
+          "401": {
+            "description": "No accepted credential was presented",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "That account does not administer this instance, that key was not issued with the scope this route needs, or setup has not been completed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Too many requests",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "ApiKeyView": {
+        "type": "object",
+        "description": "A key as the list shows it.\n\nNo field here authenticates anything. The prefix tells two keys apart and\nthe digest is not in the shape at all, so an operator who screenshots this\npage has leaked nothing.",
+        "required": [
+          "id",
+          "name",
+          "prefix",
+          "scopes",
+          "createdAt"
+        ],
+        "properties": {
+          "createdAt": {
+            "type": "integer",
+            "format": "int64",
+            "description": "When it was issued, in epoch milliseconds."
+          },
+          "id": {
+            "type": "string",
+            "description": "The key's identifier, which is what revocation names."
+          },
+          "lastUsedAt": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "When it was last accepted, in epoch milliseconds."
+          },
+          "name": {
+            "type": "string",
+            "description": "The operator's name for it."
+          },
+          "prefix": {
+            "type": "string",
+            "description": "The first eight characters, for display."
+          },
+          "revokedAt": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "When it was revoked, in epoch milliseconds."
+          },
+          "scopes": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "What this key may reach, as the names it was issued with."
+          }
+        }
+      },
+      "ClaimGranted": {
+        "type": "object",
+        "description": "A claim now held by this browser.",
+        "required": [
+          "expiresAt"
+        ],
+        "properties": {
+          "expiresAt": {
+            "type": "integer",
+            "format": "int64",
+            "description": "When the hold lapses if nothing renews it, in epoch milliseconds."
+          }
+        }
+      },
+      "ClaimRequest": {
+        "type": "object",
+        "description": "The token an operator copies off the console.",
+        "required": [
+          "token"
+        ],
+        "properties": {
+          "token": {
+            "type": "string",
+            "description": "The three four-character segments, as printed."
+          }
+        },
+        "additionalProperties": false
+      },
+      "ClaimStatus": {
+        "type": "object",
+        "description": "The two facts the claim page renders, and whether it already holds a claim.\n\nDeliberately not the derived step and deliberately not `Evidence`: this route\nis outside the claim gate, so it says the least that lets step one draw\nitself and nothing about how far setup has got (D-046).",
+        "required": [
+          "ordinal",
+          "claimHeld",
+          "recoveryAvailable",
+          "tokenLive"
+        ],
+        "properties": {
+          "claimHeld": {
+            "type": "boolean",
+            "description": "Whether this browser already holds the wizard."
+          },
+          "ordinal": {
+            "type": "integer",
+            "format": "int32",
+            "description": "The claim step's position in the journey, one-based, for display only.\n\nCarried rather than assumed, for the same reason `/api/setup/status`\ncarries it: the shape of the journey is the server's to state, and a\nnumber written into a page is a number that goes stale in silence.",
+            "minimum": 0
+          },
+          "recoveryAvailable": {
+            "type": "boolean",
+            "description": "Whether an administrator account exists, which decides whether the claim\npage offers the recovery affordance (PRD §7.14)."
+          },
+          "tokenLive": {
+            "type": "boolean",
+            "description": "Whether a token is live to be entered at all.\n\nFalse fifteen minutes after a start with no restart, which is what turns\nthe page's message from \"enter the token\" into \"restart the container\nand read the console\"."
+          }
+        }
+      },
+      "CreateAdmin": {
+        "type": "object",
+        "description": "The administrator the wizard creates.",
+        "required": [
+          "username",
+          "password"
+        ],
+        "properties": {
+          "password": {
+            "type": "string",
+            "description": "The password."
+          },
+          "username": {
+            "type": "string",
+            "description": "The name the account will sign in with."
+          }
+        },
+        "additionalProperties": false
+      },
+      "Credentials": {
+        "type": "object",
+        "description": "What the sign-in form sends.",
+        "required": [
+          "username",
+          "password"
+        ],
+        "properties": {
+          "password": {
+            "type": "string",
+            "description": "The password."
+          },
+          "username": {
+            "type": "string",
+            "description": "The account name."
+          }
+        },
+        "additionalProperties": false
+      },
+      "DirectoryListing": {
+        "type": "object",
+        "description": "One directory's contents.",
+        "required": [
+          "root",
+          "path",
+          "entries"
+        ],
+        "properties": {
+          "entries": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/EntryView"
+            },
+            "description": "The entries, directories first and then by name."
+          },
+          "path": {
+            "type": "string",
+            "description": "The path inside it."
+          },
+          "root": {
+            "type": "string",
+            "description": "The root that was walked."
+          }
+        }
+      },
+      "EntryView": {
+        "type": "object",
+        "description": "One entry in a browsed directory.",
+        "required": [
+          "name",
+          "path",
+          "isDirectory"
+        ],
+        "properties": {
+          "isDirectory": {
+            "type": "boolean",
+            "description": "Whether it can be descended into."
+          },
+          "name": {
+            "type": "string",
+            "description": "The entry's own name."
+          },
+          "path": {
+            "type": "string",
+            "description": "The path relative to the root, which is what a caller asks for next.\n\nRelative and never absolute: an absolute path would tell a caller where\nthe root lives, which is the one thing the refusal message is careful\nnot to disclose."
+          },
+          "sizeBytes": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "Size in bytes, for a file.",
+            "minimum": 0
+          }
+        }
+      },
+      "ErrorCode": {
+        "type": "string",
+        "description": "What kind of failure this is.\n\nA closed enum with an exhaustive status mapping, so the generated client\nnarrows on a value it knows rather than on a number. Adding a variant is a\ncontract change that shows up in the regenerated client, which is the\npoint: a new failure mode the interface has never heard of should not be\nable to arrive silently as a 500.",
+        "enum": [
+          "invalid",
+          "unauthenticated",
+          "forbidden",
+          "notFound",
+          "conflict",
+          "blocked",
+          "rateLimited",
+          "setupRequired",
+          "upstream",
+          "internal"
+        ]
+      },
+      "Health": {
+        "type": "object",
+        "description": "What the health route reports.\n\nDeliberately thin. A container orchestrator asks this before anyone has\nsigned in, so it must not name libraries, integrations, or anything else\nthat describes the operator's setup — this is the one route with no\ncredential in front of it (`I-SEC-8` excepts it by name).",
+        "required": [
+          "status",
+          "version",
+          "setupCompleted"
+        ],
+        "properties": {
+          "setupCompleted": {
+            "type": "boolean",
+            "description": "Whether first-run setup has finished.\n\nThe one fact beyond liveness, and it is already observable from outside:\nan unclaimed instance answers every other route with `setupRequired`.\nReporting it here lets the interface route to the claim page on its\nfirst load instead of learning it from a refusal."
+          },
+          "status": {
+            "type": "string",
+            "description": "Always `ok` when this route answers at all."
+          },
+          "version": {
+            "type": "string",
+            "description": "The running binary's version."
+          }
+        }
+      },
+      "IssuedKey": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/ApiKeyView",
+            "description": "The key as the list will show it from now on."
+          },
+          {
+            "type": "object",
+            "required": [
+              "secret"
+            ],
+            "properties": {
+              "secret": {
+                "type": "string",
+                "description": "The plaintext. Shown once; this instance cannot produce it again."
+              }
+            }
+          }
+        ],
+        "description": "A key at the one moment its plaintext exists."
+      },
+      "Mismatch": {
+        "type": "object",
+        "description": "What was expected against what arrived.\n\nCarried as a pair rather than folded into the message, because the\ninterface renders them as two labelled values and a message it has to parse\nis a message that stops being renderable the first time the wording changes.",
+        "required": [
+          "expected",
+          "actual"
+        ],
+        "properties": {
+          "actual": {
+            "type": "string",
+            "description": "What it held."
+          },
+          "expected": {
+            "type": "string",
+            "description": "What the field should have held, in the operator's terms."
+          }
+        }
+      },
+      "NewApiKey": {
+        "type": "object",
+        "description": "What the operator names a new key, and what they let it reach.",
+        "required": [
+          "name",
+          "scopes"
+        ],
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "A name the operator will recognise later."
+          },
+          "scopes": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "The capabilities the key is issued with.\n\nRequired, and required to be non-empty. There is no default and there is\ndeliberately no \"everything\": the field existing but being optional is\nhow a caller ends up with an unscoped key without ever deciding to have\none, and an unscoped key is the whole instance in a string an\nintegration keeps in a config file."
+          }
+        },
+        "additionalProperties": false
+      },
+      "PasswordChange": {
+        "type": "object",
+        "description": "What a password change sends.",
+        "required": [
+          "currentPassword",
+          "newPassword"
+        ],
+        "properties": {
+          "currentPassword": {
+            "type": "string",
+            "description": "The password in force now, re-entered."
+          },
+          "newPassword": {
+            "type": "string",
+            "description": "The password to store instead."
+          }
+        },
+        "additionalProperties": false
+      },
+      "PasswordChanged": {
+        "type": "object",
+        "description": "What a password change produced.",
+        "required": [
+          "sessionsRevoked"
+        ],
+        "properties": {
+          "sessionsRevoked": {
+            "type": "integer",
+            "format": "int64",
+            "description": "How many other sessions were revoked.\n\nReported rather than silent: the point of revoking them is that the\noperator knows the other devices are signed out.",
+            "minimum": 0
+          }
+        }
+      },
+      "PinStarted": {
+        "type": "object",
+        "description": "A started sign-in.",
+        "required": [
+          "id",
+          "code",
+          "expiresAt"
+        ],
+        "properties": {
+          "authorizationUrl": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Where to send the operator, for the OAuth variant."
+          },
+          "code": {
+            "type": "string",
+            "description": "The four-character code, for the PIN variant."
+          },
+          "expiresAt": {
+            "type": "integer",
+            "format": "int64",
+            "description": "When plex.tv stops answering for this pin, in epoch milliseconds."
+          },
+          "id": {
+            "type": "string",
+            "description": "Afisharr's identifier for this attempt. The client polls this."
+          }
+        }
+      },
+      "PinState": {
+        "oneOf": [
+          {
+            "type": "object",
+            "description": "plex.tv has not seen the operator finish. Poll again.",
+            "required": [
+              "state"
+            ],
+            "properties": {
+              "state": {
+                "type": "string",
+                "enum": [
+                  "pending"
+                ]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "description": "A token arrived and a session was created.",
+            "required": [
+              "userId",
+              "username",
+              "isAdmin",
+              "state"
+            ],
+            "properties": {
+              "isAdmin": {
+                "type": "boolean",
+                "description": "Whether that account administers this instance.\n\nReported rather than assumed. A linked Plex account that is not an\nadministrator gets a session with `is_admin = false`, and a client\nthat recorded it as an administrator would route the operator into\nadmin-only pages that answer 403 (`I-UX-2`)."
+              },
+              "state": {
+                "type": "string",
+                "enum": [
+                  "authorized"
+                ]
+              },
+              "userId": {
+                "type": "string",
+                "description": "The account now signed in."
+              },
+              "username": {
+                "type": "string",
+                "description": "The account name."
+              }
+            }
+          },
+          {
+            "type": "object",
+            "description": "The pin's window closed without a token.",
+            "required": [
+              "state"
+            ],
+            "properties": {
+              "state": {
+                "type": "string",
+                "enum": [
+                  "expired"
+                ]
+              }
+            }
+          }
+        ],
+        "description": "What one poll found.\n\nThree states, and the client renders three different things. Folding\n`expired` into `pending` would leave an operator watching a spinner for a\ncode that will never be accepted (P1)."
+      },
+      "Problem": {
+        "type": "object",
+        "description": "The body of every failed response on this surface.\n\nThe JSON pointer is what lets a form put the message beside the field that\ncaused it, rather than in a banner at the top that names nothing. It is\nRFC 6901 — `/sources/2/kind`, not `sources[2].kind` — so the client can walk\nthe request body it already holds.",
+        "required": [
+          "code",
+          "message"
+        ],
+        "properties": {
+          "code": {
+            "$ref": "#/components/schemas/ErrorCode",
+            "description": "What kind of failure this is. The client narrows on this."
+          },
+          "message": {
+            "type": "string",
+            "description": "One sentence, in the operator's terms, naming what failed (PRD §8.4)."
+          },
+          "mismatch": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/Mismatch",
+                "description": "The expected-versus-actual pair, when there is one."
+              }
+            ]
+          },
+          "pointer": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "An RFC 6901 pointer into the request body, when one field caused this."
+          },
+          "retryAfterSeconds": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "When the caller may try again, in seconds. Set on a rate-limited or\nblocked answer, and matching the `Retry-After` header.",
+            "minimum": 0
+          }
+        }
+      },
+      "RecoverRequest": {
+        "type": "object",
+        "description": "The administrator credentials that recover an interrupted setup.",
+        "required": [
+          "username",
+          "password"
+        ],
+        "properties": {
+          "password": {
+            "type": "string",
+            "description": "The administrator's password."
+          },
+          "username": {
+            "type": "string",
+            "description": "The administrator's account name."
+          }
+        },
+        "additionalProperties": false
+      },
+      "RootView": {
+        "type": "object",
+        "description": "One root the operator has allowed.",
+        "required": [
+          "id",
+          "label"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "The identifier the browser addresses it by.\n\nThe row's own key rather than the label: two roots of one purpose can\nshare a final directory name, so a label is allowed to collide and\naddressing by it would make the second of them unreachable."
+          },
+          "label": {
+            "type": "string",
+            "description": "The operator's name for it, which is what a refusal reads out."
+          }
+        }
+      },
+      "SessionView": {
+        "type": "object",
+        "description": "One session, as the settings page lists it.",
+        "required": [
+          "id",
+          "isCurrent",
+          "createdAt",
+          "lastSeenAt"
+        ],
+        "properties": {
+          "createdAt": {
+            "type": "integer",
+            "format": "int64",
+            "description": "When it was created, in epoch milliseconds."
+          },
+          "id": {
+            "type": "string",
+            "description": "The digest, which is what revocation names.\n\nSafe to show: it is the SHA-256 of a cookie value, and knowing it does\nnot let anyone present the value it came from."
+          },
+          "ip": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The address it was created from."
+          },
+          "isCurrent": {
+            "type": "boolean",
+            "description": "Whether this is the session making the request."
+          },
+          "lastSeenAt": {
+            "type": "integer",
+            "format": "int64",
+            "description": "When it was last used, in epoch milliseconds."
+          },
+          "revokedAt": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "When it was revoked, in epoch milliseconds."
+          },
+          "userAgent": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The user agent recorded when it was created."
+          }
+        }
+      },
+      "SetupStatus": {
+        "type": "object",
+        "description": "Where the wizard is, derived from what the database holds.",
+        "required": [
+          "step",
+          "ordinal",
+          "claimHeld",
+          "recoveryAvailable",
+          "tokenLive"
+        ],
+        "properties": {
+          "claimHeld": {
+            "type": "boolean",
+            "description": "Whether this browser holds the claim."
+          },
+          "ordinal": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Its position in the journey, one-based, for display only.",
+            "minimum": 0
+          },
+          "recoveryAvailable": {
+            "type": "boolean",
+            "description": "Whether an administrator account exists, which decides whether the\nclaim page offers the recovery affordance (PRD §7.14)."
+          },
+          "step": {
+            "$ref": "#/components/schemas/StepView",
+            "description": "The step to resume at."
+          },
+          "tokenLive": {
+            "type": "boolean",
+            "description": "Whether a token is live to be entered at all.\n\nFalse after fifteen minutes with no restart, which is what turns the\nclaim page's message from \"enter the token\" into \"restart the container\nand read the console\"."
+          }
+        }
+      },
+      "SignedIn": {
+        "type": "object",
+        "description": "Who the caller now is.",
+        "required": [
+          "userId",
+          "username",
+          "isAdmin"
+        ],
+        "properties": {
+          "displayName": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The name to show, when it differs from the account name."
+          },
+          "isAdmin": {
+            "type": "boolean",
+            "description": "Whether the account holds administrator rights."
+          },
+          "userId": {
+            "type": "string",
+            "description": "The account's identifier."
+          },
+          "username": {
+            "type": "string",
+            "description": "The account name."
+          }
+        }
+      },
+      "StartPin": {
+        "type": "object",
+        "description": "What the interface asks for when it starts a Plex sign-in.",
+        "required": [
+          "oauth"
+        ],
+        "properties": {
+          "forwardUrl": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Where plex.tv returns the operator, for the OAuth variant.\n\nIt must be on this instance's configured `publicOrigin`. plex.tv\nredirects to whatever this asks for, so a target anywhere else turns the\nendpoint into a redirector wearing a legitimate `app.plex.tv/auth` URL,\nand the operator who completes the sign-in lands on somebody else's\npage."
+          },
+          "oauth": {
+            "type": "boolean",
+            "description": "`pin` shows a four-character code; `oauth` sends the operator to\nplex.tv's hosted sign-in."
+          }
+        },
+        "additionalProperties": false
+      },
+      "StepView": {
+        "type": "string",
+        "description": "A step, as the generated client sees it.\n\nA mirror of [`SetupStep`] rather than a `ToSchema` derive on the domain\ntype, so `afisharr-core` stays free of the HTTP surface's annotations\n(§24.6.1). The `From` below is exhaustive, so a step added to the domain\nfails to compile here rather than reaching the client as a string it cannot\nnarrow.",
+        "enum": [
+          "claim",
+          "admin",
+          "plex",
+          "libraries",
+          "integrations",
+          "packs",
+          "report",
+          "review"
+        ]
+      }
+    }
+  },
+  "tags": [
+    {
+      "name": "health",
+      "description": "Liveness, with no credential required"
+    },
+    {
+      "name": "setup",
+      "description": "First run: the claim, the derived step, and completion"
+    },
+    {
+      "name": "authentication",
+      "description": "Signing in and out"
+    },
+    {
+      "name": "settings",
+      "description": "Instance configuration"
+    },
+    {
+      "name": "files",
+      "description": "The jailed filesystem browser"
+    },
+    {
+      "name": "stream",
+      "description": "The multiplexed event stream"
+    }
+  ]
+}
