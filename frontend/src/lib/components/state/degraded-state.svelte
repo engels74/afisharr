@@ -20,7 +20,7 @@
 </script>
 
 <div class={cn('flex flex-col gap-2', className)} data-slot="degraded-state">
-	<p class="text-xs text-[var(--muted-foreground)]">
+	<p class="text-xs text-muted-foreground">
 		{t('state.degraded.title')} · {state.capability}
 		{#if state.configureHref}
 			<a class="underline" href={state.configureHref}>{t('state.degraded.configure')}</a>

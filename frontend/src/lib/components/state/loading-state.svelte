@@ -31,11 +31,19 @@
 		aria-label={t('state.loading.label')}
 	>
 		{#if treatment === 'skeleton'}
+			<!--
+				`border`, not `muted`, and the reason is arithmetic. The panel a
+				page sits on is `card`, and against it `muted` is 1.05:1 in
+				light and 1.003:1 in dark — the same color to two decimal
+				places. A skeleton nobody can see is an empty panel held for
+				the length of the wait, which is the failure the treatment
+				exists to prevent. `border` reads at 1.34:1 in both modes.
+			-->
 			{#each Array.from({ length: rows }, (_, index) => index) as row (row)}
-				<div class="h-4 rounded animate-pulse bg-[var(--muted)]"></div>
+				<div class="h-4 rounded animate-pulse bg-border"></div>
 			{/each}
 		{:else}
-			<p class="text-sm text-[var(--muted-foreground)]">
+			<p class="text-sm text-muted-foreground">
 				{state.progress ?? t('state.loading.stillWorking')}
 			</p>
 		{/if}

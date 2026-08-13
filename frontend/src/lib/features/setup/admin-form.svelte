@@ -79,7 +79,7 @@
 
 <section class="flex flex-col gap-4 max-w-md">
 	<h1 class="text-lg font-semibold">{t('setup.admin.title')}</h1>
-	<p class="text-sm text-[var(--muted-foreground)]">{t('setup.admin.body')}</p>
+	<p class="text-sm text-muted-foreground">{t('setup.admin.body')}</p>
 
 	{#if generalProblem}
 		<ErrorState state={{ kind: 'error', summary: generalProblem.message }} />
@@ -89,24 +89,32 @@
 		<label class="text-sm" for={usernameId}>{t('auth.username')}</label>
 		<input
 			id={usernameId}
-			class="rounded border border-[var(--border)] px-2 py-1 text-sm"
+			class="rounded-md border border-border bg-input px-2 py-1 text-sm"
 			bind:value={username}
 			autocomplete="username"
 		/>
+		<!--
+			The destructive token marks the message, it does not colour it — the
+			same rule `error-state.svelte` follows, and for the same arithmetic.
+			Against the card the red is 4.51:1 in light and 3.50:1 in dark:
+			enough for a rule, which WCAG asks 3:1 of, and short of the 4.5:1
+			this text owes in dark. The sentence saying why a password was
+			refused is the last one that should be hard to read.
+		-->
 		{#if usernameProblem}
-			<p class="text-xs text-[var(--destructive)]">{usernameProblem}</p>
+			<p class="border-l-2 border-destructive-rule pl-2 text-xs">{usernameProblem}</p>
 		{/if}
 
 		<label class="text-sm" for={passwordId}>{t('auth.password')}</label>
 		<input
 			id={passwordId}
-			class="rounded border border-[var(--border)] px-2 py-1 text-sm"
+			class="rounded-md border border-border bg-input px-2 py-1 text-sm"
 			type="password"
 			bind:value={password}
 			autocomplete="new-password"
 		/>
 		{#if passwordProblem}
-			<p class="text-xs text-[var(--destructive)]">{passwordProblem}</p>
+			<p class="border-l-2 border-destructive-rule pl-2 text-xs">{passwordProblem}</p>
 		{/if}
 
 		<button class="self-start text-sm underline" type="submit" disabled={submitting}>

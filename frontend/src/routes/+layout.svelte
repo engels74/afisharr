@@ -3,14 +3,21 @@
 	SPDX-License-Identifier: AGPL-3.0-or-later
 -->
 <script lang="ts">
-	import '../app.css';
+	// UnoCSS first, the theme second, and the order is load-bearing. UnoCSS
+	// layers are output ordering rather than CSS cascade layers, so its theme
+	// block and `app.css`'s `:root` are two unlayered `:root` rules of equal
+	// specificity and the last one wins. With `app.css` first, presetWind4's own
+	// `--font-sans: var(--font-sans)` landed after ours — a self-referential
+	// custom property, invalid at computed-value time, which drops the interface
+	// back to the browser's default face while every gate stays green.
 	import 'virtual:uno.css';
-	import { ModeWatcher } from 'mode-watcher';
+	import '../app.css';
 	import { type Snippet, untrack } from 'svelte';
 	import { goto } from '$app/navigation';
 	import { page } from '$app/state';
 	import { api } from '$lib/api/client';
 	import { ErrorState, LoadingState } from '$lib/components/state';
+	import { ModePreference } from '$lib/features/appearance';
 	import { NotPermittedPanel, session } from '$lib/features/auth';
 	import {
 		isBareRoute,
@@ -147,9 +154,10 @@
 
 </script>
 
-<!-- ModeWatcher sets the theme before paint, so a dark-mode instance never
-     flashes light on the way in. -->
-<ModeWatcher />
+<!-- The mode follows the operating system, an explicit choice overrides it,
+     and the class is set before paint so a dark instance never flashes light
+     on the way in (PRD §10.4, D-050). -->
+<ModePreference />
 
 {#snippet notPermitted()}
 	<NotPermittedPanel />
@@ -181,8 +189,18 @@
 		does not need it (D-028, PRD §6.4).
 	-->
 	<div class="min-h-screen flex flex-col">
-		<main class="flex-1 px-4 py-10">
-			{@render body?.()}
+		<!-- The same panel the shell gives a page, at the width one form needs:
+		     the journeys outside the shell are one column of decisions, and the
+		     ground the palette provides is not a reading surface. -->
+		<main class="mx-auto w-full max-w-md flex-1 px-4 py-10">
+			<!-- The wordmark, because these are the two journeys with no shell
+			     around them: without it the sign-in page belongs to no product. -->
+			<p class="mb-4 font-serif text-xl font-semibold tracking-tight">
+				{t('app.name')}
+			</p>
+			<div class="rounded-lg border border-border bg-card p-6">
+				{@render body?.()}
+			</div>
 		</main>
 		<SourceFooter />
 	</div>

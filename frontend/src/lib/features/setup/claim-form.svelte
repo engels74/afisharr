@@ -58,7 +58,7 @@
 
 <section class="flex flex-col gap-4 max-w-md">
 	<h1 class="text-lg font-semibold">{t('setup.claim.title')}</h1>
-	<p class="text-sm text-[var(--muted-foreground)]">{t('setup.claim.body')}</p>
+	<p class="text-sm text-muted-foreground">{t('setup.claim.body')}</p>
 
 	{#if blocked}
 		<BlockedState
@@ -77,9 +77,11 @@
 	{#if status.tokenLive}
 		<form class="flex flex-col gap-2" onsubmit={submitToken}>
 			<label class="text-sm" for={tokenId}>{t('setup.claim.tokenLabel')}</label>
+			<!-- Mono, because this is transcribed from a console line by hand and
+			     a proportional face hides the difference between l, 1, and I. -->
 			<input
 				id={tokenId}
-				class="rounded border border-[var(--border)] px-2 py-1 text-sm"
+				class="rounded-md border border-border bg-input px-2 py-1 font-mono text-sm"
 				bind:value={token}
 				autocomplete="off"
 				spellcheck="false"
@@ -93,23 +95,23 @@
 	{/if}
 
 	{#if status.recoveryAvailable}
-		<section class="flex flex-col gap-2 border-t border-[var(--border)] pt-4">
+		<section class="flex flex-col gap-2 border-t border-border pt-4">
 			<h2 class="text-sm font-medium">{t('setup.claim.recoveryTitle')}</h2>
-			<p class="text-sm text-[var(--muted-foreground)]">
+			<p class="text-sm text-muted-foreground">
 				{t('setup.claim.recoveryBody')}
 			</p>
 			<form class="flex flex-col gap-2" onsubmit={submitCredentials}>
 				<label class="text-sm" for={usernameId}>{t('auth.username')}</label>
 				<input
 					id={usernameId}
-					class="rounded border border-[var(--border)] px-2 py-1 text-sm"
+					class="rounded-md border border-border bg-input px-2 py-1 text-sm"
 					bind:value={username}
 					autocomplete="username"
 				/>
 				<label class="text-sm" for={passwordId}>{t('auth.password')}</label>
 				<input
 					id={passwordId}
-					class="rounded border border-[var(--border)] px-2 py-1 text-sm"
+					class="rounded-md border border-border bg-input px-2 py-1 text-sm"
 					type="password"
 					bind:value={password}
 					autocomplete="current-password"

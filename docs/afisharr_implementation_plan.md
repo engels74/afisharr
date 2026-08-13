@@ -553,39 +553,39 @@ the eight-step journey on top of it.
 - **Where:** `frontend/src/app.css`; `frontend/uno.config.ts`; `frontend/src/routes/+layout.svelte`;
   `frontend/static/fonts/`.
 - **Subtasks:**
-  - [ ] 1. Fetch the registry item — `bunx shadcn@latest add https://tweakcn.com/r/themes/tangerine.json`
+  - [x] 1. Fetch the registry item — `bunx shadcn@latest add https://tweakcn.com/r/themes/tangerine.json`
      — and treat its JSON as the source of truth rather than whatever the CLI writes. It is a
      `registry:style` item with no components and no dependencies, so nothing but token values is
      owed. If the run rewrites `app.css` into Tailwind-v4 `@theme` shape, revert it: that shape is
      inert under UnoCSS, and a stylesheet that looks applied and renders nothing is worse than one
      that was never touched.
-  - [ ] 2. Transcribe `cssVars.light` into `:root` and `cssVars.dark` into `.dark` in `app.css`,
+  - [x] 2. Transcribe `cssVars.light` into `:root` and `cssVars.dark` into `.dark` in `app.css`,
      replacing the placeholder greyscale wholesale rather than merging into it — a half-replaced
      palette is a set of tokens no designer chose. All 53 light and 52 dark tokens land, including
      `sidebar-*`, `chart-1` through `chart-5`, and the shadow scale, so a later page reaching for one
      finds it defined instead of inventing a color.
-  - [ ] 3. Put `cssVars.theme` where UnoCSS can see it: the three font families and `radius` in
+  - [x] 3. Put `cssVars.theme` where UnoCSS can see it: the three font families and `radius` in
      `uno.config.ts` `theme`, `--tracking-normal: 0em` in `:root`, and the five `tracking-*`
      `calc()` entries beside it. Add the registry's one base rule —
      `body { letter-spacing: var(--tracking-normal) }` — as plain CSS, not inside an `@layer base`
      this stack does not have.
-  - [ ] 4. Self-host Inter, JetBrains Mono, and Source Serif 4 under `frontend/static/fonts/` with
+  - [x] 4. Self-host Inter, JetBrains Mono, and Source Serif 4 under `frontend/static/fonts/` with
      `@font-face` rules and `font-display: swap`. Do not add `presetWebFonts` with the Google
      provider: it would put an outbound request carrying the operator's IP on every page load of a
      product that collects nothing (PRD §21.8, D-038, D-050).
-  - [ ] 5. Leave `<ModeWatcher />`'s `defaultMode` at its `"system"` default and add the light
+  - [x] 5. Leave `<ModeWatcher />`'s `defaultMode` at its `"system"` default and add the light
      fallback explicitly, because the library's own fallback is dark: it resolves the preference by
      testing `(prefers-color-scheme: light)` and maps every non-match — a browser without
      `window.matchMedia` included — to dark. Set the mode to light in exactly that case, and nowhere
      else, so a genuine system-dark preference is still honoured.
-  - [ ] 6. Add the mode control to the shell so the operator's explicit choice overrides the system
+  - [x] 6. Add the mode control to the shell so the operator's explicit choice overrides the system
      and persists across visits, and confirm the pre-paint script still runs first — a theme applied
      after paint is the light-to-dark flash `mode-watcher` exists to prevent.
-  - [ ] 7. Sweep the pages and components Tasks 1.8 and 1.11 shipped onto semantic tokens. No literal
+  - [x] 7. Sweep the pages and components Tasks 1.8 and 1.11 shipped onto semantic tokens. No literal
      color survives in `frontend/src`: no hex, no bare `oklch(…)`, no `bg-orange-500`. The nine state
      components are the ones to check first — a hand-picked red on the Error treatment is exactly the
      kind of color that reads as correct in light and disappears in dark.
-- [ ] **Done when:** `frontend/src` outside `app.css` contains no literal color — checked with the
+- [x] **Done when:** `frontend/src` outside `app.css` contains no literal color — checked with the
   grep in §A.4 — and every one of the six destinations plus Settings renders in both modes at WCAG AA
   contrast; a fresh profile with the system set to dark opens dark, with the system set to light opens
   light, and with `matchMedia` unavailable opens light; an explicit choice survives a reload; the built

@@ -59,14 +59,14 @@
 		<label class="text-sm" for={usernameId}>{t('auth.username')}</label>
 		<input
 			id={usernameId}
-			class="rounded border border-[var(--border)] px-2 py-1 text-sm"
+			class="rounded-md border border-border bg-input px-2 py-1 text-sm"
 			bind:value={username}
 			autocomplete="username"
 		/>
 		<label class="text-sm" for={passwordId}>{t('auth.password')}</label>
 		<input
 			id={passwordId}
-			class="rounded border border-[var(--border)] px-2 py-1 text-sm"
+			class="rounded-md border border-border bg-input px-2 py-1 text-sm"
 			type="password"
 			bind:value={password}
 			autocomplete="current-password"

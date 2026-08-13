@@ -27,7 +27,7 @@
 	<p class="text-sm font-medium">{t('state.blocked.title')}</p>
 	<p class="text-sm">{state.reason}</p>
 	{#if state.retryAfter}
-		<p class="text-sm text-[var(--muted-foreground)]">
+		<p class="text-sm text-muted-foreground">
 			{t('state.blocked.retryAt', { duration: state.retryAfter })}
 		</p>
 	{/if}
