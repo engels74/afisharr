@@ -47,20 +47,34 @@ pub(crate) async fn run(state: &ApiState) -> AppResult<PlexConnection> {
     }
 }
 
-/// The Plex server token, decrypted, or `None` when none is stored.
+/// The Plex server token, decrypted, or `None` when none can be presented.
 async fn plex_token(state: &ApiState) -> AppResult<Option<String>> {
-    let sealed = secrets::get(
+    let sealed = match secrets::get(
         state.database().readers(),
         state.secret_key(),
         PLEX_TOKEN_SECRET,
     )
     .await
-    .map_err(AppError::internal)?;
-    // A secret that will not decrypt is a database restored without its key
-    // (`I-SEC-5`), which is a different problem from having no token at all —
-    // but both leave this instance with nothing to present, and both are fixed
-    // by signing in to Plex again. The distinction is the restore path's to
-    // draw, and it is drawn in Phase 12.
+    {
+        Ok(sealed) => sealed,
+        // A secret that will not decrypt is a database restored without its key
+        // (`I-SEC-5`), which is a different problem from having no token at all
+        // — but both leave this instance with nothing to present, and both are
+        // fixed by signing in to Plex again. The distinction is the restore
+        // path's to draw, and it is drawn in Phase 12. Reporting it as an
+        // internal failure here would put a 500 on the one page that could have
+        // told the operator what to do about it. Nothing is deleted on the
+        // strength of it: this reads, and the row stays exactly where it is.
+        Err(error @ secrets::SecretError::Undecryptable { .. }) => {
+            tracing::warn!(
+                %error,
+                "the stored Plex token could not be decrypted with the current key; \
+                 reporting this instance as having no credential"
+            );
+            None
+        }
+        Err(error) => return Err(AppError::internal(error)),
+    };
     sealed
         .map(|bytes| String::from_utf8(bytes).map_err(AppError::internal))
         .transpose()
@@ -120,8 +134,9 @@ async fn observed(
     let bound = MachineIdentifier::new(server.machine_identifier.clone());
     let verdict = verify_binding(Some(&bound), &identity.machine_identifier);
 
+    let blocked = verdict.blocks();
     let answer = PlexConnection {
-        state: if verdict.blocks() {
+        state: if blocked {
             PlexConnectionState::WrongServer
         } else {
             PlexConnectionState::Reachable
@@ -129,10 +144,18 @@ async fn observed(
         base_url: Some(server.base_url.clone()),
         bound_machine_identifier: Some(server.machine_identifier.clone()),
         observed_machine_identifier: Some(identity.machine_identifier.to_string()),
-        friendly_name: identity
-            .friendly_name
-            .clone()
-            .or_else(|| Some(server.friendly_name.clone())),
+        // The fallback is the *bound* server's recorded name, and `GET /identity`
+        // never carries one — so on a blocked verdict it would pair the old
+        // server's name with the stranger's version and present the two as one
+        // server describing itself (P1). Nobody named the machine that answered,
+        // so this answer does not either.
+        friendly_name: identity.friendly_name.clone().or_else(|| {
+            if blocked {
+                None
+            } else {
+                Some(server.friendly_name.clone())
+            }
+        }),
         version: Some(identity.version.clone()),
         detail: None,
         checked_at: now.as_millis(),

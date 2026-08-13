@@ -36,9 +36,17 @@ impl ItemPage {
     #[must_use]
     pub fn has_more(&self) -> bool {
         let filled = u32::try_from(self.items.len()).unwrap_or(u32::MAX) >= self.window.size;
+        if !filled {
+            // Short of what was asked for is the end of the result, whatever the
+            // total says. A server whose reported total outruns what it actually
+            // returned — items removed between windows, or a total counted before
+            // a filter — would otherwise have the caller request window after
+            // empty window until the arithmetic caught up.
+            return false;
+        }
         match self.total {
             Some(total) => self.window.start.saturating_add(self.window.size) < total,
-            None => filled && self.window.size > 0,
+            None => self.window.size > 0,
         }
     }
 }
@@ -122,6 +130,17 @@ mod tests {
                 size: 2,
             },
         );
+        assert!(!page.has_more());
+    }
+
+    #[test]
+    fn a_short_window_stops_even_when_the_total_says_otherwise() {
+        // Items removed between windows, or a total counted before a filter
+        // narrowed the result: the server still claims 1200 and returned two of
+        // a window of fifty. Reading the total alone would send the caller
+        // through twenty-four more windows with nothing in any of them.
+        let page = page(TWO_ITEMS, Window { start: 0, size: 50 });
+        assert_eq!(page.total, Some(1200));
         assert!(!page.has_more());
     }
 
