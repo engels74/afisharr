@@ -3,6 +3,7 @@
 	SPDX-License-Identifier: AGPL-3.0-or-later
 -->
 <script lang="ts">
+	import { untrack } from 'svelte';
 	import type { Problem } from '$lib/api/client';
 	import {
 		BlockedState,
@@ -11,7 +12,7 @@
 		LoadingState,
 	} from '$lib/components/state';
 	import { t } from '$lib/shared/i18n';
-	import ConnectionFacts from './connection-facts.svelte';
+	import ConnectionEvidence from './connection-evidence.svelte';
 	import { checkConnection, type PlexConnection } from './plex-client';
 	import WrongServerChoices from './wrong-server-choices.svelte';
 
@@ -45,13 +46,24 @@
 		connection = result.value;
 	}
 
-	// The check runs on load, and the loading treatment is driven by real
-	// elapsed time rather than by a guess: nothing under 300ms, a skeleton to
-	// about three seconds, progress text beyond it (PRD §8.2).
+	// The check runs once, on load.
+	//
+	// `untrack`, and it is load-bearing. `check()` reads `checking` for its own
+	// re-entry guard, and a read inside an effect is a subscription — so the
+	// effect re-ran the moment the guard flipped, hit its own early return, and
+	// re-ran again when the request settled. The panel rendered nothing at all:
+	// no state, no error, no empty treatment, just the heading and a button. It
+	// passed every unit test in this feature, because none of them mounted the
+	// panel; a screenshot of the running page is what found it.
 	$effect(() => {
-		void check();
+		untrack(() => {
+			void check();
+		});
 	});
 
+	// The loading treatment is driven by real elapsed time rather than by a
+	// guess: nothing under 300 ms, a skeleton to about three seconds, progress
+	// text beyond it (PRD §8.2).
 	$effect(() => {
 		if (!checking) {
 			return;
@@ -63,7 +75,13 @@
 	});
 </script>
 
-<section class="flex flex-col gap-4" data-slot="plex-connection">
+<!--
+	Verdict first, evidence under it, and the evidence is the same block in
+	every state that has any. A page that rearranged itself per outcome would
+	make the operator re-find the identifier each time they checked, and the
+	identifier is what they came for.
+-->
+<section class="flex flex-col gap-5" data-slot="plex-connection">
 	<div class="flex items-baseline justify-between gap-4">
 		<h2 class="text-sm font-medium">{t('plex.connection.title')}</h2>
 		<button
@@ -97,16 +115,19 @@
 			<BlockedState
 				state={{
 					kind: 'blocked',
-					reason: t('plex.connection.wrongServer.reason', {
-						address: seen.baseUrl ?? '',
-						expected: seen.boundMachineIdentifier ?? '',
-						found: seen.observedMachineIdentifier ?? '',
-					}),
-					unblockLabel: t('plex.connection.wrongServer.unblock'),
+					reason: t('plex.connection.wrongServer.reason'),
 				}}
 			>
 				{#snippet action()}
-					<WrongServerChoices connection={seen} />
+					<!--
+						Evidence before remedies. The claim is that a different
+						server answered; the two identifiers are what makes that
+						checkable, and an operator asked to choose between
+						abandoning their work and restoring a backup should not
+						have to scroll past both options to see the proof.
+					-->
+					<ConnectionEvidence connection={seen} />
+					<WrongServerChoices />
 				{/snippet}
 			</BlockedState>
 		{:else if seen.state === 'unreachable'}
@@ -118,21 +139,16 @@
 					detail: seen.detail ?? undefined,
 				}}
 			/>
-			<ConnectionFacts connection={seen} />
+			<ConnectionEvidence connection={seen} />
 		{:else if seen.state === 'reachable'}
-			<p class="text-sm">
-				{t('plex.connection.reachable.body', {
-					server: seen.friendlyName ?? seen.baseUrl ?? '',
-				})}
-			</p>
-			<ConnectionFacts connection={seen} />
+			<p class="text-sm">{t('plex.connection.reachable.body')}</p>
+			<ConnectionEvidence connection={seen} />
 		{:else if seen.state === 'noCredential'}
 			<EmptyState
 				state={{ kind: 'empty', reason: 'pending' }}
-				explanation={t('plex.connection.noCredential.body', {
-					address: seen.baseUrl ?? '',
-				})}
+				explanation={t('plex.connection.noCredential.body')}
 			/>
+			<ConnectionEvidence connection={seen} />
 		{:else}
 			<EmptyState
 				state={{ kind: 'empty', reason: 'nothingCreated' }}

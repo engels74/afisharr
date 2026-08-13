@@ -144,35 +144,32 @@ export const en = {
 	'plex.connection.title': 'Plex connection',
 	'plex.connection.check': 'Check now',
 	'plex.connection.checking': 'Asking the server who it is',
-	'plex.connection.checkedAt': 'Last checked {when}.',
 	'plex.connection.address': 'Address',
-	'plex.connection.serverName': 'Server',
-	'plex.connection.version': 'Version',
-	'plex.connection.identifier': 'Machine identifier',
-	'plex.connection.reachable.title': 'Connected',
+	'plex.connection.identity': 'Identity',
+	'plex.connection.bound': 'Bound',
+	'plex.connection.answered': 'Answered',
 	'plex.connection.reachable.body':
-		'{server} answered, and it is the server this installation is bound to.',
-	'plex.connection.notConfigured.title': 'No Plex server yet',
+		'The server at this address is the one Afisharr manages.',
 	'plex.connection.notConfigured.body':
-		'Nothing is bound to this installation. Connecting a server is part of first-run setup.',
-	'plex.connection.noCredential.title': 'No Plex credential stored',
+		'Afisharr is not managing a Plex server yet. Connect one during setup.',
 	'plex.connection.noCredential.body':
-		'A server is bound at {address}, and this instance holds no token to reach it with. Sign in to Plex again.',
-	'plex.connection.unreachable.title': 'Plex did not answer',
+		'Afisharr has no Plex sign-in to reach this server with. Sign in to Plex again.',
+	'plex.connection.unreachable.title': 'The server did not answer',
 	'plex.connection.unreachable.consequence':
-		'Nothing bound to this server can be read or written until it answers. Nothing has been changed.',
+		'Collections, posters, and the home screen stay as they are until it does. Nothing has been changed.',
 	'plex.connection.wrongServer.reason':
-		'A different Plex server answered at {address}. This installation is bound to {expected}, and {found} answered. Every rating key, adoption, and position stored here means something else on that server, so nothing has been read, written, or rebound.',
-	'plex.connection.wrongServer.unblock':
-		'Two ways forward, and this instance will take neither on its own.',
-	'plex.connection.wrongServer.rebind': 'This is a new server — rebind',
+		'A different Plex server answered at this address. Everything Afisharr recorded — collections, posters, positions — points at the server it was set up against, and means something else on this one. Nothing has been read, written, or moved.',
+	'plex.connection.wrongServer.unblock': 'Two ways forward. Pick one:',
+	'plex.connection.wrongServer.rebind': 'Start again on the new server',
 	'plex.connection.wrongServer.rebindBody':
-		'Abandons every binding recorded against {expected} and starts again against {found}. It cannot be undone from here.',
+		'Afisharr forgets every collection, poster, and position it recorded, and builds them again here.',
+	'plex.connection.wrongServer.rebindCost': 'Cannot be undone',
 	'plex.connection.wrongServer.restore': 'Restore a backup',
 	'plex.connection.wrongServer.restoreBody':
-		'Keeps the bindings and puts the original server back. Restore runs from the command line against a backup taken before the change.',
+		'Keeps everything Afisharr recorded and puts the original server back in front of it.',
+	'plex.connection.wrongServer.restoreCost': 'Keeps your work',
 	'plex.connection.wrongServer.notYet':
-		'Neither is available in this build yet. Point the address back at {expected}, or take the decision once the recovery surface ships.',
+		'Neither runs from here yet. Point the address back at the server above to carry on in the meantime.',
 	'page.notFound.title': 'No such page',
 	'page.notFound.body':
 		'That address does not resolve to anything on this instance.',

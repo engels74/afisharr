@@ -4,16 +4,31 @@
 -->
 <script lang="ts">
 	import { t } from '$lib/shared/i18n';
-	import type { PlexConnection } from './plex-client';
 
-	interface Props {
-		connection: PlexConnection;
-	}
-
-	let { connection }: Props = $props();
-
-	const expected = $derived(connection.boundMachineIdentifier ?? '');
-	const found = $derived(connection.observedMachineIdentifier ?? '');
+	/**
+	 * The two ways out, heaviest first.
+	 *
+	 * Ordered by what each one costs rather than alphabetically or by how
+	 * likely it is, because the order is the only thing on this surface that
+	 * says they are not equivalent: one abandons everything recorded against
+	 * the old server, the other puts the old server back. `keeps` carries that
+	 * difference as a label rather than as a colour, so it survives both modes
+	 * and a reader who is skimming.
+	 */
+	const ways = $derived([
+		{
+			key: 'rebind',
+			title: t('plex.connection.wrongServer.rebind'),
+			body: t('plex.connection.wrongServer.rebindBody'),
+			cost: t('plex.connection.wrongServer.rebindCost'),
+		},
+		{
+			key: 'restore',
+			title: t('plex.connection.wrongServer.restore'),
+			body: t('plex.connection.wrongServer.restoreBody'),
+			cost: t('plex.connection.wrongServer.restoreCost'),
+		},
+	]);
 </script>
 
 <!--
@@ -25,27 +40,21 @@
 	Neither is a control, because neither mechanism exists in this build yet —
 	rebinding arrives with the library cache and restore with the backup phase.
 	A button that did nothing would be the interface lying about what it can do
-	(PRD §8.6), so what is offered is the choice and what each costs, alongside
-	the one move that is available now.
+	(PRD §8.6), so what is offered is the choice, what each costs, and the one
+	move that is available right now.
 -->
 <div class="flex flex-col gap-3" data-slot="wrong-server-choices">
-	<div class="flex flex-col gap-1">
-		<p class="text-sm font-medium">
-			{t('plex.connection.wrongServer.rebind')}
-		</p>
-		<p class="text-sm text-muted-foreground">
-			{t('plex.connection.wrongServer.rebindBody', { expected, found })}
-		</p>
-	</div>
-	<div class="flex flex-col gap-1">
-		<p class="text-sm font-medium">
-			{t('plex.connection.wrongServer.restore')}
-		</p>
-		<p class="text-sm text-muted-foreground">
-			{t('plex.connection.wrongServer.restoreBody')}
-		</p>
-	</div>
-	<p class="text-sm">
-		{t('plex.connection.wrongServer.notYet', { expected })}
-	</p>
+	<p class="text-sm">{t('plex.connection.wrongServer.unblock')}</p>
+	<ul class="flex flex-col gap-3">
+		{#each ways as way (way.key)}
+			<li class="border-l-2 border-border pl-3" data-way={way.key}>
+				<p class="text-sm font-medium">{way.title}</p>
+				<p class="text-sm text-muted-foreground">{way.body}</p>
+				<p class="text-xs uppercase tracking-wider text-muted-foreground">
+					{way.cost}
+				</p>
+			</li>
+		{/each}
+	</ul>
+	<p class="text-sm">{t('plex.connection.wrongServer.notYet')}</p>
 </div>
