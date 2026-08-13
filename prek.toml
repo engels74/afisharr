@@ -24,13 +24,16 @@ default_install_hook_types = ["pre-commit", "commit-msg", "pre-push"]
 
 # Builtin hooks — fast, offline, Rust-native.
 # LICENSE is excluded from the whitespace and EOF fixers: it is the verbatim
-# AGPL-3.0 text and must not be reformatted.
+# AGPL-3.0 text and must not be reformatted. The self-hosted faces' OFL texts
+# are excluded for the same reason — the SIL Open Font License obliges the
+# notice to travel with the font, and a fixer that strips a trailing space is
+# editing somebody else's licence (§21.9, D-050).
 [[repos]]
 repo = "builtin"
 hooks = [
-  { id = "trailing-whitespace", exclude = "^LICENSE$" },
-  { id = "end-of-file-fixer", exclude = "^LICENSE$" },
-  { id = "mixed-line-ending", args = ["--fix=lf"], exclude = "^LICENSE$" },
+  { id = "trailing-whitespace", exclude = "^(LICENSE|frontend/static/fonts/.*\\.LICENSE\\.txt)$" },
+  { id = "end-of-file-fixer", exclude = "^(LICENSE|frontend/static/fonts/.*\\.LICENSE\\.txt)$" },
+  { id = "mixed-line-ending", args = ["--fix=lf"], exclude = "^(LICENSE|frontend/static/fonts/.*\\.LICENSE\\.txt)$" },
   { id = "check-merge-conflict" },
   { id = "check-case-conflict" },
   # 1 MB, not the 512 KB default. The guard exists to stop binaries and build
