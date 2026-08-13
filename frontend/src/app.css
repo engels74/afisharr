@@ -7,12 +7,15 @@
  * 53 tokens and 52 — and this file is the only place in `frontend/src` where a
  * color is written down. Everything else names a token.
  *
- * One token departs from the registry, and says so where it sits:
- * `--destructive` is darkened from L 0.6368 to L 0.5928, hue and chroma
- * untouched. The registry red carries white text at 3.76:1, and the one control
- * that fills with it is the proceed button of a destructive action — the last
- * thing an operator reads before something is deleted. 4.5:1 is the floor for
- * text that size. A re-sync from tweakcn will offer 0.6368 back; keep 0.5928.
+ * One token departs from the registry: `--destructive` is darkened from
+ * L 0.6368 to L 0.5928, hue and chroma untouched. The registry red carries
+ * white text at 3.76:1, and the one control that fills with it is the proceed
+ * button of a destructive action — the last thing an operator reads before
+ * something is deleted. 4.5:1 is the floor for text that size, and 0.5928
+ * reads 4.51:1. A re-sync from tweakcn will offer 0.6368 back; keep 0.5928.
+ *
+ * That darkening costs the other place the red is used, so one token is added
+ * below the copied blocks: `--destructive-rule`. Its comment carries the rest.
  *
  * They are CSS variables rather than UnoCSS theme entries because that is the
  * form the shadcn-svelte components read; `uno.config.ts` binds the utility
@@ -187,6 +190,20 @@
 	--shadow-xl:
 		0px 1px 3px 0px hsl(0 0% 0% / 0.1), 0px 8px 10px -1px hsl(0 0% 0% / 0.1);
 	--shadow-2xl: 0px 1px 3px 0px hsl(0 0% 0% / 0.25);
+}
+
+/* Ours, not the registry's. One red cannot do both of the jobs the interface
+ * asks of it: a fill carries white text, so it has to be dark, while a rule
+ * marking an error sits on a surface, so on the dark card it has to be light.
+ * `--destructive` took the fill. This takes the rule, and in dark mode it is
+ * the registry's own 0.6368 — 3.50:1 against the card, where the fill's
+ * 0.5928 reads 2.92:1 and misses the 3:1 floor for a mark that is not text. */
+:root {
+	--destructive-rule: oklch(0.5928 0.2078 25.3313);
+}
+
+.dark {
+	--destructive-rule: oklch(0.6368 0.2078 25.3313);
 }
 
 /* The registry's one base rule. Plain CSS, not `@layer base`: that is a

@@ -96,13 +96,13 @@
 		<!--
 			The destructive token marks the message, it does not colour it — the
 			same rule `error-state.svelte` follows, and for the same arithmetic.
-			Against the card the red is 3.76:1 in light and 3.50:1 in dark:
+			Against the card the red is 4.51:1 in light and 3.50:1 in dark:
 			enough for a rule, which WCAG asks 3:1 of, and short of the 4.5:1
-			this text owes. The sentence saying why a password was refused is
-			the last one that should be hard to read.
+			this text owes in dark. The sentence saying why a password was
+			refused is the last one that should be hard to read.
 		-->
 		{#if usernameProblem}
-			<p class="border-l-2 border-destructive pl-2 text-xs">{usernameProblem}</p>
+			<p class="border-l-2 border-destructive-rule pl-2 text-xs">{usernameProblem}</p>
 		{/if}
 
 		<label class="text-sm" for={passwordId}>{t('auth.password')}</label>
@@ -114,7 +114,7 @@
 			autocomplete="new-password"
 		/>
 		{#if passwordProblem}
-			<p class="border-l-2 border-destructive pl-2 text-xs">{passwordProblem}</p>
+			<p class="border-l-2 border-destructive-rule pl-2 text-xs">{passwordProblem}</p>
 		{/if}
 
 		<button class="self-start text-sm underline" type="submit" disabled={submitting}>

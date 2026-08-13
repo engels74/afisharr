@@ -70,6 +70,7 @@ export default defineConfig({
 			destructive: {
 				DEFAULT: 'var(--destructive)',
 				foreground: 'var(--destructive-foreground)',
+				rule: 'var(--destructive-rule)',
 			},
 			border: 'var(--border)',
 			input: 'var(--input)',

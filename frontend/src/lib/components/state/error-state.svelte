@@ -19,15 +19,19 @@
 </script>
 
 <!--
-	The destructive token marks the block, not the prose. At `text-sm` it is
-	3.76:1 against the card in light and 3.50:1 in dark — enough for a rule,
-	which WCAG asks 3:1 of, and short of the 4.5:1 text owes. A red that fails
-	on the one state an operator most needs to read is a red chosen for the
-	reviewer rather than for the room (P2).
+	The destructive token marks the block, not the prose. At `text-sm` the red
+	is 4.51:1 against the card in light and 3.50:1 in dark — enough for a rule,
+	which WCAG asks 3:1 of, and short of the 4.5:1 text owes in dark. A red that
+	fails on the one state an operator most needs to read is a red chosen for
+	the reviewer rather than for the room (P2).
+
+	The rule takes `--destructive-rule` rather than `--destructive`, which is
+	darkened so the proceed button can carry white text and would leave this
+	mark at 2.92:1 in dark. `app.css` carries the arithmetic.
 -->
 <div
 	class={cn(
-		'flex flex-col items-start gap-2 border-l-2 border-destructive py-6 pl-3',
+		'flex flex-col items-start gap-2 border-l-2 border-destructive-rule py-6 pl-3',
 		className,
 	)}
 	data-slot="error-state"
