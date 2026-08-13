@@ -7,6 +7,7 @@ use std::sync::{Arc, atomic::AtomicBool, atomic::Ordering};
 
 use afisharr_core::{secrets::SecretKey, setup::TokenStore, storage::Database, time::Clock};
 use afisharr_plex::pin::PlexTvClient;
+use afisharr_sources::outbound::OutboundClient;
 
 use crate::{
     interface::AssetSource,
@@ -49,6 +50,7 @@ struct Inner {
     secret_key: Arc<SecretKey>,
     bootstrap: Arc<TokenStore>,
     plex: PlexTvClient,
+    outbound: OutboundClient,
     limiter: RateLimiter,
     trusted_proxies: TrustedProxies,
     public_origin: Option<PublicOrigin>,
@@ -75,6 +77,12 @@ pub struct ApiStateParts {
     pub bootstrap: Arc<TokenStore>,
     /// The plex.tv client the login flow uses.
     pub plex: PlexTvClient,
+    /// The one instrumented outbound client (PRD §21.2.5).
+    ///
+    /// Held apart from `plex` because a Plex *server* client is built per
+    /// request from the bound address and the stored token, and it must reach
+    /// the same transport rather than construct a second one.
+    pub outbound: OutboundClient,
     /// Proxies whose forwarded headers are honoured.
     pub trusted_proxies: TrustedProxies,
     /// The origin operators reach this instance at, when one is configured.
@@ -101,6 +109,7 @@ impl ApiState {
                 secret_key: parts.secret_key,
                 bootstrap: parts.bootstrap,
                 plex: parts.plex,
+                outbound: parts.outbound,
                 limiter,
                 trusted_proxies: parts.trusted_proxies,
                 public_origin: parts.public_origin,
@@ -145,6 +154,12 @@ impl ApiState {
     #[must_use]
     pub fn plex(&self) -> &PlexTvClient {
         &self.inner.plex
+    }
+
+    /// The one outbound HTTP client every external request leaves through.
+    #[must_use]
+    pub fn outbound(&self) -> &OutboundClient {
+        &self.inner.outbound
     }
 
     /// The rate limiter.

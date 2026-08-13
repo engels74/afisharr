@@ -15,11 +15,34 @@ authors.workspace = true
 
 [dependencies]
 afisharr-sources.workspace = true
+# `axum` and `tokio` serve the adversarial fake and nothing else, so both are
+# optional and reached only through the `fake` feature below.
+axum = { workspace = true, optional = true }
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
+tokio = { workspace = true, optional = true, features = [
+  "macros",
+  "net",
+  "rt-multi-thread",
+  "sync",
+  "time",
+] }
 tracing.workspace = true
 url.workspace = true
 
+[features]
+# The adversarial fake (D-036). Off by default, so a release build carries no
+# HTTP server and no scenario table; enabled by every later crate's
+# dev-dependencies, because a `#[cfg(test)]` module is invisible to the test
+# suites of other crates and D-036's fake is consumed by all of them.
+fake = ["dep:axum", "dep:tokio"]
+
 [lints]
 workspace = true
+
+[dev-dependencies]
+# This crate's own tests drive the fake, so they turn it on for themselves.
+afisharr-plex = { workspace = true, features = ["fake"] }
+serde_urlencoded.workspace = true
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }

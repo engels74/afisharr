@@ -28,7 +28,7 @@ use axum::{
 use std::net::SocketAddr;
 
 use crate::{
-    authentication, error::AppError, files, health, interface, keys, proxy::ClientContext,
+    authentication, error::AppError, files, health, interface, keys, plex, proxy::ClientContext,
     security, setup, state::ApiState, stream,
 };
 
@@ -191,6 +191,10 @@ fn guarded_routes(state: &ApiState) -> Router<ApiState> {
         )
         .route("/settings/api-keys", get(keys::list).post(keys::create))
         .route("/settings/api-keys/{id}", delete(keys::revoke))
+        .route(
+            "/settings/plex/connection/check",
+            post(plex::check_connection),
+        )
         .route("/stream", get(stream::stream))
         // Called after the last route and before the layer, which is what makes
         // it work at all: it attaches to every method router registered so far,

@@ -12,10 +12,12 @@ mod body;
 mod client;
 mod deadline;
 mod error;
+mod request;
 
 pub use client::{OutboundClient, Response};
 pub use deadline::Deadline;
 pub use error::OutboundError;
+pub use request::RequestBody;
 // The transport's own types, re-exported so an adapter names the seam rather
 // than the crate behind it. An adapter that depends on `reqwest` directly is an
 // adapter that can build its own client (PRD §21.2.5).

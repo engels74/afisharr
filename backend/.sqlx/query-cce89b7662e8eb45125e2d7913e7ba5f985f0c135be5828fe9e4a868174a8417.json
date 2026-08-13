@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "UPDATE plex_server\n                SET friendly_name = ?2,\n                    platform      = ?4,\n                    base_url      = ?5,\n                    last_seen_at  = ?6,\n                    last_version_change_at =\n                        CASE WHEN version = ?3 THEN last_version_change_at ELSE ?6 END,\n                    version       = ?3\n              WHERE id = 1 AND machine_identifier = ?1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 6
+    },
+    "nullable": []
+  },
+  "hash": "cce89b7662e8eb45125e2d7913e7ba5f985f0c135be5828fe9e4a868174a8417"
+}

@@ -141,6 +141,38 @@ export const en = {
 	'page.settings.general': 'General',
 	'page.settings.teardown': 'Teardown',
 	'page.settings.about': 'About',
+	'plex.connection.title': 'Plex connection',
+	'plex.connection.check': 'Check now',
+	'plex.connection.checking': 'Asking the server who it is',
+	'plex.connection.checkedAt': 'Last checked {when}.',
+	'plex.connection.address': 'Address',
+	'plex.connection.serverName': 'Server',
+	'plex.connection.version': 'Version',
+	'plex.connection.identifier': 'Machine identifier',
+	'plex.connection.reachable.title': 'Connected',
+	'plex.connection.reachable.body':
+		'{server} answered, and it is the server this installation is bound to.',
+	'plex.connection.notConfigured.title': 'No Plex server yet',
+	'plex.connection.notConfigured.body':
+		'Nothing is bound to this installation. Connecting a server is part of first-run setup.',
+	'plex.connection.noCredential.title': 'No Plex credential stored',
+	'plex.connection.noCredential.body':
+		'A server is bound at {address}, and this instance holds no token to reach it with. Sign in to Plex again.',
+	'plex.connection.unreachable.title': 'Plex did not answer',
+	'plex.connection.unreachable.consequence':
+		'Nothing bound to this server can be read or written until it answers. Nothing has been changed.',
+	'plex.connection.wrongServer.reason':
+		'A different Plex server answered at {address}. This installation is bound to {expected}, and {found} answered. Every rating key, adoption, and position stored here means something else on that server, so nothing has been read, written, or rebound.',
+	'plex.connection.wrongServer.unblock':
+		'Two ways forward, and this instance will take neither on its own.',
+	'plex.connection.wrongServer.rebind': 'This is a new server — rebind',
+	'plex.connection.wrongServer.rebindBody':
+		'Abandons every binding recorded against {expected} and starts again against {found}. It cannot be undone from here.',
+	'plex.connection.wrongServer.restore': 'Restore a backup',
+	'plex.connection.wrongServer.restoreBody':
+		'Keeps the bindings and puts the original server back. Restore runs from the command line against a backup taken before the change.',
+	'plex.connection.wrongServer.notYet':
+		'Neither is available in this build yet. Point the address back at {expected}, or take the decision once the recovery surface ships.',
 	'page.notFound.title': 'No such page',
 	'page.notFound.body':
 		'That address does not resolve to anything on this instance.',

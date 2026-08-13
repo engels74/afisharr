@@ -34,6 +34,7 @@ pub mod health;
 pub mod interface;
 pub mod keys;
 pub mod openapi;
+pub mod plex;
 pub mod proxy;
 pub mod ratelimit;
 pub mod router;

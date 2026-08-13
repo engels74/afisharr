@@ -5,11 +5,15 @@
 //!
 //! The Plex client: the protocol surface Afisharr actually calls, and no more.
 //!
-//! Phase 1 needs one part of it — the plex.tv PIN and OAuth token exchange
-//! behind the login flow — so [`pin`] is what exists here. The library, item,
-//! collection, hub, label, artwork, and filter-metadata calls arrive with the
-//! rest of the protocol surface, along with the adversarial fake they are
-//! tested against (D-036).
+//! [`pin`] and [`account`] are the plex.tv half: the PIN and OAuth token
+//! exchange behind the login flow. Everything else here is the server half —
+//! [`server`] owns the connection and the machine identifier `I-ID-5` rests on,
+//! and [`libraries`], [`collections`], [`hubs`], [`labels`], [`streams`],
+//! [`artwork`], and [`discovery`] are the calls Afisharr actually makes,
+//! and no more.
+//!
+//! The adversarial fake (D-036) lives in `fake`, behind the `fake` feature so
+//! it is compiled for tests and absent from the shipped binary.
 //!
 //! Every request leaves through the one instrumented outbound client in
 //! `afisharr-sources` (PRD §21.2.5). This crate owns the protocol; it does not
@@ -22,5 +26,15 @@
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 
 pub mod account;
+pub mod artwork;
+pub mod collections;
+pub mod discovery;
+#[cfg(feature = "fake")]
+pub mod fake;
+pub mod hubs;
 pub mod identity;
+pub mod labels;
+pub mod libraries;
 pub mod pin;
+pub mod server;
+pub mod streams;

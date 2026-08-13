@@ -224,6 +224,34 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/settings/plex/connection/check": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Checks the Plex connection and reports what it saw.
+         * @description A `POST` because it is an act with a side effect, not a read of a cached
+         *     value: it makes a request to the operator's server and records the
+         *     observation. Answering it from a `GET` would put a network call and a write
+         *     behind a method a browser prefetch may issue, and behind a method the CSRF
+         *     layer exempts.
+         *
+         *     Metered against the provider bucket rather than the general API one: it
+         *     reaches somebody else's server on the caller's behalf, which is the rule
+         *     PRD §21.4.3 sets for every provider-calling endpoint.
+         */
+        post: operations["check_connection"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/settings/sessions": {
         parameters: {
             query?: never;
@@ -665,6 +693,49 @@ export interface components {
             /** @enum {string} */
             state: "expired";
         };
+        /** @description The whole answer the Settings page renders from. */
+        PlexConnection: {
+            /** @description The address the bound server is reached at, when one is bound. */
+            baseUrl?: string | null;
+            /**
+             * @description The identifier this installation is bound to, when one is bound.
+             *
+             *     Present on every state that has a binding, including
+             *     [`PlexConnectionState::WrongServer`] — the operator's decision needs
+             *     both sides of the mismatch, and an answer naming only the stranger tells
+             *     them nothing about what they are being asked to abandon.
+             */
+            boundMachineIdentifier?: string | null;
+            /**
+             * Format: int64
+             * @description When this check ran, in epoch milliseconds.
+             */
+            checkedAt: number;
+            /**
+             * @description The technical detail behind an unreachable answer, for the collapsed
+             *     detail §8.4 describes. Never a user-facing sentence: the interface
+             *     composes those from its own catalogue (`I-UX-7`).
+             */
+            detail?: string | null;
+            /** @description The name the server reports, when it answered. */
+            friendlyName?: string | null;
+            /** @description The identifier that actually answered, when something did. */
+            observedMachineIdentifier?: string | null;
+            /** @description Where the connection stands. */
+            state: components["schemas"]["PlexConnectionState"];
+            /** @description The version it reports, when it answered. */
+            version?: string | null;
+        };
+        /**
+         * @description Where the Plex connection stands.
+         *
+         *     A closed enum the client narrows on, never a status code it infers from
+         *     (`I-UX-2`). Five variants and not three, because "nothing is configured" and
+         *     "the server did not answer" are opposite problems and an operator shown the
+         *     second for the first goes looking for a network fault that is not there.
+         * @enum {string}
+         */
+        PlexConnectionState: "notConfigured" | "noCredential" | "reachable" | "unreachable" | "wrongServer";
         /**
          * @description The body of every failed response on this surface.
          *
@@ -1463,6 +1534,53 @@ export interface operations {
             };
             /** @description That account has no password to change, or another change reached it first */
             409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Too many requests */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    check_connection: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description What the check saw. A `wrongServer` state is blocking (`I-ID-5`) and carries both identifiers */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PlexConnection"];
+                };
+            };
+            /** @description No accepted credential was presented */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description That account does not administer this instance, that key was not issued with the scope this route needs, or setup has not been completed */
+            403: {
                 headers: {
                     [name: string]: unknown;
                 };

@@ -65,6 +65,10 @@ requirement! {
     /// Listing, issuing, and revoking API keys.
     KeysManage => Scope::KeysManage
 }
+requirement! {
+    /// Reading the Plex connection, and checking it.
+    PlexRead => Scope::PlexRead
+}
 
 /// A caller who has proved who they are, on a route their credential reaches.
 ///
@@ -184,6 +188,7 @@ mod tests {
             SessionsManage::SCOPE,
             AccountManage::SCOPE,
             KeysManage::SCOPE,
+            PlexRead::SCOPE,
         ];
         let mut sorted = named.to_vec();
         sorted.sort_unstable();
