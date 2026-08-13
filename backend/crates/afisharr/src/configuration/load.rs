@@ -155,7 +155,7 @@ fn apply_seed_environment(body: &mut SettingsBody) -> Result<()> {
 /// the environment is currently holding.
 ///
 /// # Errors
-/// As [`apply_environment`].
+/// As [`apply_seed_environment`].
 pub fn apply_deployment_environment(body: &mut SettingsBody) -> Result<()> {
     if let Some(value) = override_value("BIND_ADDRESS")? {
         body.http.bind_address = value;

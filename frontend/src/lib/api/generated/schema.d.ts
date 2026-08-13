@@ -958,6 +958,15 @@ export interface operations {
                     "application/json": components["schemas"]["Problem"];
                 };
             };
+            /** @description plex.tv issued the sign-in under a different client identifier */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Problem"];
+                };
+            };
             /** @description Too many attempts */
             429: {
                 headers: {
@@ -1897,6 +1906,15 @@ export interface operations {
             };
             /** @description Setup has already been completed */
             404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Another browser holds the wizard */
+            409: {
                 headers: {
                     [name: string]: unknown;
                 };

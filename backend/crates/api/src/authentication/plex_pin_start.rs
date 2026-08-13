@@ -67,6 +67,15 @@ pub struct PinStarted {
         (status = 200, description = "A pin was created", body = PinStarted),
         (status = 400, description = "The request body was not readable, or the return target is not this instance's configured origin", body = Problem),
         (status = 403, description = "Setup has not been completed on this instance", body = Problem),
+        // `plex_failure` answers `conflict` for `ClientIdentifierMismatch`, and
+        // `create_pin` raises exactly that when plex.tv files the pin under
+        // another client identifier or omits the field. `poll_plex_pin`
+        // declares the same 409 for the same mapper; leaving it off here made
+        // it the one answer this route can give that the generated client has
+        // no shape for, so a plex.tv version change that drops the field shows
+        // the operator an unhandled error instead of the sentence telling them
+        // to start again (§24.5).
+        (status = 409, description = "plex.tv issued the sign-in under a different client identifier", body = Problem),
         (status = 429, description = "Too many attempts", body = Problem),
         (status = 502, description = "plex.tv could not be reached", body = Problem),
     ),

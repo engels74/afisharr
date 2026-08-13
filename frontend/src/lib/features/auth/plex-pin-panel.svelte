@@ -67,6 +67,18 @@
 	let started = $state<PinStarted | undefined>(resume());
 	let refusal = $state<Problem | undefined>(undefined);
 	let expired = $state(false);
+	/**
+	 * Whether a start is on the wire, so a second click cannot send another.
+	 *
+	 * Every other form on this surface guards its submit. Without it a double
+	 * click sent two `POST /api/auth/plex/pin`, spent two of the sixty provider
+	 * attempts an address gets a minute — which the interval above is already
+	 * chosen tightly against — and orphaned the first pin, because the second
+	 * answer overwrites `started` and nothing ever polls the first to a
+	 * conclusion. On the hosted variant it also called
+	 * `window.location.assign` twice.
+	 */
+	let starting = $state(false);
 
 	/**
 	 * Whether the hosted variant is still worth offering.
@@ -101,9 +113,25 @@
 	 * operator is shown.
 	 */
 	async function begin(oauth: boolean) {
+		if (starting) {
+			return;
+		}
+		starting = true;
 		refusal = undefined;
+		// The old attempt goes before the new one is asked for, and that order
+		// is the whole of it. `expired` was cleared here while `started` still
+		// held the dead pin, so the waiting branch matched again and the panel
+		// re-rendered the expired four-character code under "Waiting for
+		// Plex…", with the polling effect restarted on it. A start that is then
+		// refused — `rateLimited` is the ordinary one here, since two
+		// concurrent sign-ins share the per-address provider budget — left that
+		// standing: the start buttons live in the `{:else}`, so there was no
+		// control left to try again and the operator sat typing a dead code at
+		// plex.tv (`I-UX-2`).
+		started = undefined;
 		expired = false;
 		const result = await startPlexPin(oauth);
+		starting = false;
 		if (result.outcome === 'refused') {
 			refusal = result.problem;
 			if (oauth && refusedTheReturnTarget(result.problem)) {
@@ -225,6 +253,7 @@
 			<button
 				class="text-sm underline"
 				type="button"
+				disabled={starting}
 				onclick={() => begin(false)}
 			>
 				{t('auth.plexStart')}
@@ -233,6 +262,7 @@
 				<button
 					class="text-sm underline"
 					type="button"
+					disabled={starting}
 					onclick={() => begin(true)}
 				>
 					{t('auth.plexOauthStart')}

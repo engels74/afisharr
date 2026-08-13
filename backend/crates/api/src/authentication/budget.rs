@@ -48,7 +48,8 @@ impl Credential {
 /// the first: it reads headers, never the database. The rate-limit layer needs
 /// exactly that much.
 ///
-/// It reads the `Authorization` header through [`guard::bearer_key`] rather than
+/// It reads the `Authorization` header through [`super::guard::bearer_key`]
+/// rather than
 /// asking whether the header exists, because the two questions have different
 /// answers and the gap between them was uncounted traffic. `Authorization: Basic
 /// x` and an empty bearer value are headers the guard cannot use: it refuses

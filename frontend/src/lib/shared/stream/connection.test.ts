@@ -13,6 +13,35 @@ import {
 beforeEach(installFakeEventSource);
 afterEach(restoreEventSource);
 
+/**
+ * Waits until a connection past `previous` has been constructed.
+ *
+ * Polled rather than slept, because the delay is not a constant: the watchdog
+ * is derived from the server's stated heartbeat and the retry is jittered, so
+ * a fixed sleep is either flaky or long enough for the *next* timer to fire
+ * inside it and move the thing being asserted about.
+ */
+async function reconnected(previous: number): Promise<void> {
+	await until(
+		() => FakeEventSource.instances.length > previous,
+		`a connection past ${previous}`,
+	);
+}
+
+/** Waits for `settled`, or fails saying what never happened. */
+async function until(
+	settled: () => boolean,
+	what = 'the expected state',
+): Promise<void> {
+	const deadline = Date.now() + 2000;
+	while (!settled()) {
+		if (Date.now() > deadline) {
+			throw new Error(`${what} never arrived`);
+		}
+		await Bun.sleep(10);
+	}
+}
+
 describe('opening', () => {
 	test('a fresh connection reports connecting until the stream opens', () => {
 		const stream = new StreamConnection();
@@ -169,14 +198,43 @@ describe('the disconnection watchdog', () => {
 		latest().emit('stream', { heartbeatSeconds: 0.01, topics: ['jobs'] });
 
 		const opened = FakeEventSource.instances.length;
-		// The watchdog fires at 260ms; the first backoff is at most a second.
-		await Bun.sleep(1500);
+		// Answered as soon as it appears, which is what a real connection does:
+		// the server writes its opening event on accept. Waited out on a fixed
+		// sleep instead, the replacement is itself a connection carrying
+		// nothing, and the watchdog that now covers the connecting phase takes
+		// it down too — correctly, and before the assertions below could look.
+		await reconnected(opened);
 
 		expect(FakeEventSource.instances.length).toBeGreaterThan(opened);
 		expect(latest().closed).toBe(false);
 		latest().emit('open');
 		expect(stream.status).toBe('live');
 		expect(refetches).toBe(1);
+		stream.close();
+	});
+
+	test('a connection that never opens is torn down rather than left hanging', async () => {
+		// The half-open case one step earlier, and the one nothing covered: a
+		// socket the instance accepts and then says nothing on fires neither
+		// `open` nor `error`, so a watchdog armed only from those listeners is
+		// never armed at all. The status stays 'connecting', which the
+		// indicator renders as nothing — a shell with no live updates and
+		// nothing on screen saying so, for as long as the proxy holds the
+		// socket (`I-UX-9`).
+		const stream = new StreamConnection();
+		stream.open();
+		latest().emit('open');
+		latest().emit('stream', { heartbeatSeconds: 0.01, topics: ['jobs'] });
+
+		// The replacement this drives is never answered on, so nothing but a
+		// watchdog covering the connecting phase can end it.
+		const opened = FakeEventSource.instances.length;
+		await reconnected(opened);
+		const silent = latest();
+		expect(silent.closed).toBe(false);
+
+		await until(() => silent.closed);
+		expect(silent.closed).toBe(true);
 		stream.close();
 	});
 

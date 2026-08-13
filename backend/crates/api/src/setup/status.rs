@@ -67,6 +67,13 @@ pub struct SetupStatus {
         (status = 200, description = "The derived step", body = SetupStatus),
         (status = 403, description = "The claim on this wizard has expired", body = Problem),
         (status = 404, description = "Setup has already been completed", body = Problem),
+        // `require_claim` answers `blocked` on the `HeldByAnother` arm, and a
+        // layer answering on a route's behalf has to be in that route's own
+        // annotations. `/setup/admin` and `/setup/complete` both declare this
+        // 409 for the same layer; this was the one gated route whose generated
+        // client had no shape for it, so a second browser polling the step read
+        // an answer the interface does not handle (§24.5).
+        (status = 409, description = "Another browser holds the wizard", body = Problem),
         (status = 429, description = "Too many requests", body = Problem),
     ),
 )]

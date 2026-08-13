@@ -32,7 +32,7 @@ pub use authorization::{
 };
 pub use budget::{presents_credential, spend_anonymous};
 pub use guard::{Authenticated, Credential};
-pub(crate) use password_login::ABSENT_ACCOUNT_HASH;
+pub(crate) use password_login::verify_password;
 pub use password_login::{Credentials, SignedIn, log_in, log_out, whoami};
 pub use plex_pin_poll::{PinState, poll_plex_pin};
 pub use plex_pin_start::{PinStarted, StartPin, start_plex_pin};

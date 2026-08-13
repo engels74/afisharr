@@ -117,6 +117,16 @@ export class StreamConnection {
 				this.#dispatch(topic, parse((event as MessageEvent<string>).data));
 			});
 		}
+
+		// Armed on the attempt, not only once it succeeds. A connection that
+		// never reaches OPEN fires neither `open` nor `error` — a proxy with a
+		// long `proxy_read_timeout`, which is the usual SSE configuration,
+		// holds the socket while the instance behind it says nothing — so
+		// without this there was no timer on it at all. `status` stayed
+		// 'connecting', which the indicator renders as nothing, and the
+		// operator had a shell with no live updates and nothing on screen
+		// saying so for as long as the proxy held the socket (`I-UX-9`).
+		this.#armWatchdog();
 	}
 
 	/**

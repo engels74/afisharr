@@ -23,7 +23,12 @@
 	 */
 	function entered(account: SignedIn) {
 		session.adopt(account);
-		void goto('/dashboard');
+		// `replaceState`, as every other navigation in the shell does. Pushed,
+		// Back returns to this page — which `isBareRoute` exempts from the
+		// layout's session guard, so a signed-in operator is shown the sign-in
+		// form again and a submission from it spends another attempt against
+		// the anonymous rate limit.
+		void goto('/dashboard', { replaceState: true });
 	}
 </script>
 

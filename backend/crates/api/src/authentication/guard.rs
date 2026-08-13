@@ -81,7 +81,8 @@ impl Authenticated {
     /// can reach everything their account can reach, which is what signing in
     /// means; the key they hand to an integration reaches what they chose.
     ///
-    /// This is a ceiling and never a grant — [`Administrator`] still asks the
+    /// This is a ceiling and never a grant —
+    /// [`Administrator`](crate::authentication::Administrator) still asks the
     /// account's own rights, and a scope cannot add any.
     #[must_use]
     pub fn may(&self, scope: Scope) -> bool {

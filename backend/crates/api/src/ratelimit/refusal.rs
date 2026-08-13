@@ -56,8 +56,8 @@ fn refuse(decision: Decision, message: &str) -> Result<(), AppError> {
 /// The refusal a spent budget produces, in one bucket's own terms.
 ///
 /// The one place the shape is built. Everything that meters a request reaches
-/// it through [`RateLimiter::spend`] or [`RateLimiter::refuse_if_spent`]; this
-/// stays public for the two callers that hold a [`Decision`] already.
+/// it through [`RateLimiter::spend`]; this
+/// stays public for the callers that hold a [`Decision`] already.
 #[must_use]
 pub fn refused(retry_after_seconds: u64, message: impl Into<String>) -> AppError {
     AppError::new(Problem::new(ErrorCode::RateLimited, message).retry_after(retry_after_seconds))

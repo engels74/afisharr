@@ -14,7 +14,7 @@
 #![allow(clippy::missing_errors_doc)]
 
 use afisharr_core::{
-    accounts::{self, User},
+    accounts,
     setup::{CLAIM_COOKIE, ClaimState, inspect},
 };
 use axum::{Json, extract::State};
@@ -23,6 +23,7 @@ use serde::Deserialize;
 use utoipa::ToSchema;
 
 use crate::{
+    authentication::verify_password,
     error::{AppError, AppResult, ErrorCode, JsonBody, Problem},
     proxy::ClientContext,
     ratelimit::Bucket,
@@ -113,7 +114,7 @@ pub async fn recover(
         .map_err(AppError::internal)?
         .filter(|user| user.is_admin && user.is_active());
 
-    if !verify_admin(account.as_ref(), request.password).await? {
+    if !verify_password(account.as_ref(), request.password).await? {
         // Nothing is counted here: the attempt was taken above. The same
         // refusal for an unknown username and a wrong password, because a
         // different one tells a guesser which of the two they achieved.
@@ -144,25 +145,6 @@ pub async fn recover(
         .await;
     }
     granted
-}
-
-/// Verifies an administrator's password, at constant cost either way.
-async fn verify_admin(account: Option<&User>, password: String) -> AppResult<bool> {
-    let Some(stored) = account.and_then(|user| user.password_hash.clone()) else {
-        // No account, or a Plex account with no password: still spend the time,
-        // so "no administrator by that name" and "wrong password" are
-        // indistinguishable from the outside.
-        return Ok(accounts::verify(password, absent_hash())
-            .await
-            .unwrap_or(false));
-    };
-    accounts::verify(password, stored)
-        .await
-        .map_err(AppError::internal)
-}
-
-fn absent_hash() -> String {
-    crate::authentication::ABSENT_ACCOUNT_HASH.to_owned()
 }
 
 fn credentials_refused() -> AppError {

@@ -177,6 +177,16 @@
               }
             }
           },
+          "409": {
+            "description": "plex.tv issued the sign-in under a different client identifier",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
           "429": {
             "description": "Too many attempts",
             "content": {
@@ -1268,6 +1278,16 @@
           },
           "404": {
             "description": "Setup has already been completed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Another browser holds the wizard",
             "content": {
               "application/json": {
                 "schema": {

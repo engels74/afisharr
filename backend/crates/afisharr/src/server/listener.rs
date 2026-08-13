@@ -31,11 +31,18 @@ pub struct Serving {
 
 /// Binds `address` and returns a listener ready to serve.
 ///
+/// A bracketed IPv6 literal is accepted as well as a bare one. `[::]` is how
+/// the wildcard is written everywhere an address and a port appear together —
+/// in a URL, in a `docker run -p` argument, in nginx's `listen` — so it is what
+/// an operator writes in `bindAddress`, and `ToSocketAddrs` parses it as
+/// neither an address nor a resolvable name. The bind then failed on a value
+/// that names exactly what the bare form names.
+///
 /// # Errors
 /// Returns an error naming the address when the socket cannot be bound, which
 /// on a container start almost always means the port is already taken.
 pub async fn serve(address: &str, port: u16) -> Result<Serving> {
-    let listener = TcpListener::bind((address, port))
+    let listener = TcpListener::bind((host_of(address), port))
         .await
         .with_context(|| format!("binding {address}:{port}"))?;
     let bound = listener
@@ -45,6 +52,19 @@ pub async fn serve(address: &str, port: u16) -> Result<Serving> {
         address: bound,
         listener,
     })
+}
+
+/// The configured address as `ToSocketAddrs` will accept it.
+///
+/// Only the brackets come off. Everything else is passed through exactly as the
+/// operator wrote it, so a value that does not name anything still fails at the
+/// bind with the address in the message rather than being quietly reinterpreted
+/// here.
+fn host_of(address: &str) -> &str {
+    address
+        .strip_prefix('[')
+        .and_then(|rest| rest.strip_suffix(']'))
+        .unwrap_or(address)
 }
 
 impl Serving {
@@ -115,4 +135,40 @@ async fn deadline(started: tokio::sync::oneshot::Receiver<()>) {
         std::future::pending::<()>().await;
     }
     tokio::time::sleep(DRAIN_GRACE).await;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_bracketed_ipv6_wildcard_names_the_same_thing_as_the_bare_one() {
+        // `[::]` is how the wildcard is written wherever an address and a port
+        // appear together, so it is what an operator puts in `bindAddress` —
+        // and `ToSocketAddrs` reads it as neither an address nor a name, so the
+        // bind failed on a value that names exactly what `::` names.
+        assert_eq!(host_of("[::]"), "::");
+        assert_eq!(host_of("[::1]"), "::1");
+        assert_eq!(host_of("[fd00::1]"), "fd00::1");
+    }
+
+    #[test]
+    fn everything_else_is_passed_through_as_written() {
+        // Including a value that names nothing: it fails at the bind, with the
+        // address the operator wrote in the message, rather than being turned
+        // into some other address here.
+        for address in ["0.0.0.0", "::", "192.168.1.10", "localhost", "[not-an-ip"] {
+            assert_eq!(host_of(address), address);
+        }
+    }
+
+    #[tokio::test]
+    async fn a_bound_listener_reports_the_port_the_operating_system_chose() {
+        // Port 0 is what the tests bind, and it is why `Serving` carries the
+        // address at all: the configured document says 0 and the socket is
+        // somewhere else.
+        let serving = serve("127.0.0.1", 0).await.expect("the socket must bind");
+        assert_ne!(serving.address.port(), 0);
+        assert_eq!(serving.address.ip().to_string(), "127.0.0.1");
+    }
 }

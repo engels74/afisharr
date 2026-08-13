@@ -44,14 +44,9 @@ pub async fn run(paths: &DataPaths, configured: Configuration) -> Result<()> {
 /// Split from [`run`] so that every way out of it — including the ones that
 /// never reach the server — passes through one close.
 async fn serve_until_stopped(booted: &startup::Booted) -> Result<()> {
-    // The token exists only while setup is incomplete, and minting it here —
-    // once, on the start that prints it — is what makes a restart invalidate
-    // the previous one (PRD §19.6.1).
+    // The token exists only while setup is incomplete, and minting it once per
+    // start is what makes a restart invalidate the previous one (PRD §19.6.1).
     let bootstrap = Arc::new(TokenStore::empty());
-    if booted.instance.setup_completed_at.is_none() {
-        let token = bootstrap.mint(&SystemClock);
-        print_setup_banner(&token, &booted.settings.body.http);
-    }
 
     if !interface::EmbeddedInterface::is_present() {
         warn!(
@@ -64,6 +59,20 @@ async fn serve_until_stopped(booted: &startup::Booted) -> Result<()> {
     let http = &booted.settings.body.http;
     let serving = server::serve(&http.bind_address, http.port).await?;
     info!(address = %serving.address, "afisharr is listening");
+
+    // After the socket is bound, and from the address it was bound to. Printed
+    // before, the banner made two false statements on a start that then failed
+    // to bind — which is the ordinary failure here, a `docker compose restart`
+    // racing the container that has not finished stopping. It announced a live
+    // fifteen-minute token for a process that was about to exit, so a restart
+    // loop filled the console with tokens no instance ever accepted; and it
+    // named `http.port` rather than the port in use, so `AFISHARR_PORT=0`
+    // printed `http://localhost:0/setup` while the instance was reachable
+    // somewhere else entirely.
+    if booted.instance.setup_completed_at.is_none() {
+        let token = bootstrap.mint(&SystemClock);
+        print_setup_banner(&token, serving.address);
+    }
 
     serving.run(state, shutdown_signal()).await
 }

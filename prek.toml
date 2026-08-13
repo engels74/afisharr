@@ -111,7 +111,14 @@ hooks = [
   # The generated client is the sole contract (24.5). Push stage: it compiles
   # the backend to print the document, which is too slow for every commit and
   # too important to leave to CI alone.
-  { id = "openapi-contract", name = "OpenAPI contract", entry = "scripts/check-openapi-contract.sh", language = "system", files = "^(backend/crates/api/|frontend/src/lib/api/)", pass_filenames = false, stages = ["pre-push"] },
+  #
+  # `backend/Cargo.toml` is in the list because the document's `info.version`
+  # is the workspace version: `afisharr-api` takes `version.workspace = true`
+  # and utoipa reads it. A release commit that bumps `[workspace.package]` and
+  # nothing under the two `api/` trees would otherwise skip this hook, push
+  # clean, and fail `contract-check` in CI on a one-line diff the author never
+  # wrote and got no local warning about.
+  { id = "openapi-contract", name = "OpenAPI contract", entry = "scripts/check-openapi-contract.sh", language = "system", files = "^(backend/crates/api/|frontend/src/lib/api/|backend/Cargo\\.toml$)", pass_filenames = false, stages = ["pre-push"] },
 
   # Structure gate — the script-checkable half of PRD §24.6 (D-047).
   #

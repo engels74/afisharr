@@ -124,7 +124,7 @@ pub async fn log_in(
     // Nothing is recorded on either failure path below, because the attempt was
     // already taken above. A second count here would charge one guess twice and
     // halve the allowance the requirements state.
-    let accepted = verify(user.as_ref(), credentials.password).await?;
+    let accepted = verify_password(user.as_ref(), credentials.password).await?;
     if !accepted {
         return Err(rejected());
     }
@@ -243,15 +243,43 @@ async fn sign_in(
 }
 
 /// Verifies a password against an account that may not exist.
-async fn verify(user: Option<&User>, password: String) -> AppResult<bool> {
-    let stored = user
-        .and_then(|user| user.password_hash.clone())
-        .unwrap_or_else(|| ABSENT_ACCOUNT_HASH.to_owned());
-    match accounts::verify(password, stored).await {
-        Ok(accepted) => Ok(accepted),
-        // A stored hash that will not parse is a corrupt row, not a wrong
-        // password. Reporting it as a wrong password would send the operator
-        // to reset a credential that is fine.
+///
+/// The one password check on this surface, and `setup::recover` reaches it too
+/// — it verifies the same administrator's password for the same purpose, and
+/// two statements of "what makes a password acceptable" is one of them being
+/// the version nobody tested (P7).
+///
+/// The dummy hash is spent for its cost and never for its answer. An account
+/// with no `password_hash` is not an account whose password is unknown: the
+/// schema's `CHECK ((kind = 'Local') = (password_hash IS NOT NULL))` makes
+/// every Plex-linked row one, and such an account signs in through the pin
+/// exchange and nowhere else. Returning the comparison's own result there made
+/// [`ABSENT_ACCOUNT_HASH`] a live credential for every one of them — a constant
+/// published in this source file, standing between an anonymous caller and a
+/// session as any linked viewer, with nothing but its unguessed preimage
+/// holding the door. Cost is what the dummy is for; the answer is `false` the
+/// moment there was no stored hash to answer about (P2).
+///
+/// # Errors
+/// Returns an internal failure when a stored hash will not parse. A corrupt row
+/// is not a wrong password, and reporting it as one sends the operator to reset
+/// a credential that is fine.
+pub(crate) async fn verify_password(user: Option<&User>, password: String) -> AppResult<bool> {
+    verify_against(user, password, ABSENT_ACCOUNT_HASH).await
+}
+
+/// [`verify_password`], with the stand-in hash named.
+///
+/// A parameter so the rule above is testable: the guarantee is that a
+/// password-less account is refused *even when the presented password verifies
+/// against the stand-in*, and a test cannot demonstrate that against a constant
+/// whose preimage nobody has.
+async fn verify_against(user: Option<&User>, password: String, absent: &str) -> AppResult<bool> {
+    let stored = user.and_then(|user| user.password_hash.clone());
+    let has_password = stored.is_some();
+    let phc = stored.unwrap_or_else(|| absent.to_owned());
+    match accounts::verify(password, phc).await {
+        Ok(accepted) => Ok(has_password && accepted),
         Err(error) => Err(AppError::internal(error)),
     }
 }
@@ -276,12 +304,65 @@ fn rejected() -> AppError {
 mod tests {
     use super::*;
 
+    /// An account of `kind` holding `password_hash`.
+    fn account(kind: afisharr_core::accounts::UserKind, password_hash: Option<String>) -> User {
+        User {
+            id: "U".to_owned(),
+            kind,
+            username: "operator".to_owned(),
+            email: None,
+            display_name: None,
+            password_hash,
+            plex_account_id: None,
+            plex_uuid: None,
+            avatar_url: None,
+            is_admin: true,
+            created_at: Timestamp::EPOCH,
+            updated_at: Timestamp::EPOCH,
+            last_login_at: None,
+            disabled_at: None,
+        }
+    }
+
     #[tokio::test]
     async fn an_unknown_account_verifies_against_the_absent_hash_and_fails() {
         assert!(
-            !verify(None, "anything".to_owned())
+            !verify_password(None, "anything".to_owned())
                 .await
                 .expect("the absent hash must parse")
+        );
+    }
+
+    #[tokio::test]
+    async fn an_account_with_no_password_is_refused_even_by_the_stand_in_hash() {
+        // The escalation this closes. A Plex-linked row carries
+        // `password_hash = NULL`, and comparing the presented password against
+        // the stand-in and *returning that answer* made the stand-in a live
+        // credential for every one of them: anybody holding its preimage signs
+        // in as any linked viewer, by username, with no Plex exchange at all.
+        // The preimage of the real constant is nobody's, which is why the
+        // stand-in is a parameter here — the rule has to hold when it is known.
+        let known = afisharr_core::accounts::hash("open sesame please".to_owned())
+            .await
+            .expect("the test hash must be produced");
+
+        let plex = account(afisharr_core::accounts::UserKind::Plex, None);
+        assert!(
+            !verify_against(Some(&plex), "open sesame please".to_owned(), &known)
+                .await
+                .expect("the stand-in must parse"),
+            "an account with no password must never be signed in by the stand-in"
+        );
+
+        // And the bound: a local account still signs in with its own password.
+        let local = account(
+            afisharr_core::accounts::UserKind::Local,
+            Some(known.clone()),
+        );
+        assert!(
+            verify_against(Some(&local), "open sesame please".to_owned(), &known)
+                .await
+                .expect("the stored hash must parse")
         );
     }
 

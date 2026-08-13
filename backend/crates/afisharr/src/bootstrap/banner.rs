@@ -3,7 +3,7 @@
 
 //! What the operator reads off the console on a first start.
 
-use afisharr_core::settings::HttpSettings;
+use std::net::SocketAddr;
 
 /// Prints the setup banner.
 ///
@@ -14,8 +14,8 @@ use afisharr_core::settings::HttpSettings;
 ///
 /// `println!` rather than `info!`: the tracing subscriber writes to
 /// `logs/afisharr.log`, and the token must never reach it.
-pub fn print_setup_banner(token: &str, http: &HttpSettings) {
-    let url = setup_url(http);
+pub fn print_setup_banner(token: &str, bound: SocketAddr) {
+    let url = setup_url(bound);
     println!();
     println!("┌────────────────────────────────────────────────────────────┐");
     println!("│  Afisharr is not set up yet.                               │");
@@ -31,49 +31,47 @@ pub fn print_setup_banner(token: &str, http: &HttpSettings) {
     println!();
 }
 
-/// The address to open, composed from the configured bind address and port.
+/// The address to open, composed from the socket that is actually bound.
+///
+/// From `bound` rather than from the configured `HttpSettings`, because the two
+/// disagree in the case that matters: `port = 0` asks the operating system to
+/// choose, so the document holds `0` and the instance is reachable somewhere
+/// else. The banner has one job, and printing a URL nothing answers on fails
+/// it.
 ///
 /// `0.0.0.0` and `::` are what a container binds to, and neither is somewhere a
 /// browser can go. They are rendered as `localhost`, which is where the
 /// operator reading this console actually is.
-fn setup_url(http: &HttpSettings) -> String {
-    let host = match http.bind_address.as_str() {
-        "0.0.0.0" | "::" | "[::]" | "" => "localhost",
-        configured => configured,
-    };
-    let host = if host.contains(':') && !host.starts_with('[') {
-        format!("[{host}]")
-    } else {
-        host.to_owned()
-    };
-    format!("http://{host}:{}/setup", http.port)
+fn setup_url(bound: SocketAddr) -> String {
+    if bound.ip().is_unspecified() {
+        return format!("http://localhost:{}/setup", bound.port());
+    }
+    // `SocketAddr`'s own `Display` brackets an IPv6 literal and appends the
+    // port, which is exactly the shape a URL wants.
+    format!("http://{bound}/setup")
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    fn http(bind: &str, port: u16) -> HttpSettings {
-        HttpSettings {
-            bind_address: bind.to_owned(),
-            port,
-            ..HttpSettings::default()
-        }
+    fn bound(address: &str) -> SocketAddr {
+        address.parse().expect("a valid socket address")
     }
 
     #[test]
     fn a_wildcard_bind_is_rendered_as_somewhere_a_browser_can_go() {
         assert_eq!(
-            setup_url(&http("0.0.0.0", 8484)),
+            setup_url(bound("0.0.0.0:8484")),
             "http://localhost:8484/setup"
         );
-        assert_eq!(setup_url(&http("::", 8484)), "http://localhost:8484/setup");
+        assert_eq!(setup_url(bound("[::]:8484")), "http://localhost:8484/setup");
     }
 
     #[test]
     fn a_specific_bind_address_is_used_as_written() {
         assert_eq!(
-            setup_url(&http("192.168.1.10", 9000)),
+            setup_url(bound("192.168.1.10:9000")),
             "http://192.168.1.10:9000/setup"
         );
     }
@@ -81,13 +79,24 @@ mod tests {
     #[test]
     fn an_ipv6_literal_is_bracketed_so_the_port_is_not_read_as_part_of_it() {
         assert_eq!(
-            setup_url(&http("fd00::1", 8484)),
+            setup_url(bound("[fd00::1]:8484")),
             "http://[fd00::1]:8484/setup"
         );
     }
 
     #[test]
+    fn the_port_printed_is_the_one_the_socket_got() {
+        // `port = 0` asks the operating system to choose, so the configured
+        // document says `0` and the instance answers somewhere else. Composed
+        // from settings, the banner sent the operator to `localhost:0`.
+        assert_eq!(
+            setup_url(bound("0.0.0.0:41337")),
+            "http://localhost:41337/setup"
+        );
+    }
+
+    #[test]
     fn the_url_points_at_the_setup_page_rather_than_the_root() {
-        assert!(setup_url(&http("0.0.0.0", 8484)).ends_with("/setup"));
+        assert!(setup_url(bound("0.0.0.0:8484")).ends_with("/setup"));
     }
 }
