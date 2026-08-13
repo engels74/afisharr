@@ -29,6 +29,18 @@ Both stacks compile the previous generation's idiom without complaint, so the ga
 green while the code is wrong. PRD §24.1 states the rule, §0.2 states its authority against §24, and
 D-048 records why. §A.2 and §A.3 open with the confirmation line.
 
+**Interface work carries a second read-first obligation: load the `frontend-design` skill before you
+write markup.** It binds any task that builds or reshapes a rendered surface — a page, a visual
+component, a layout, the theme — and not a copy fix, a typing fix, or a change with no rendered
+consequence. The rule file above covers correct Svelte and says nothing about whether the page looks
+like anything; left to defaults an agent ships the same centred card fifteen times, and no gate in
+§A.1 goes red when it does. PRD §24.3.5.1 states the rule and D-051 records why. §A.3 opens with the
+confirmation line and §A.4 carries the reviewer's.
+
+The palette every interface task builds against is fixed: `tangerine`, from tweakcn, with the mode
+following the operating system and falling back to light. PRD §10.4 states it, §24.3.5 says where the
+tokens land, D-050 records why, and Task 1.13 applies it.
+
 **Exit criteria are invariants, not opinions.** Every phase names the invariants from *Invariants* in
 the PRD that must pass before it is done. All 97 are assigned exactly once (*Invariant coverage*), so no invariant is
 orphaned and none is claimed twice. A phase whose invariants pass is finished; one whose invariants
@@ -312,6 +324,13 @@ instance is on the internet, so this is not hardening added later.
 **Why i18n now:** `I-UX-7` forbids hard-coded user-facing strings. Extraction added after fifteen pages
 exist is a mechanical sweep over every one of them; added now it is a habit.
 
+**Why the theme lands here rather than in a later polish phase:** Task 1.13 was added on 2026-08-13,
+after the rest of this phase had shipped, and it stays in this phase rather than moving to a
+comfortable later one. Every page from Phase 2 onward is built against the shell's tokens, so a
+palette applied later is a palette applied by editing fifteen pages that each hard-coded around its
+absence. The phase is not finished while its box is unticked, which is the correct report: the shell
+exists and its visual layer does not.
+
 **Why the bootstrap claim is here rather than with the wizard in Phase 13:** the first-run
 admin-account page ships in this phase (Task 1.11), and the moment it exists on a reachable instance
 it is an unauthenticated grant of administrator. The gate has to arrive with the page it guards, not
@@ -526,6 +545,52 @@ the eight-step journey on top of it.
   token appears in no table, no response, and no log file; and a restart with setup incomplete
   invalidates the previous token. `I-UX-10` is claimed in Phase 13, where the wizard the resume step
   serves is built.
+
+### Task 1.13 The theme, the mode default, and the design obligation
+- **Build:** the `tangerine` palette as the interface's only palette, the automatic mode default with
+  its light fallback, and the self-hosted faces the palette names. Specified in PRD §10.4 and
+  §24.3.5; decided as D-050 and D-051.
+- **Where:** `frontend/src/app.css`; `frontend/uno.config.ts`; `frontend/src/routes/+layout.svelte`;
+  `frontend/static/fonts/`.
+- **Subtasks:**
+  - [ ] 1. Fetch the registry item — `bunx shadcn@latest add https://tweakcn.com/r/themes/tangerine.json`
+     — and treat its JSON as the source of truth rather than whatever the CLI writes. It is a
+     `registry:style` item with no components and no dependencies, so nothing but token values is
+     owed. If the run rewrites `app.css` into Tailwind-v4 `@theme` shape, revert it: that shape is
+     inert under UnoCSS, and a stylesheet that looks applied and renders nothing is worse than one
+     that was never touched.
+  - [ ] 2. Transcribe `cssVars.light` into `:root` and `cssVars.dark` into `.dark` in `app.css`,
+     replacing the placeholder greyscale wholesale rather than merging into it — a half-replaced
+     palette is a set of tokens no designer chose. All 53 light and 52 dark tokens land, including
+     `sidebar-*`, `chart-1` through `chart-5`, and the shadow scale, so a later page reaching for one
+     finds it defined instead of inventing a color.
+  - [ ] 3. Put `cssVars.theme` where UnoCSS can see it: the three font families and `radius` in
+     `uno.config.ts` `theme`, `--tracking-normal: 0em` in `:root`, and the five `tracking-*`
+     `calc()` entries beside it. Add the registry's one base rule —
+     `body { letter-spacing: var(--tracking-normal) }` — as plain CSS, not inside an `@layer base`
+     this stack does not have.
+  - [ ] 4. Self-host Inter, JetBrains Mono, and Source Serif 4 under `frontend/static/fonts/` with
+     `@font-face` rules and `font-display: swap`. Do not add `presetWebFonts` with the Google
+     provider: it would put an outbound request carrying the operator's IP on every page load of a
+     product that collects nothing (PRD §21.8, D-038, D-050).
+  - [ ] 5. Leave `<ModeWatcher />`'s `defaultMode` at its `"system"` default and add the light
+     fallback explicitly, because the library's own fallback is dark: it resolves the preference by
+     testing `(prefers-color-scheme: light)` and maps every non-match — a browser without
+     `window.matchMedia` included — to dark. Set the mode to light in exactly that case, and nowhere
+     else, so a genuine system-dark preference is still honoured.
+  - [ ] 6. Add the mode control to the shell so the operator's explicit choice overrides the system
+     and persists across visits, and confirm the pre-paint script still runs first — a theme applied
+     after paint is the light-to-dark flash `mode-watcher` exists to prevent.
+  - [ ] 7. Sweep the pages and components Tasks 1.8 and 1.11 shipped onto semantic tokens. No literal
+     color survives in `frontend/src`: no hex, no bare `oklch(…)`, no `bg-orange-500`. The nine state
+     components are the ones to check first — a hand-picked red on the Error treatment is exactly the
+     kind of color that reads as correct in light and disappears in dark.
+- [ ] **Done when:** `frontend/src` outside `app.css` contains no literal color — checked with the
+  grep in §A.4 — and every one of the six destinations plus Settings renders in both modes at WCAG AA
+  contrast; a fresh profile with the system set to dark opens dark, with the system set to light opens
+  light, and with `matchMedia` unavailable opens light; an explicit choice survives a reload; the built
+  SPA requests no font from any host — verified against the network log of a full page load, not
+  assumed from the config.
 
 ---
 
@@ -2739,11 +2804,12 @@ allow = ["MIT", "Apache-2.0", "BSD-3-Clause", "Unicode-3.0"]
 
 ### A.3 Frontend checklist per task
 
-Work through this list for every frontend task before requesting review. Each line names the concrete thing to check and where the rule that backs it lives in the requirements document (§24.3, §24.4, and §24.6 for the four structure lines that open the list).
+Work through this list for every frontend task before requesting review. Each line names the concrete thing to check and where the rule that backs it lives in the requirements document (§24.3, §24.4, §24.6 for the four structure lines that open the list, and §10.4 for the theme and mode lines).
 
-The first line is the only one you tick *before* writing code rather than after.
+The first two lines are the only ones you tick *before* writing code rather than after.
 
 - [ ] **Rules read**: you read `.augment/rules/frontend-dev-pro.md` before writing this task's code, not after. If the task touches a construct the file covers — runes, props, effects, the SvelteKit file conventions, UnoCSS, shadcn-svelte, Bun tooling — you re-read that part of it. Read §24.4 alongside it: the rule file describes the full SvelteKit stack, and this project has no JavaScript server runtime (PRD §24.1, D-048).
+- [ ] **Design skill loaded**: if this task builds or reshapes a rendered surface — a page, a visual component, a layout, the theme — you loaded the `frontend-design` skill before writing markup, not after a reviewer called the page bland. A copy fix, a typing fix, or a change with no rendered consequence is outside this line; say so in the PR and move on (PRD §24.3.5.1, D-051).
 - [ ] **Placement**: new domain code sits in `src/lib/features/<domain>/` beside that domain's state and API calls; nothing domain-specific was added to `src/lib/components/ui/`; no `utils.ts`/`helpers.ts`/`types.ts` catch-all was created or grown (§24.6.1, §24.6.3).
 - [ ] **Single purpose**: each new component renders one thing, and each new `.svelte.ts` module owns one piece of state. A component that both fetches a list and edits a row is two components (§24.6.2).
 - [ ] **File size**: the structure gate in §A.1 prints nothing for this diff — 250 lines soft and 400 hard for `.svelte`, 300 soft and 500 hard for `.ts`/`.svelte.ts`. Past the hard limit, either split the component or carry a `// STRUCTURE:` comment a reviewer signs; "the sub-parts would share a dozen `$bindable` values" is a real reason, and it is written down (§24.6.4).
@@ -2758,6 +2824,8 @@ The first line is the only one you tick *before* writing code rather than after.
 - [ ] **Accessibility**: every new label/input pair uses `$props.id()` for the `for`/`id` association, not a hand-written string id (§24.3.4).
 - [ ] **Keyed each**: every new `{#each}` over data that can reorder or be removed is keyed with `(item.id)` (§24.3.1, §24.3.9).
 - [ ] **Styling**: only `presetWind4` UnoCSS classes/shortcuts used; no `presetUno`/`presetWind3`, no `tailwind.config.js`, no `@tailwind` directive, no `@apply`/`@screen` (prefer `shortcuts`) (§24.3.5, §24.3.13).
+- [ ] **Theme tokens**: every color in the diff is a semantic token — `bg-background`, `text-muted-foreground`, `border-border`, `bg-primary` — and no literal color was introduced anywhere under `frontend/src` except `app.css`: no hex, no bare `oklch(…)`, no numbered palette class such as `bg-orange-500`. The tangerine values in `app.css` are the only place a color is written down (§10.4, §24.3.5, D-050).
+- [ ] **Both modes checked**: any new or changed surface was actually rendered in light and in dark, not reasoned about. A token that reads correctly in one mode and vanishes in the other is the failure this line exists to catch, and it is invisible in a diff (§10.4).
 - [ ] **Icons**: `@lucide/svelte` only; confirm no `lucide-svelte` (unscoped) import slipped in (§24.3.1, §24.3.13).
 - [ ] **Typing**: every new/changed component has an explicit `Props` type (or inline prop type); class props typed `ClassValue`; snippet props typed `Snippet`/`Snippet<[T]>` (§24.3.11).
 - [ ] **Bun-native**: no `dotenv`, `ts-node`/`tsx`, `jest`, `bcrypt`, or `nodemon` introduced — use `Bun.env`/`$env`, native `.ts` execution, `bun:test`, `Bun.password`, `bun --hot` respectively (§24.3.12, §24.3.13).
@@ -2859,6 +2927,10 @@ git diff --unified=0 -- '*.svelte' '*.ts' | grep -nE '\$app/stores'
 git diff --unified=0 -- '*' | grep -nE 'presetUno|presetWind3|tailwind\.config|@tailwind|class-variance-authority|lucide-svelte'
 git diff --unified=0 -- '*' | grep -nE '\+page\.server\.ts|\+layout\.server\.ts|hooks\.server\.ts|\.remote\.ts|bun:sqlite|env/dynamic'
 git diff --unified=0 -- '*' | grep -nE '\bdotenv\b|\bts-node\b|\bbcrypt\b|\bjest\b'
+
+# Literal colors outside app.css — every hit has left the theme (D-050)
+git diff --unified=0 -- 'frontend/src' ':!frontend/src/app.css' \
+  | grep -nE '#[0-9a-fA-F]{3,8}\b|oklch\(|hsla?\(|rgba?\(|(bg|text|border|fill|stroke|ring|from|via|to)-(red|orange|amber|yellow|lime|green|emerald|teal|cyan|sky|blue|indigo|violet|purple|fuchsia|pink|rose|slate|gray|grey|zinc|neutral|stone)-[0-9]{2,3}\b'
 ```
 
 Structure, both surfaces (§24.6):
@@ -2877,6 +2949,7 @@ Any hit in the Rust `unsafe`/db/db-string block or the frontend static-SPA block
 - [ ] **Structure, before anything else.** Every new file is in a domain folder, states one thing, and does not add a responsibility to a module that already had a different one. A file that grew past its soft limit was split, or the PR says in one sentence why not (§24.6.1–§24.6.4). This is a request-changes on its own — a correct change in the wrong file is still the wrong file, and it is cheaper to move now than after the next phase builds on it.
 - [ ] **The hard-limit exception, if this PR takes one.** You are the second signature (§24.6.4), so decide rather than wave it through. The `// STRUCTURE:` comment names a category — one state machine, one exhaustive `match`, one editor whose parts would share a dozen `$bindable` values — and not a schedule. Confirm the file is one thing under §24.6.2 first: the exception exists for a file that is big, never for a file that is two files.
 - [ ] **Public surface.** Every new `pub`/`pub use`/barrel export is there because a caller outside the boundary needs it, not because a symbol was needed somewhere and `pub` was the shortest fix. Ask whether the caller belongs inside the boundary instead (§24.6.5).
+- [ ] **The interface was designed, not defaulted.** For a diff that ships or reshapes a rendered surface, the author confirms in the PR that the `frontend-design` skill was loaded before the markup was written (PRD §24.3.5.1, D-051). Then read the result as a reader would: does the page have a hierarchy, or is it a centred card on a neutral background because that is what came out first? This is a request-changes on its own, and it is the one property no command in §A.1 can report — every gate stays green on an interface nobody chose. Colors stay inside the theme: a literal color in the grep block above is not a style opinion to defer, it is a component that will be wrong in one of the two modes (§10.4, D-050).
 - [ ] **Stack idiom, checked against the rule file rather than from memory.** Where the diff uses a construct the surface's rule file covers, open that part of `.augment/rules/backend-rust-dev-pro.md` or `.augment/rules/frontend-dev-pro.md` and compare. Each file pairs the current idiom with the wrong-but-plausible alternative; the grep block above catches only the alternatives common enough to write as a regex, and the rest are found by reading. A diff that is green on every command and contradicts its rule file is a request-changes (PRD §24.1, D-048).
 - [ ] The OpenAPI schema/generated client were regenerated in the same PR as any handler/DTO change, and the frontend diff, if any, uses the regenerated client rather than a hand-typed shape (§24.2.6, §24.5).
 - [ ] Error responses use the shared `AppError` pattern; no new bespoke error shape was introduced for one endpoint (§24.2.6).

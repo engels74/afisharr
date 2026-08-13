@@ -38,6 +38,16 @@ it is not an appendix: the rule files state the one current idiomatic pattern fo
 each stack, version-anchored, and code that contradicts them is wrong even when it compiles and the
 tests pass. §24.1 states the rule and its authority; D-048 records why.
 
+**One further obligation binds interface work, and only interface work: an agent that builds or
+reshapes a screen loads its `frontend-design` skill first.** The rule file says how to write correct
+Svelte; it says nothing about whether the result looks like anything. An agent left to its own
+defaults produces the same centred card on a grey page every time, and fifteen pages built that way
+are fifteen pages nobody chose. The skill is the counterweight, and it is read before the markup is
+written rather than consulted after a reviewer calls the page bland. §24.3.5 states the rule and the
+scope; D-051 records why. It does not join the normative set below: it is a working obligation on the
+author, not a source of requirements — where the skill and this document disagree, this document
+wins.
+
 Those four files — this document, the implementation plan, and the two rule files — are the complete
 normative set. Nothing else is normative.
 
@@ -1358,6 +1368,36 @@ supported says so; it does not render broken.
 
 Light and dark, following the system by default, with an explicit override. Both are first-class —
 this product is used at night, and a dark theme that is an afterthought shows.
+
+**The palette is `tangerine`, taken from tweakcn.** It is fetched once as a shadcn registry item and
+lands in the repository as CSS variables:
+
+```bash
+bunx shadcn@latest add https://tweakcn.com/r/themes/tangerine.json
+```
+
+The item is `"type": "registry:style"` against `https://ui.shadcn.com/schema/registry-item.json`. It
+carries no components and no dependencies — only `cssVars.light` (53 tokens), `cssVars.dark` (52),
+`cssVars.theme` (fonts, radius `0.75rem`, the `tracking-*` scale), and one `@layer base` rule setting
+`body { letter-spacing: var(--tracking-normal) }`. Its primary is a warm orange,
+`oklch(0.6397 0.1720 36.4421)`, the same value in both modes; light backs it with a soft blue-grey
+`oklch(0.9383 0.0042 236.4993)` and dark with a deep blue-purple `oklch(0.2598 0.0306 262.6666)`.
+§24.3.5 says where each group of tokens lands on this stack, and why the command above is a fetch
+rather than a build step we depend on.
+
+**The default mode is automatic**: the interface follows the operating system's
+`prefers-color-scheme` on first visit, and an explicit choice from the operator overrides and
+persists from then on. **Where the system preference cannot be read, the interface renders light.**
+That fallback is stated because the obvious implementation gets it backwards — `mode-watcher` tests
+`(prefers-color-scheme: light)` and treats every non-match as dark, so a browser without `matchMedia`
+lands in dark by accident rather than by choice. Light is the safer miss: a dark interface shown to
+somebody who asked for neither is the one that looks broken in a lit room.
+
+**The theme's fonts are self-hosted, never fetched from a font CDN.** Tangerine names Inter, JetBrains
+Mono, and Source Serif 4. Loading those from Google's servers would send the operator's IP address to
+Google on every page load of a product that collects nothing (D-038, §21.8), which is a privacy
+regression arriving through a stylesheet. The faces ship inside the binary with the rest of the SPA,
+and the interface makes no outbound request no operator asked for.
 ## 11. The collection pipeline
 
 I run one pipeline for every collection, every mode. There is no divergent quick path and full
@@ -8028,9 +8068,74 @@ marker inside an ordered list is an undocumented extension of an extension: it r
 and inconsistently elsewhere, and this plan is read in editors as well as on the web. The subtasks
 keep their numbers as text on an unordered box instead. Rejected: no tracking at all, with the git
 history as the record, because "what is built" is not a question a log answers without reading every
-commit against a plan of 121 tasks. Convention and the two-kinds-of-checkbox rule in the
+commit against a plan of 122 tasks. Convention and the two-kinds-of-checkbox rule in the
 implementation plan's *How to read this*; the appendix's own boxes are a reusable template and say so
 where they live.
+
+**D-050 — The interface ships one palette, `tangerine`, and defaults to the system's mode with a
+light fallback.** *Raised while specifying the visual layer, 2026-08-13.* The palette is the tweakcn
+`tangerine` registry item, fetched with
+`bunx shadcn@latest add https://tweakcn.com/r/themes/tangerine.json` and transcribed into
+`frontend/src/app.css` (`:root` and `.dark`) and `uno.config.ts`. The default mode follows
+`prefers-color-scheme`; an explicit operator choice overrides and persists; where the preference
+cannot be read, the interface renders light. Requirement in §10.4, placement in §24.3.5.
+
+*Why a named palette rather than shadcn's defaults:* the defaults are a neutral greyscale with a
+near-black primary, which is what every shadcn project looks like before anybody decides anything. A
+media-library tool that runs on a television-adjacent screen and is read at night is not served by
+looking like an unconfigured admin panel. Choosing once, writing it down, and binding every component
+to the semantic tokens is cheaper than fifteen pages each reaching for a color.
+
+*Why the fallback is light and not dark:* `prefers-color-scheme` resolves to `light` in current
+browsers when the operator has expressed no preference, so the fallback only fires where the query
+cannot run at all. In that case the interface knows nothing about the room it is in. A dark surface
+shown to somebody who did not ask for it reads as broken in daylight; a light one reads as plain at
+night. The failure that looks like a bug is the one to avoid.
+
+*Why the fallback is stated at all:* because the library gets it backwards by default.
+`mode-watcher` tests `(prefers-color-scheme: light)` and maps every non-match to dark, including the
+no-`matchMedia` case. Left alone, the undetectable case lands in dark — a default nobody chose,
+arriving through a dependency's internals. Stating the requirement makes it testable.
+
+*Why the fonts are self-hosted:* the palette names Inter, JetBrains Mono, and Source Serif 4, and the
+idiomatic way to load them on this stack is `presetWebFonts` with Google as the provider. That sends
+the operator's IP to Google on every page load of a product that collects nothing (D-038). The faces
+ship in the binary instead.
+
+*Rejected:* an operator-selectable palette in Tier 0, because a theme picker is a settings surface, a
+persistence concern, and a contrast-audit obligation multiplied by however many palettes ship — for a
+single-operator tool whose owner can edit two CSS blocks. Rejected: taking the CLI's output as
+authoritative, because `shadcn` is the React CLI writing Tailwind-v4 `@theme` shape into a repository
+that has neither Tailwind nor that schema; the JSON's values are the contract and the CLI is a
+convenience. Rejected: dark-by-default, which suits the night use this product is built for but
+misreports the system preference on every daytime first run.
+
+**D-051 — Interface work loads the `frontend-design` skill before it writes markup.** *Raised
+alongside D-050, 2026-08-13.* An agent building or reshaping any rendered surface — a page, a
+visual component, a layout, the theme — loads its `frontend-design` skill first. Copy fixes, typing
+fixes, and changes with no rendered consequence are outside it. Rule in §24.3.5.1; checklist line in
+the implementation plan's §A.3; reviewer line in §A.4.
+
+*Why this needs saying when §24.3 already runs to thirteen subsections:* every one of them constrains
+correctness, and a page can satisfy all of them and still be shapeless. Nothing in the rule file, the
+gates, or the invariants fails when an interface is merely dull, so nothing catches it until a human
+looks — and by then it is fifteen pages deep and the fix is a redesign.
+
+*Why the read-first framing, matching D-048:* the failure mode is identical. An agent that starts
+writing reaches for its defaults immediately, and the defaults are the centred card on the neutral
+page. Design advice read afterwards is design advice applied as a rewrite, which is exactly the cost
+D-048 exists to avoid on the code side.
+
+*Why it is not in the normative set:* the skill is a working aid for the author, not a source of
+product requirements, and it lives outside the repository where this document cannot pin its version.
+§10.4 fixes the palette and §24.3.5 fixes the tokens; the skill operates inside those, never against
+them. Where the two disagree, this document wins, and that ordering is what keeps a general design
+aid from quietly reopening a decided question.
+
+*Rejected:* a subjective "the interface should look good" line with no trigger and no owner, because
+it is unenforceable and every reviewer reads it differently. Rejected: a design-system document of our
+own in §24, because writing one is a project, keeping it true is a second project, and neither is
+this product.
 
 ### 22.4 Change requests against the frozen scope
 
@@ -9590,6 +9695,64 @@ Making shadcn-svelte's Tailwind-authored components work on UnoCSS requires: the
   <Moon class="hidden size-5 dark:block" />
 </Button>
 ```
+
+**The token values are `tangerine`'s, not shadcn's defaults.** §10.4 states the product requirement;
+this is where the values land. The registry item is fetched with
+`bunx shadcn@latest add https://tweakcn.com/r/themes/tangerine.json` and its four parts are
+distributed as follows:
+
+| Registry field | Where it lands here | Why not where the CLI would put it |
+| --- | --- | --- |
+| `cssVars.light` (53 tokens) | `:root` in `frontend/src/app.css` | Same place shadcn-svelte's own tokens live |
+| `cssVars.dark` (52 tokens) | `.dark` in `frontend/src/app.css` | Class strategy, driven by `mode-watcher` |
+| `cssVars.theme` (`font-*`, `radius`, `tracking-*`) | `uno.config.ts` `theme`, plus `--tracking-normal` and the `tracking-*` `calc()` chain in `:root` | There is no `@theme` directive on UnoCSS; it is a Tailwind-v4 CSS-file feature |
+| `css["@layer base"]` (`body { letter-spacing }`) | A plain rule in `app.css` | `@layer base` here would be a Tailwind layer we do not have |
+
+**Treat the command as a fetch, not as a build step.** `shadcn` is the React CLI reading a
+`components.json` whose schema is not the one this repository carries (`shadcn-svelte.com/schema.json`),
+and its Tailwind-v4 output assumes a `@theme inline` block that UnoCSS never processes. What is
+authoritative is the JSON's token values, transcribed into the two files above; what is disposable is
+whichever CLI put them there. A run that rewrites `app.css` into Tailwind-v4 shape has not applied the
+theme, it has broken the stylesheet — revert it and transcribe.
+
+Two consequences carry beyond the token list:
+
+- **Fonts are self-hosted.** Inter, JetBrains Mono, and Source Serif 4 ship as files inside the SPA.
+  `presetWebFonts` with `provider: "google"` — the pattern the rule file shows — is not used here,
+  because it makes every page load an outbound request to Google carrying the operator's IP (D-038,
+  §21.8, D-050).
+- **Semantic tokens only.** Components reference `bg-background`, `text-muted-foreground`,
+  `border-border`, `bg-primary`, and the rest. A literal color in a component — a hex, an `oklch(…)`,
+  or a `bg-orange-500` — is a component that has left the theme and will be wrong in one of the two
+  modes. The exceptions are the poster and overlay renderer's own colors, which are content rather
+  than interface, and live in the backend.
+
+**The default mode is `system`, and the fallback is light.** `<ModeWatcher />`'s `defaultMode` already
+defaults to `"system"` and `track` to `true`, so following the operating system needs no prop. The
+fallback does need code: `mode-watcher` resolves the system preference by testing
+`(prefers-color-scheme: light)` and mapping every non-match — including a browser with no
+`window.matchMedia` at all — to `"dark"`. §10.4 requires light there, so the root layout sets the mode
+explicitly when the query cannot be run. It is a few lines, and it is the difference between a
+documented default and an accident.
+
+#### 24.3.5.1 Visual design is an obligation, not a taste
+
+**Before an agent writes or reshapes any interface surface, it loads its `frontend-design` skill.**
+This applies to a new page, a new component with a visual surface, a layout change, and any work on
+the theme itself. It does not apply to a copy fix, a typing fix, or a change with no rendered
+consequence.
+
+The reason is narrow and specific. Everything else in §24.3 constrains correctness — runes over
+stores, `$derived` over `$effect`, Bits UI over hand-rolled ARIA — and a page can satisfy every line
+of it while looking like nothing at all. Left to defaults, an agent reaches for the same centred card
+on a neutral background on every page, and the result is not a design that was chosen but a shape
+that was defaulted into fifteen times. §4.3 and §8 already say this product's interface has to carry
+state, density, and consequence honestly; a templated shell cannot.
+
+What the obligation is *not*: a licence to invent per-page visual languages. The skill informs
+typography, hierarchy, density, and restraint within the theme in §10.4 — it does not authorise a
+second palette, a page-specific font, or a literal color. Where the skill's advice and this section
+collide, this section wins (D-051).
 
 #### 24.3.6 Forms
 
