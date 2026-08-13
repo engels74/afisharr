@@ -36,6 +36,11 @@ export const en = {
 	'nav.settings': 'Settings',
 	'nav.primary': 'Primary',
 
+	'appearance.mode.label': 'Color mode',
+	'appearance.mode.system': 'Follow the system',
+	'appearance.mode.light': 'Light',
+	'appearance.mode.dark': 'Dark',
+
 	'state.loading.label': 'Loading',
 	'state.loading.stillWorking': 'Still working…',
 	'state.empty.nothingCreated.title': 'Nothing here yet',
