@@ -7,6 +7,13 @@
  * 53 tokens and 52 — and this file is the only place in `frontend/src` where a
  * color is written down. Everything else names a token.
  *
+ * One token departs from the registry, and says so where it sits:
+ * `--destructive` is darkened from L 0.6368 to L 0.5928, hue and chroma
+ * untouched. The registry red carries white text at 3.76:1, and the one control
+ * that fills with it is the proceed button of a destructive action — the last
+ * thing an operator reads before something is deleted. 4.5:1 is the floor for
+ * text that size. A re-sync from tweakcn will offer 0.6368 back; keep 0.5928.
+ *
  * They are CSS variables rather than UnoCSS theme entries because that is the
  * form the shadcn-svelte components read; `uno.config.ts` binds the utility
  * names (`bg-background`, `text-muted-foreground`) to them, so the two never
@@ -60,7 +67,7 @@
 	--muted-foreground: oklch(0.551 0.0234 264.3637);
 	--accent: oklch(0.9119 0.0222 243.8174);
 	--accent-foreground: oklch(0.3791 0.1378 265.5222);
-	--destructive: oklch(0.6368 0.2078 25.3313);
+	--destructive: oklch(0.5928 0.2078 25.3313);
 	--destructive-foreground: oklch(1 0 0);
 	--border: oklch(0.9022 0.0052 247.8822);
 	--input: oklch(0.97 0.0029 264.542);
@@ -137,7 +144,7 @@
 	--muted-foreground: oklch(0.7155 0 0);
 	--accent: oklch(0.338 0.0589 267.5867);
 	--accent-foreground: oklch(0.8823 0.0571 254.1284);
-	--destructive: oklch(0.6368 0.2078 25.3313);
+	--destructive: oklch(0.5928 0.2078 25.3313);
 	--destructive-foreground: oklch(1 0 0);
 	--border: oklch(0.3843 0.0301 269.7337);
 	--input: oklch(0.3843 0.0301 269.7337);
