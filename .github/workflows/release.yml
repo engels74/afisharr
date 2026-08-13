@@ -72,14 +72,36 @@ jobs:
     name: plex-matrix
     runs-on: ubuntu-latest
     timeout-minutes: 120
+    defaults:
+      run:
+        working-directory: backend
     steps:
       - uses: actions/checkout@v5
+      - uses: ./.github/actions/rust
+        with:
+          tools: nextest
       # The contract test against a real server is what keeps the adversarial
       # fake honest: the fake makes failures reproducible, and this makes the
-      # fake truthful (D-036). It needs a real Plex server, which arrives with
-      # the client in Phase 2.
-      - name: contract tests against every supported Plex version
-        run: echo "No Plex contract tests exist yet (the client is built in Phase 2)."
+      # fake truthful (D-036). It needs a real Plex server, and it says so
+      # rather than passing quietly when the lane has none — a contract test
+      # that silently skips reads green on the one lane meant to catch drift.
+      - name: contract tests against a real Plex server
+        env:
+          AFISHARR_PLEX_CONTRACT_URL: ${{ secrets.AFISHARR_PLEX_CONTRACT_URL }}
+          AFISHARR_PLEX_CONTRACT_TOKEN: ${{ secrets.AFISHARR_PLEX_CONTRACT_TOKEN }}
+        run: |
+          if [ -z "${AFISHARR_PLEX_CONTRACT_URL:-}" ] || [ -z "${AFISHARR_PLEX_CONTRACT_TOKEN:-}" ]; then
+            echo "::error title=plex-matrix::No real Plex server is configured for the" \
+                 "release lane. Set the AFISHARR_PLEX_CONTRACT_URL and" \
+                 "AFISHARR_PLEX_CONTRACT_TOKEN repository secrets; without them the" \
+                 "adversarial fake (D-036) ships unverified."
+            exit 1
+          fi
+          # `--no-capture`, so the per-call drift report reaches the log: a lane
+          # that printed only "contract test failed" would send whoever reads it
+          # back to a server they may not have.
+          cargo nextest run --package afisharr-plex --all-features \
+            --no-capture -E 'binary(contract)'
 
   render-cache-bound:
     name: render-cache-bound
