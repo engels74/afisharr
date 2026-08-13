@@ -67,9 +67,21 @@ impl PinBody {
     /// plex.tv has answered both `"id": 12345` and `"id": "12345"` across
     /// versions, and a client that accepts only one of them breaks on an
     /// upgrade nobody here controls.
+    ///
+    /// A string form is held to the shape an identifier can actually have,
+    /// because this value is pasted into the poll URL's path
+    /// (`{base}/pins/{id}`). A value carrying a `/`, a `?`, or a `#` is not a
+    /// path segment: `"id": "../user"` normalises the poll to
+    /// `https://plex.tv/api/v2/user`, which answers 200 with a body carrying no
+    /// `authToken`, so every poll reads `Pending` and the operator watches a
+    /// sign-in that can never finish with nothing anywhere saying why. Refused
+    /// here, it is [`PinError::NoIdentifier`] — the answer this crate already
+    /// gives for an identifier it cannot follow.
+    ///
+    /// [`PinError::NoIdentifier`]: crate::pin::PinError::NoIdentifier
     pub(crate) fn identifier(&self) -> Option<String> {
         match &self.id {
-            serde_json::Value::String(text) => Some(text.clone()),
+            serde_json::Value::String(text) => is_pollable(text).then(|| text.clone()),
             serde_json::Value::Number(number) => Some(number.to_string()),
             _ => None,
         }
@@ -93,6 +105,19 @@ impl PinBody {
     }
 }
 
+/// Whether an identifier is one this client can put in a URL path unchanged.
+///
+/// Deliberately narrow: every identifier plex.tv has ever issued is a decimal
+/// number, and the tolerance here exists only so a future alphanumeric one is
+/// not refused. Anything else is a value that would change which endpoint the
+/// poll reaches rather than which pin it names.
+fn is_pollable(identifier: &str) -> bool {
+    !identifier.is_empty()
+        && identifier
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || byte == b'-' || byte == b'_')
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -114,6 +139,34 @@ mod tests {
     fn an_identifier_of_an_unexpected_shape_is_absent_rather_than_invented() {
         let body: PinBody = serde_json::from_str(r#"{"id":null,"code":"abcd"}"#).expect("parses");
         assert_eq!(body.identifier(), None);
+    }
+
+    #[test]
+    fn an_identifier_that_is_not_a_path_segment_is_refused() {
+        // The failure this closes: the identifier is pasted into the poll URL's
+        // path, so `"../user"` normalises the poll to plex.tv's `/user`
+        // endpoint. That answers 200 with no `authToken`, so every poll reads
+        // `Pending` for ever and the operator watches a sign-in that cannot
+        // finish, with nothing anywhere saying why.
+        for id in ["../user", "42?X-Plex-Token=x", "42#frag", "42/43", ""] {
+            let body: PinBody =
+                serde_json::from_str(&format!(r#"{{"id":{},"code":"abcd"}}"#, json_string(id)))
+                    .expect("parses");
+            assert_eq!(body.identifier(), None, "id {id:?}");
+        }
+    }
+
+    #[test]
+    fn an_alphanumeric_identifier_a_later_version_might_issue_is_still_accepted() {
+        // The bound on the rule above: it exists to keep the value a path
+        // segment, not to insist plex.tv keeps issuing decimal numbers.
+        let body: PinBody =
+            serde_json::from_str(r#"{"id":"pin_abc-123","code":"abcd"}"#).expect("parses");
+        assert_eq!(body.identifier().as_deref(), Some("pin_abc-123"));
+    }
+
+    fn json_string(value: &str) -> String {
+        serde_json::Value::String(value.to_owned()).to_string()
     }
 
     #[test]

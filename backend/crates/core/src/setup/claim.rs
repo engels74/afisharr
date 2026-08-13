@@ -7,7 +7,7 @@ use sqlx::{SqliteConnection, SqlitePool};
 
 use crate::{
     digest,
-    leases::{Acquire, Heartbeat, LeaseName, LeaseOwner, Release, held_by},
+    leases::{Acquire, Heartbeat, LeaseName, LeaseOwner, held_by},
     storage::WriteOperation,
     time::Timestamp,
 };
@@ -154,38 +154,6 @@ impl WriteOperation for RenewClaim {
         Ok(renew(conn, &owner, self.at, expires_at)
             .await?
             .then_some(expires_at))
-    }
-}
-
-/// Gives up the claim. Completing setup runs this.
-#[derive(Debug)]
-pub struct ReleaseClaim {
-    /// The cookie value that holds it, when the release is a sign-off rather
-    /// than a completion.
-    pub cookie_value: Option<String>,
-}
-
-impl WriteOperation for ReleaseClaim {
-    type Output = ();
-
-    async fn execute(self, conn: &mut SqliteConnection) -> Result<(), sqlx::Error> {
-        if let Some(cookie_value) = self.cookie_value {
-            return Release {
-                name: LeaseName::SetupClaim,
-                owner: owner_of(&cookie_value),
-            }
-            .execute(conn)
-            .await;
-        }
-
-        // Completion deletes the row whoever holds it: setup is over, and a
-        // lingering lease would answer "claimed" on an endpoint that now
-        // answers 404 anyway.
-        let name = LeaseName::SetupClaim.as_text();
-        sqlx::query!("DELETE FROM leases WHERE name = ?1", name)
-            .execute(&mut *conn)
-            .await?;
-        Ok(())
     }
 }
 

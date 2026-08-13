@@ -23,8 +23,7 @@ mod token;
 
 pub use acknowledgements::{AckSetupStep, CompleteSetup, PACKS_ACK, REPORT_ACK};
 pub use claim::{
-    CLAIM_COOKIE, CLAIM_TTL_MILLIS, ClaimOutcome, ClaimState, MintClaim, ReleaseClaim, RenewClaim,
-    inspect,
+    CLAIM_COOKIE, CLAIM_TTL_MILLIS, ClaimOutcome, ClaimState, MintClaim, RenewClaim, inspect,
 };
 pub use evidence::{Evidence, read as read_evidence};
 pub use steps::SetupStep;
