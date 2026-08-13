@@ -250,6 +250,15 @@ async fn envelope(
 /// that create the administrator and finish setup; the Plex attempt cookie is
 /// the third, and behind it sits the request that turns a finished plex.tv
 /// exchange into a session.
+///
+/// A refusal counts, and it has to count here. This layer sits outside every
+/// route group, so a request it turns away never reaches the limit that group
+/// carries — and the cookies it branches on are read and never validated, so
+/// `Cookie: afisharr_session=x` on any `POST` is enough to produce one.
+/// Uncounted, that was a request an unauthenticated caller could loop as fast
+/// as the instance accepts connections while `Bucket::Anonymous` read zero for
+/// their address, against a module whose rule is that every request through
+/// `/api` is counted exactly once ([`limits`]).
 async fn csrf(
     State(state): State<ApiState>,
     request: Request<Body>,
@@ -265,23 +274,32 @@ async fn csrf(
         .get(security::CSRF_COOKIE)
         .map(|cookie| cookie.value().to_owned());
 
-    match security::judge_csrf(
+    let refusal = match security::judge_csrf(
         request.method(),
         request.headers(),
         token.as_deref(),
         carries_ambient_credential,
         state.public_origin(),
     ) {
-        security::CsrfDecision::Allowed => Ok(next.run(request).await),
-        security::CsrfDecision::ForeignOrigin => Err(AppError::of(
+        security::CsrfDecision::Allowed => return Ok(next.run(request).await),
+        security::CsrfDecision::ForeignOrigin => AppError::of(
             crate::error::ErrorCode::Forbidden,
             "That request came from another site and was refused.",
-        )),
-        security::CsrfDecision::TokenMismatch => Err(AppError::of(
+        ),
+        security::CsrfDecision::TokenMismatch => AppError::of(
             crate::error::ErrorCode::Forbidden,
             "That request was missing its cross-site protection token. Reload and try again.",
-        )),
-    }
+        ),
+    };
+
+    // The address the envelope resolved, which is the one every other bucket is
+    // keyed on. A missing context is a wiring fault rather than a request
+    // anybody can fix, and the refusal above is still the honest answer to it.
+    let address = request
+        .extensions()
+        .get::<ClientContext>()
+        .map(|client| client.address);
+    Err(authentication::spend_anonymous(&state, address).unwrap_or(refusal))
 }
 
 /// Refuses everything while `instance.setup_completed_at` is `NULL`.

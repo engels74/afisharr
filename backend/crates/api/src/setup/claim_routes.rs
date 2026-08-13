@@ -63,23 +63,25 @@ pub async fn claim(
         .get(CLAIM_COOKIE)
         .map(|cookie| cookie.value().to_owned());
 
-    // 1. The holder renews and succeeds, before anything else is consulted.
-    if let ClaimState::HeldByCaller { .. } =
-        inspect(state.database().readers(), existing.as_deref(), now)
-            .await
-            .map_err(AppError::internal)?
-    {
-        return grant(&state, client, jar, existing.unwrap_or_default(), now).await;
-    }
+    // One read, matched once. Asking twice was two reader-pool round trips for
+    // one question, and two chances to get different answers: a lease that
+    // lapsed between them left the request taking neither the holder-first path
+    // nor the blocked one.
+    let held = inspect(state.database().readers(), existing.as_deref(), now)
+        .await
+        .map_err(AppError::internal)?;
 
-    // 2. Held elsewhere: answer before the limiter is touched, so refreshing
-    //    the page costs nothing an operator will need later (PRD §21.4.3).
-    if let ClaimState::HeldByAnother { expires_at } =
-        inspect(state.database().readers(), existing.as_deref(), now)
-            .await
-            .map_err(AppError::internal)?
-    {
-        return Err(held_elsewhere(now, expires_at));
+    match held {
+        // 1. The holder renews and succeeds, before anything else is consulted.
+        ClaimState::HeldByCaller { .. } => {
+            return grant(&state, client, jar, existing.unwrap_or_default(), now).await;
+        }
+        // 2. Held elsewhere: answer before the limiter is touched, so refreshing
+        //    the page costs nothing an operator will need later (PRD §21.4.3).
+        ClaimState::HeldByAnother { expires_at } => {
+            return Err(held_elsewhere(now, expires_at));
+        }
+        ClaimState::Unclaimed => {}
     }
 
     // 3. Now the limiter, guarding the one step where guessing gains anything.

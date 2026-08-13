@@ -402,3 +402,44 @@ async fn a_wrong_method_on_a_guarded_route_is_counted_like_any_other_call() {
 
     running.stop().await;
 }
+
+#[tokio::test]
+async fn a_request_the_cross_site_check_refuses_is_counted_like_any_other_call() {
+    // The last layer that answers before any limit does. The CSRF check wraps
+    // the whole router, outside every route group, so a request it turns away
+    // never reaches the limit that group carries — and it branches on cookies
+    // it reads and never validates, so `afisharr_session=` with any value at
+    // all is enough to make a write "carry an ambient credential" and be
+    // refused for its missing token. Uncounted, that was 403s at whatever rate
+    // a caller can send them, with `Bucket::Anonymous` reading zero for their
+    // address.
+    let instance = TempInstance::new();
+    let running = RunningInstance::start(&instance).await;
+    let _wizard = Wizard::set_up(&running, "operator", PASSWORD).await;
+
+    let stranger = client();
+    let mut bounded = false;
+    for _ in 0..=ANONYMOUS_ALLOWANCE {
+        let response = stranger
+            .post(format!("{}/api/auth/logout", running.base_url))
+            .header("cookie", "afisharr_session=not-a-session")
+            .send()
+            .await
+            .expect("the logout route must answer");
+        if response.status() == StatusCode::TOO_MANY_REQUESTS {
+            bounded = true;
+            break;
+        }
+        assert_eq!(
+            response.status(),
+            StatusCode::FORBIDDEN,
+            "a write with no echoed token is refused by the cross-site check"
+        );
+    }
+    assert!(
+        bounded,
+        "a cross-site refusal must still be charged to an allowance"
+    );
+
+    running.stop().await;
+}
