@@ -155,7 +155,9 @@ async fn a_burst_arriving_at_once_does_not_outrun_the_account_allowance() {
         async move {
             client
                 .post(url)
-                .json(&serde_json::json!({ "username": "operator", "password": "not the password" }))
+                .json(
+                    &serde_json::json!({ "username": "operator", "password": "not the password" }),
+                )
                 .send()
                 .await
                 .expect("the login route must answer")

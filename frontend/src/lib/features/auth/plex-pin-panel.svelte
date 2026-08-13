@@ -12,6 +12,13 @@
 		type SignedIn,
 		startPlexPin,
 	} from './auth-client';
+	import {
+		forgetAttempt,
+		POLL_INTERVAL_MS,
+		parkAttempt,
+		refusedTheReturnTarget,
+		resumeAttempt,
+	} from './plex-attempt';
 
 	interface Props {
 		onsignedin: (account: SignedIn) => void;
@@ -19,52 +26,7 @@
 
 	let { onsignedin }: Props = $props();
 
-	/**
-	 * How often to ask plex.tv whether the operator has finished.
-	 *
-	 * Chosen against the budget it spends, not against how fast a code can be
-	 * typed. Every poll reaches plex.tv, so every poll costs one of the sixty
-	 * provider attempts an address gets each minute — and `trustProxy` is empty
-	 * by default, so behind the reverse proxy nearly every deployment runs,
-	 * every caller resolves to the proxy's one address and shares that counter.
-	 * At two seconds a single panel spent thirty of the sixty, so two operators
-	 * signing in at once — or one operator with the page open in two tabs —
-	 * refused each other. At five it is twelve, which leaves room for five
-	 * concurrent sign-ins and still notices a finished exchange within a few
-	 * seconds of the operator finishing it (PRD §21.4.3).
-	 */
-	const POLL_INTERVAL_MS = 5000;
-
-	/**
-	 * Where an in-flight attempt is kept across the hosted sign-in.
-	 *
-	 * The OAuth variant leaves this page by top-level navigation and returns to
-	 * a fresh document, so an attempt held only in component state is an
-	 * attempt nobody polls: plex.tv has authorised a pin this build has
-	 * forgotten, and the operator's only move is to start another one. Session
-	 * storage rather than local: it belongs to the tab that started it and has
-	 * no business outliving it.
-	 */
-	const RESUME_KEY = 'afisharr.plexAttempt';
-
-	/** The attempt this tab left behind, if it is still worth polling. */
-	function resume(): PinStarted | undefined {
-		const stored = sessionStorage.getItem(RESUME_KEY);
-		// Read once: a pin that was not polled to a conclusion this time is not
-		// worth resuming on the load after either.
-		sessionStorage.removeItem(RESUME_KEY);
-		if (!stored) {
-			return undefined;
-		}
-		try {
-			const attempt = JSON.parse(stored) as PinStarted;
-			return attempt.expiresAt > Date.now() ? attempt : undefined;
-		} catch {
-			return undefined;
-		}
-	}
-
-	let started = $state<PinStarted | undefined>(resume());
+	let started = $state<PinStarted | undefined>(resumeAttempt());
 	let refusal = $state<Problem | undefined>(undefined);
 	let expired = $state(false);
 	/**
@@ -97,11 +59,6 @@
 	 * server was asked and it answered (D-046).
 	 */
 	let hostedOffered = $state(true);
-
-	/** Whether `problem` is the instance refusing the return target itself. */
-	function refusedTheReturnTarget(problem: Problem): boolean {
-		return problem.pointer === '/forwardUrl';
-	}
 
 	/**
 	 * Starts a sign-in.
@@ -146,7 +103,7 @@
 		// not one. The attempt is parked first, so the document plex.tv returns
 		// the operator to picks the same one up rather than orphaning it.
 		if (oauth && started.authorizationUrl) {
-			sessionStorage.setItem(RESUME_KEY, JSON.stringify(started));
+			parkAttempt(started);
 			window.location.assign(started.authorizationUrl);
 		}
 	}
@@ -202,7 +159,7 @@
 				// refusal, a 502 from plex.tv, and the operator's only move is
 				// to reload the page (`I-UX-2`).
 				started = undefined;
-				sessionStorage.removeItem(RESUME_KEY);
+				forgetAttempt();
 				return;
 			}
 			// The poll that got through clears the refusal the last one showed:

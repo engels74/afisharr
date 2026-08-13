@@ -189,9 +189,12 @@ fn requested_scopes(requested: &[String]) -> AppResult<ScopeSet> {
     for name in requested {
         let scope = Scope::parse(name).ok_or_else(|| {
             AppError::new(
-                Problem::new(ErrorCode::Invalid, "That is not a scope this instance grants.")
-                    .at("/scopes")
-                    .expecting(known_scopes(), name.clone()),
+                Problem::new(
+                    ErrorCode::Invalid,
+                    "That is not a scope this instance grants.",
+                )
+                .at("/scopes")
+                .expecting(known_scopes(), name.clone()),
             )
         })?;
         scopes.push(scope);
@@ -328,8 +331,15 @@ mod tests {
         let problem = refusal.problem();
         assert_eq!(problem.code, ErrorCode::Invalid);
         assert_eq!(problem.pointer.as_deref(), Some("/scopes"));
-        let mismatch = problem.mismatch.as_ref().expect("the choices must be named");
-        assert!(mismatch.expected.contains("files:read"), "{}", mismatch.expected);
+        let mismatch = problem
+            .mismatch
+            .as_ref()
+            .expect("the choices must be named");
+        assert!(
+            mismatch.expected.contains("files:read"),
+            "{}",
+            mismatch.expected
+        );
     }
 
     #[test]

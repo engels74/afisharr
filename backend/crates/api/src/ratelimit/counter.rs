@@ -150,5 +150,4 @@ mod tests {
         );
         assert_eq!(spent.locked_until, None);
     }
-
 }
