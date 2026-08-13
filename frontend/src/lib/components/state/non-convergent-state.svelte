@@ -21,8 +21,8 @@
 
 <div class={cn('flex flex-col gap-2', className)} data-slot="non-convergent-state">
 	<p class="text-sm font-medium">{t('state.nonConvergent.title')}</p>
-	<p class="text-sm text-[var(--muted-foreground)]">{t('state.nonConvergent.body')}</p>
-	<ul class="text-xs text-[var(--muted-foreground)]">
+	<p class="text-sm text-muted-foreground">{t('state.nonConvergent.body')}</p>
+	<ul class="text-xs text-muted-foreground">
 		{#each state.unsettled as item (item)}
 			<li>{item}</li>
 		{/each}

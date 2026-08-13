@@ -19,6 +19,10 @@
 	import { sourceHref } from './source-link.svelte';
 </script>
 
-<footer class="border-t border-[var(--border)] px-4 py-3 text-xs">
-	<a href={sourceHref()} rel="external">{t('app.sourceLink')}</a>
+<footer class="border-t border-border">
+	<!-- The same column the page is in, so the link sits under the content
+	     rather than at the far edge of the window. -->
+	<div class="mx-auto w-full max-w-6xl px-4 py-3 text-xs">
+		<a class="underline" href={sourceHref()} rel="external">{t('app.sourceLink')}</a>
+	</div>
 </footer>

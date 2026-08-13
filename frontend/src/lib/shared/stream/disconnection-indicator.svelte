@@ -24,7 +24,7 @@
 -->
 {#if status === 'disconnected' || status === 'reconnecting'}
 	<p
-		class={cn('text-xs text-[var(--muted-foreground)]', className)}
+		class={cn('text-xs text-muted-foreground', className)}
 		data-slot="disconnection-indicator"
 		data-status={status}
 		role="status"

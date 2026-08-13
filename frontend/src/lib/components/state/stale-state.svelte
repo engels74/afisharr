@@ -20,7 +20,7 @@
 </script>
 
 <div class={cn('flex flex-col gap-2', className)} data-slot="stale-state">
-	<p class="text-xs text-[var(--muted-foreground)]">
+	<p class="text-xs text-muted-foreground">
 		{t('state.stale.title')} · {t('state.stale.body', { age: state.age })}
 	</p>
 	{@render children?.()}

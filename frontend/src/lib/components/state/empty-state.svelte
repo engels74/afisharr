@@ -39,9 +39,9 @@
 			{t('state.empty.pending.title')}
 		{/if}
 	</p>
-	<p class="text-sm text-[var(--muted-foreground)]">{explanation}</p>
+	<p class="text-sm text-muted-foreground">{explanation}</p>
 	{#if state.reason === 'nothingMatched' && state.predicate}
-		<p class="text-xs text-[var(--muted-foreground)]">
+		<p class="text-xs text-muted-foreground">
 			{t('state.empty.nothingMatched.body', { predicate: state.predicate })}
 		</p>
 	{/if}

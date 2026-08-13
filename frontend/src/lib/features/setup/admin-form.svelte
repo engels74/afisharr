@@ -79,7 +79,7 @@
 
 <section class="flex flex-col gap-4 max-w-md">
 	<h1 class="text-lg font-semibold">{t('setup.admin.title')}</h1>
-	<p class="text-sm text-[var(--muted-foreground)]">{t('setup.admin.body')}</p>
+	<p class="text-sm text-muted-foreground">{t('setup.admin.body')}</p>
 
 	{#if generalProblem}
 		<ErrorState state={{ kind: 'error', summary: generalProblem.message }} />
@@ -89,24 +89,24 @@
 		<label class="text-sm" for={usernameId}>{t('auth.username')}</label>
 		<input
 			id={usernameId}
-			class="rounded border border-[var(--border)] px-2 py-1 text-sm"
+			class="rounded-md border border-border bg-card px-2 py-1 text-sm"
 			bind:value={username}
 			autocomplete="username"
 		/>
 		{#if usernameProblem}
-			<p class="text-xs text-[var(--destructive)]">{usernameProblem}</p>
+			<p class="text-xs text-destructive">{usernameProblem}</p>
 		{/if}
 
 		<label class="text-sm" for={passwordId}>{t('auth.password')}</label>
 		<input
 			id={passwordId}
-			class="rounded border border-[var(--border)] px-2 py-1 text-sm"
+			class="rounded-md border border-border bg-card px-2 py-1 text-sm"
 			type="password"
 			bind:value={password}
 			autocomplete="new-password"
 		/>
 		{#if passwordProblem}
-			<p class="text-xs text-[var(--destructive)]">{passwordProblem}</p>
+			<p class="text-xs text-destructive">{passwordProblem}</p>
 		{/if}
 
 		<button class="self-start text-sm underline" type="submit" disabled={submitting}>

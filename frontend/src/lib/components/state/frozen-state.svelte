@@ -24,7 +24,7 @@
 	shown, marked, with the source and the time of its last success.
 -->
 <div class={cn('flex flex-col gap-2', className)} data-slot="frozen-state">
-	<p class="text-xs text-[var(--muted-foreground)]">
+	<p class="text-xs text-muted-foreground">
 		{t('state.frozen.title')} ·
 		{t('state.frozen.body', { source: state.source, age: state.lastSuccessAge })}
 	</p>

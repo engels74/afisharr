@@ -83,7 +83,7 @@
 	-->
 	<ErrorState state={{ kind: 'error', summary: refusal }} onretry={load} />
 {:else if status}
-	<p class="text-xs text-[var(--muted-foreground)]">
+	<p class="text-xs text-muted-foreground">
 		{t('setup.step', { ordinal: status.ordinal })}
 	</p>
 	<ClaimForm {status} onclaimed={() => goto('/setup/admin')} />

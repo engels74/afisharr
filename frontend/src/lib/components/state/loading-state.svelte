@@ -32,10 +32,10 @@
 	>
 		{#if treatment === 'skeleton'}
 			{#each Array.from({ length: rows }, (_, index) => index) as row (row)}
-				<div class="h-4 rounded animate-pulse bg-[var(--muted)]"></div>
+				<div class="h-4 rounded animate-pulse bg-muted"></div>
 			{/each}
 		{:else}
-			<p class="text-sm text-[var(--muted-foreground)]">
+			<p class="text-sm text-muted-foreground">
 				{state.progress ?? t('state.loading.stillWorking')}
 			</p>
 		{/if}

@@ -137,7 +137,7 @@
 {#if blocked}
 	<BlockedState state={{ kind: 'blocked', reason: blocked }} />
 {:else if status}
-	<p class="text-xs text-[var(--muted-foreground)]">
+	<p class="text-xs text-muted-foreground">
 		{t('setup.step', { ordinal: status.ordinal })}
 	</p>
 	{#if status.step === 'admin' && !created}

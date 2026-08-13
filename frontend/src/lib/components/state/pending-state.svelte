@@ -28,7 +28,7 @@
 	data-slot="pending-state"
 	aria-busy="true"
 >
-	<p class="text-xs text-[var(--muted-foreground)]">
+	<p class="text-xs text-muted-foreground">
 		{t('state.pending.title')} · {state.operation}
 	</p>
 	{@render children?.()}

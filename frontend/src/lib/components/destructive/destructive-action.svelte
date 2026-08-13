@@ -57,7 +57,7 @@
 			</label>
 			<input
 				id={confirmId}
-				class="rounded border border-[var(--border)] px-2 py-1 text-sm"
+				class="rounded-md border border-border bg-card px-2 py-1 text-sm"
 				bind:value={typed}
 				autocomplete="off"
 			/>
@@ -70,7 +70,7 @@
 		</button>
 		<button
 			type="button"
-			class="rounded bg-[var(--destructive)] px-3 py-1 text-sm text-[var(--destructive-foreground)] disabled:opacity-50"
+			class="rounded bg-destructive px-3 py-1 text-sm text-destructive-foreground disabled:opacity-50"
 			disabled={!satisfied}
 			onclick={onproceed}
 		>
