@@ -48,6 +48,16 @@ pub struct ClaimRequest {
         (status = 200, description = "The wizard is now held by this browser", body = ClaimGranted),
         (status = 400, description = "The request body was not readable", body = Problem),
         (status = 401, description = "The token was not accepted", body = Problem),
+        // The cross-site layer answers this one, and it is reachable here for
+        // the same reason the layer judges this route at all: the claim is an
+        // ambient credential, so a browser that already holds it — every
+        // renewal, which is the holder-first path below — is judged, and a
+        // request whose echoed token is absent or stale is refused before any
+        // handler runs. A layer that answers on a route's behalf has to be in
+        // that route's own annotations: the generated client is built from
+        // them and nothing else, so an undeclared answer is one the interface
+        // simply does not handle (§24.5).
+        (status = 403, description = "The request was refused as cross-site", body = Problem),
         (status = 409, description = "Another browser holds the wizard", body = Problem),
         (status = 429, description = "Too many attempts", body = Problem),
     ),

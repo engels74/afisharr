@@ -36,21 +36,11 @@ async fn instance_with_a_root() -> (TempInstance, tempfile::TempDir, RunningInst
 
     let instance = TempInstance::new();
 
-    // The root is inserted before the server starts, because the enabled roots
-    // are read once at boot — the same way the running binary reads them.
-    {
-        let booted = instance.boot().await;
-        sqlx::query(
-            "INSERT INTO asset_roots (id, path, purpose, is_enabled, created_at)
-             VALUES (?1, ?2, 'Browse', 1, 0)",
-        )
-        .bind("01JROOT0000000000000000000")
-        .bind(root.to_string_lossy().to_string())
-        .execute(booted.database.readers())
-        .await
-        .expect_err("the read pool must refuse a write");
-        booted.database.close().await;
-    }
+    // Written through the write actor, which is the only path that may mutate
+    // (D-024). *When* it is written does not matter to the route: `files::browse`
+    // reads `asset_roots` on every call, so a root added while the server is up
+    // is browsable without a restart. It is written here because the test needs
+    // it before it asks, and for no other reason.
     insert_root(&instance, &root).await;
 
     let running = RunningInstance::start(&instance).await;

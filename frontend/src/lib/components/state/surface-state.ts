@@ -99,7 +99,15 @@ export interface Blocked {
 	readonly reason: string;
 	/** When it can be tried again, already formatted. */
 	readonly retryAfter?: string;
-	/** The one action that unblocks it. */
+	/**
+	 * What the one unblocking action is, named.
+	 *
+	 * Rendered beside the `action` snippet the surface supplies rather than
+	 * instead of it: the snippet is the control, and this is the sentence that
+	 * says what pressing it will do. It was declared here and read by nothing,
+	 * so a surface that set it — as the doc invited — got a blocked state with
+	 * no account of the way out, and nothing anywhere reported the omission.
+	 */
 	readonly unblockLabel?: string;
 }
 

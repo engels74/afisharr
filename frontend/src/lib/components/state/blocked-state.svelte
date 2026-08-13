@@ -31,5 +31,8 @@
 			{t('state.blocked.retryAt', { duration: state.retryAfter })}
 		</p>
 	{/if}
+	{#if state.unblockLabel}
+		<p class="text-sm">{state.unblockLabel}</p>
+	{/if}
 	{@render action?.()}
 </div>

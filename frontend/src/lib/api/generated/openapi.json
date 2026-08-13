@@ -1060,6 +1060,16 @@
               }
             }
           },
+          "403": {
+            "description": "The request was refused as cross-site",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
           "409": {
             "description": "Another browser holds the wizard",
             "content": {
@@ -1186,6 +1196,16 @@
           },
           "401": {
             "description": "The credentials were not accepted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The request was refused as cross-site",
             "content": {
               "application/json": {
                 "schema": {

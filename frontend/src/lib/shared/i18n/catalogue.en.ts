@@ -139,6 +139,9 @@ export const en = {
 	'page.notFound.title': 'No such page',
 	'page.notFound.body':
 		'That address does not resolve to anything on this instance.',
+	'page.failed.title': 'This page could not be shown',
+	'page.failed.body':
+		'The address is right and something went wrong rendering it. Reloading may be enough; if it is not, the instance log has the detail.',
 } as const satisfies Record<string, string>;
 
 /**

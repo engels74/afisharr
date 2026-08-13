@@ -1714,6 +1714,15 @@ export interface operations {
                     "application/json": components["schemas"]["Problem"];
                 };
             };
+            /** @description The request was refused as cross-site */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Problem"];
+                };
+            };
             /** @description Another browser holds the wizard */
             409: {
                 headers: {
@@ -1823,6 +1832,15 @@ export interface operations {
             };
             /** @description The credentials were not accepted */
             401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description The request was refused as cross-site */
+            403: {
                 headers: {
                     [name: string]: unknown;
                 };

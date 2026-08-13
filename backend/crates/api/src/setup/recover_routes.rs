@@ -58,6 +58,11 @@ pub struct RecoverRequest {
         (status = 200, description = "The wizard is now held by this browser", body = ClaimGranted),
         (status = 400, description = "The request body was not readable", body = Problem),
         (status = 401, description = "The credentials were not accepted", body = Problem),
+        // As `claim` declares it, and reachable for the same reason: a browser
+        // recovering a claim it still holds carries the claim cookie, which is
+        // an ambient credential, so the cross-site layer judges this request
+        // and refuses it when the echoed token is absent or stale (§24.5).
+        (status = 403, description = "The request was refused as cross-site", body = Problem),
         (status = 409, description = "Another browser holds the wizard", body = Problem),
         (status = 429, description = "Too many attempts", body = Problem),
     ),
