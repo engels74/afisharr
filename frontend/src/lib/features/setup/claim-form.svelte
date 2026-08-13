@@ -81,7 +81,7 @@
 			     a proportional face hides the difference between l, 1, and I. -->
 			<input
 				id={tokenId}
-				class="rounded-md border border-border bg-card px-2 py-1 font-mono text-sm"
+				class="rounded-md border border-border bg-input px-2 py-1 font-mono text-sm"
 				bind:value={token}
 				autocomplete="off"
 				spellcheck="false"
@@ -104,14 +104,14 @@
 				<label class="text-sm" for={usernameId}>{t('auth.username')}</label>
 				<input
 					id={usernameId}
-					class="rounded-md border border-border bg-card px-2 py-1 text-sm"
+					class="rounded-md border border-border bg-input px-2 py-1 text-sm"
 					bind:value={username}
 					autocomplete="username"
 				/>
 				<label class="text-sm" for={passwordId}>{t('auth.password')}</label>
 				<input
 					id={passwordId}
-					class="rounded-md border border-border bg-card px-2 py-1 text-sm"
+					class="rounded-md border border-border bg-input px-2 py-1 text-sm"
 					type="password"
 					bind:value={password}
 					autocomplete="current-password"

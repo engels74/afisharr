@@ -57,7 +57,7 @@
 			</label>
 			<input
 				id={confirmId}
-				class="rounded-md border border-border bg-card px-2 py-1 text-sm"
+				class="rounded-md border border-border bg-input px-2 py-1 text-sm"
 				bind:value={typed}
 				autocomplete="off"
 			/>

@@ -89,24 +89,32 @@
 		<label class="text-sm" for={usernameId}>{t('auth.username')}</label>
 		<input
 			id={usernameId}
-			class="rounded-md border border-border bg-card px-2 py-1 text-sm"
+			class="rounded-md border border-border bg-input px-2 py-1 text-sm"
 			bind:value={username}
 			autocomplete="username"
 		/>
+		<!--
+			The destructive token marks the message, it does not colour it — the
+			same rule `error-state.svelte` follows, and for the same arithmetic.
+			Against the card the red is 3.76:1 in light and 3.50:1 in dark:
+			enough for a rule, which WCAG asks 3:1 of, and short of the 4.5:1
+			this text owes. The sentence saying why a password was refused is
+			the last one that should be hard to read.
+		-->
 		{#if usernameProblem}
-			<p class="text-xs text-destructive">{usernameProblem}</p>
+			<p class="border-l-2 border-destructive pl-2 text-xs">{usernameProblem}</p>
 		{/if}
 
 		<label class="text-sm" for={passwordId}>{t('auth.password')}</label>
 		<input
 			id={passwordId}
-			class="rounded-md border border-border bg-card px-2 py-1 text-sm"
+			class="rounded-md border border-border bg-input px-2 py-1 text-sm"
 			type="password"
 			bind:value={password}
 			autocomplete="new-password"
 		/>
 		{#if passwordProblem}
-			<p class="text-xs text-destructive">{passwordProblem}</p>
+			<p class="border-l-2 border-destructive pl-2 text-xs">{passwordProblem}</p>
 		{/if}
 
 		<button class="self-start text-sm underline" type="submit" disabled={submitting}>

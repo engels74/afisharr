@@ -23,6 +23,23 @@ function reset(): void {
 	document.documentElement.classList.remove('dark');
 }
 
+/** Runs `body` on a browser whose `matchMedia` cannot be called. */
+async function withoutMatchMedia(body: () => Promise<void>): Promise<void> {
+	const real = window.matchMedia;
+	Object.defineProperty(window, 'matchMedia', {
+		configurable: true,
+		value: undefined,
+	});
+	try {
+		await body();
+	} finally {
+		Object.defineProperty(window, 'matchMedia', {
+			configurable: true,
+			value: real,
+		});
+	}
+}
+
 /** Lets the mode effects flush and the class land. */
 async function settle(): Promise<void> {
 	for (let round = 0; round < 5; round += 1) {
@@ -85,23 +102,30 @@ describe('the mode default', () => {
 		// `mode-watcher` tests `(prefers-color-scheme: light)` and maps every
 		// non-match to dark — including this one, where nothing was tested and
 		// nothing was learned (P1). PRD §10.4 fixes the answer as light.
-		const real = window.matchMedia;
-		Object.defineProperty(window, 'matchMedia', {
-			configurable: true,
-			value: undefined,
-		});
-		try {
+		await withoutMatchMedia(async () => {
 			await render(ModePreference);
 			await settle();
+		});
 
-			expect(localStorage.getItem(STORAGE_KEY)).toBe('light');
-			expect(document.documentElement.classList.contains('dark')).toBe(false);
-		} finally {
-			Object.defineProperty(window, 'matchMedia', {
-				configurable: true,
-				value: real,
-			});
-		}
+		expect(localStorage.getItem(STORAGE_KEY)).toBe('light');
+		expect(document.documentElement.classList.contains('dark')).toBe(false);
+	});
+
+	test('a browser that cannot be asked still honours an explicit choice', async () => {
+		// The fallback answers "what should be assumed", never "what did you
+		// say". `setMode` persists, so applying it over a stored `dark` does
+		// not merely render the wrong mode for one visit — it erases the
+		// choice from local storage, on the one browser where the operator has
+		// no way to make it stick.
+		localStorage.setItem(STORAGE_KEY, 'dark');
+
+		await withoutMatchMedia(async () => {
+			await render(ModePreference);
+			await settle();
+		});
+
+		expect(localStorage.getItem(STORAGE_KEY)).toBe('dark');
+		expect(document.documentElement.classList.contains('dark')).toBe(true);
 	});
 
 	test('a browser that can be asked keeps following the system', async () => {
