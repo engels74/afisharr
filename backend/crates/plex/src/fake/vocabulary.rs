@@ -14,20 +14,40 @@ use serde_json::{Value, json};
 
 use crate::fake::json as shape;
 
+/// The library type a numeric `type=` argument names.
+///
+/// The vocabulary is per-libtype, and a fake that always described movies would
+/// answer a show library's discovery call with a filtering type the caller can
+/// never match its own libtype against — so the call would look answered and
+/// the type list would be about something else.
+fn libtype(plex_type: Option<&str>) -> &'static str {
+    match plex_type {
+        Some("2") => "show",
+        Some("3") => "season",
+        Some("4") => "episode",
+        Some("18") => "collection",
+        _ => "movie",
+    }
+}
+
 /// `GET /library/sections/{key}/all?includeMeta=1`.
-pub(crate) fn describe(section: &str) -> Value {
+pub(crate) fn describe(section: &str, plex_type: Option<&str>) -> Value {
+    let kind = libtype(plex_type);
+    let asked = plex_type.unwrap_or("1");
     shape::container(&json!({
         "size": 0,
         "Meta": {
             "Type": [{
-                "type": "movie",
-                "title": "Movies",
+                "type": kind,
+                "title": kind,
                 "Filter": [
                     {
                         "filter": "genre",
                         "filterType": "string",
                         "title": "Genre",
-                        "key": format!("/library/sections/{section}/genre?type=1"),
+                        // The server composes this, query string and all, and
+                        // the type it carries is the one it was asked about.
+                        "key": format!("/library/sections/{section}/genre?type={asked}"),
                     },
                     { "filter": "year", "filterType": "integer", "title": "Year" }
                 ],
@@ -110,7 +130,7 @@ mod tests {
 
     #[test]
     fn the_vocabulary_declares_a_filtering_type_with_fields_and_sorts() {
-        let meta = describe("1")["MediaContainer"]["Meta"].clone();
+        let meta = describe("1", Some("1"))["MediaContainer"]["Meta"].clone();
         assert_eq!(meta["Type"][0]["type"], "movie");
         assert_eq!(meta["Type"][0]["Field"][2]["subType"], "rating");
         assert_eq!(meta["Type"][0]["Sort"][0]["key"], "titleSort");
@@ -118,7 +138,7 @@ mod tests {
 
     #[test]
     fn a_filter_with_choices_declares_the_endpoint_they_come_from() {
-        let meta = describe("7")["MediaContainer"]["Meta"].clone();
+        let meta = describe("7", Some("1"))["MediaContainer"]["Meta"].clone();
         assert_eq!(
             meta["Type"][0]["Filter"][0]["key"],
             "/library/sections/7/genre?type=1"
@@ -132,7 +152,7 @@ mod tests {
     fn the_operator_table_differs_by_field_type() {
         // The whole point of discovery: an integer takes range operators and a
         // tag does not, and neither list is compiled into the client.
-        let meta = describe("1")["MediaContainer"]["Meta"].clone();
+        let meta = describe("1", Some("1"))["MediaContainer"]["Meta"].clone();
         let operators = |index: usize| {
             meta["FieldType"][index]["Operator"]
                 .as_array()
@@ -148,6 +168,18 @@ mod tests {
             operators(1).contains(&">>=".to_owned()),
             "{:?}",
             operators(1)
+        );
+    }
+
+    #[test]
+    fn the_vocabulary_describes_the_type_it_was_asked_about() {
+        // A show library's discovery call answered with a movie filtering type
+        // is a call that looks answered and describes something else.
+        let meta = describe("2", Some("2"))["MediaContainer"]["Meta"].clone();
+        assert_eq!(meta["Type"][0]["type"], "show");
+        assert_eq!(
+            meta["Type"][0]["Filter"][0]["key"],
+            "/library/sections/2/genre?type=2"
         );
     }
 

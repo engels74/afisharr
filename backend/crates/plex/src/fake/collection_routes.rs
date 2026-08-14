@@ -52,8 +52,20 @@ pub(crate) async fn create_collection(
     let Some(library) = world.library(&section) else {
         return Ok(Json(shape::container(&json!({ "size": 0 }))));
     };
+    // Derived from the count, then advanced past anything that already holds
+    // it: a create/delete/create run would otherwise mint a key a live
+    // collection already answers to, and every later call addressing it would
+    // land on whichever of the two comes first in the list.
+    let mut suffix = 6000 + library.collections.len();
+    while library
+        .collections
+        .iter()
+        .any(|candidate| candidate.rating_key == format!("{section}{suffix}"))
+    {
+        suffix += 1;
+    }
     let collection = FakeCollection {
-        rating_key: format!("{section}{}", 6000 + library.collections.len()),
+        rating_key: format!("{section}{suffix}"),
         title,
         sort_title: None,
         sort_title_locked: false,

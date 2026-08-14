@@ -13,7 +13,7 @@
 	} from '$lib/components/state';
 	import { t } from '$lib/shared/i18n';
 	import ConnectionEvidence from './connection-evidence.svelte';
-	import { checkConnection, type PlexConnection } from './plex-client';
+	import { blocks, checkConnection, type PlexConnection } from './plex-client';
 	import WrongServerChoices from './wrong-server-choices.svelte';
 
 	let connection = $state<PlexConnection | undefined>(undefined);
@@ -111,7 +111,13 @@
 			connection}` performs does not reach inside one.
 		-->
 		{@const seen = connection}
-		{#if seen.state === 'wrongServer'}
+		<!--
+			`blocks` rather than a comparison spelled out here: which states stop
+			everything is `I-ID-5`'s rule, and a second copy of it on this page
+			is a copy free to disagree with the one the rest of the feature
+			narrows on.
+		-->
+		{#if blocks(seen.state)}
 			<BlockedState
 				state={{
 					kind: 'blocked',

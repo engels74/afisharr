@@ -35,6 +35,14 @@ impl ItemPage {
     /// "there is no more".
     #[must_use]
     pub fn has_more(&self) -> bool {
+        // A window of nothing is never worth advancing, whatever the total says:
+        // it can never be short of what was asked for, and `Window::next` on it
+        // returns the same window — so a caller paging on this would re-request
+        // the empty window for ever. The zero-size window is not hypothetical:
+        // it is how the filter vocabulary is asked for.
+        if self.window.size == 0 {
+            return false;
+        }
         let filled = u32::try_from(self.items.len()).unwrap_or(u32::MAX) >= self.window.size;
         if !filled {
             // Short of what was asked for is the end of the result, whatever the
@@ -46,7 +54,7 @@ impl ItemPage {
         }
         match self.total {
             Some(total) => self.window.start.saturating_add(self.window.size) < total,
-            None => self.window.size > 0,
+            None => true,
         }
     }
 }
@@ -165,6 +173,16 @@ mod tests {
                 size: 200,
             },
         );
+        assert!(!page.has_more());
+    }
+
+    #[test]
+    fn a_window_of_nothing_is_never_worth_advancing() {
+        // How the filter vocabulary is asked for. `Window::next` on it returns
+        // the same window, so a caller paging on `has_more` would re-request
+        // `start=0, size=0` for ever against a server reporting any total.
+        let page = page(r#"{"totalSize":1200}"#, Window::first(0));
+        assert_eq!(page.total, Some(1200));
         assert!(!page.has_more());
     }
 

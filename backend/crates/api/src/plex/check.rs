@@ -9,8 +9,8 @@ use afisharr_core::{
     time::Timestamp,
 };
 use afisharr_plex::server::{
-    BindingVerdict, MachineIdentifier, PlexServerClient, ServerAddress, ServerError,
-    ServerIdentity, ServerToken, verify_binding,
+    BindingVerdict, MachineIdentifier, PlexServerClient, ServerAddress, ServerIdentity,
+    ServerToken, verify_binding,
 };
 
 use crate::{
@@ -40,10 +40,18 @@ pub(crate) async fn run(state: &ApiState) -> AppResult<PlexConnection> {
         return Ok(no_credential(&server, now));
     };
 
-    let client = client_for(state, &server, &token)?;
+    // A stored address that will not parse, or a stored token that cannot be a
+    // header, is a server this instance cannot reach — not an internal failure.
+    // A 500 here would put an unexplained error on the one page that exists to
+    // say what is wrong with the connection, which is the same argument the
+    // undecryptable secret above is decided by.
+    let client = match client_for(state, &server, &token) {
+        Ok(client) => client,
+        Err(detail) => return Ok(unreachable(&server, detail, now)),
+    };
     match client.identity().await {
         Ok(identity) => Ok(observed(state, &server, identity, now).await?),
-        Err(error) => Ok(unreachable(&server, &error, now)),
+        Err(error) => Ok(unreachable(&server, error.to_string(), now)),
     }
 }
 
@@ -81,9 +89,18 @@ async fn plex_token(state: &ApiState) -> AppResult<Option<String>> {
 }
 
 /// A client pointed at the bound server, presenting `token`.
-fn client_for(state: &ApiState, server: &PlexServer, token: &str) -> AppResult<PlexServerClient> {
-    let address = ServerAddress::parse(&server.base_url).map_err(AppError::internal)?;
-    let token = ServerToken::new(token).map_err(AppError::internal)?;
+///
+/// The failure is the collapsed technical detail §8.4 renders, not an error to
+/// propagate: neither an address this build cannot parse nor a token it cannot
+/// send is something the operator fixes by reloading the page, and both leave
+/// this instance unable to reach the server it is bound to.
+fn client_for(
+    state: &ApiState,
+    server: &PlexServer,
+    token: &str,
+) -> Result<PlexServerClient, String> {
+    let address = ServerAddress::parse(&server.base_url).map_err(|error| error.to_string())?;
+    let token = ServerToken::new(token).map_err(|error| error.to_string())?;
     Ok(PlexServerClient::new(
         state.outbound().clone(),
         state.plex().identity().clone(),
@@ -107,7 +124,7 @@ fn no_credential(server: &PlexServer, now: Timestamp) -> PlexConnection {
 }
 
 /// The answer for a server that did not answer, or answered unusably.
-fn unreachable(server: &PlexServer, error: &ServerError, now: Timestamp) -> PlexConnection {
+fn unreachable(server: &PlexServer, detail: String, now: Timestamp) -> PlexConnection {
     PlexConnection {
         state: PlexConnectionState::Unreachable,
         base_url: Some(server.base_url.clone()),
@@ -119,7 +136,7 @@ fn unreachable(server: &PlexServer, error: &ServerError, now: Timestamp) -> Plex
         observed_machine_identifier: None,
         friendly_name: Some(server.friendly_name.clone()),
         version: Some(server.version.clone()),
-        detail: Some(error.to_string()),
+        detail: Some(detail),
         checked_at: now.as_millis(),
     }
 }
@@ -194,6 +211,7 @@ async fn observed(
 
 #[cfg(test)]
 mod tests {
+    use afisharr_plex::server::ServerError;
     use afisharr_sources::outbound::OutboundError;
 
     use super::*;
@@ -224,7 +242,7 @@ mod tests {
                 body: String::new(),
             },
         };
-        let answer = unreachable(&server(), &error, Timestamp::from_millis(3_000));
+        let answer = unreachable(&server(), error.to_string(), Timestamp::from_millis(3_000));
         assert_eq!(answer.state, PlexConnectionState::Unreachable);
         assert_eq!(answer.observed_machine_identifier, None);
         assert_eq!(

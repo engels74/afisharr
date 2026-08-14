@@ -86,6 +86,28 @@ pub(crate) fn router(running: Running) -> Router {
 /// The query string, as the handlers read it.
 pub(crate) type Params = HashMap<String, String>;
 
+/// Every query pair, in the order it arrived.
+///
+/// [`Params`] collapses repeated keys onto the last value, which is right for
+/// the single-valued arguments most handlers read and wrong for the ones Plex
+/// repeats: a label edit sends one `label[].tag.tag-` per removal, and a
+/// conjunctive filter sends one `genre&=` per value. Read from a map, a request
+/// removing two labels would remove one and report success — which is the
+/// silent partial write the fake exists to make visible, not to perform.
+pub(crate) fn pairs(query: Option<&str>) -> Vec<(String, String)> {
+    url::form_urlencoded::parse(query.unwrap_or_default().as_bytes())
+        .map(|(name, value)| (name.into_owned(), value.into_owned()))
+        .collect()
+}
+
+/// The first value of one query parameter.
+pub(crate) fn first<'a>(pairs: &'a [(String, String)], name: &str) -> Option<&'a str> {
+    pairs
+        .iter()
+        .find(|(key, _)| key == name)
+        .map(|(_, value)| value.as_str())
+}
+
 /// `GET /identity`.
 async fn identity(State(running): State<Running>) -> Result<Json<Value>, Response> {
     if let Some(refusal) = running.gate(FakeOperation::Identity).await {
@@ -154,6 +176,30 @@ mod tests {
     #[test]
     fn a_request_with_no_window_asks_for_everything() {
         assert_eq!(window(&query(&[])), (0, usize::MAX));
+    }
+
+    #[test]
+    fn a_repeated_parameter_keeps_every_value_it_was_sent() {
+        // A label edit sends one `label[].tag.tag-` per removal. Read from a
+        // map, the second removal would overwrite the first and the fake would
+        // report a partial write as a complete one.
+        let read = pairs(Some("label[].tag.tag-=old&label[].tag.tag-=older&id=1001"));
+        assert_eq!(
+            read.iter()
+                .filter(|(name, _)| name == "label[].tag.tag-")
+                .count(),
+            2
+        );
+        assert_eq!(first(&read, "id"), Some("1001"));
+        assert_eq!(first(&read, "missing"), None);
+    }
+
+    #[test]
+    fn a_percent_encoded_value_is_decoded_the_way_a_server_reads_it() {
+        assert_eq!(
+            first(&pairs(Some("title.value=a+b%26c")), "title.value"),
+            Some("a b&c")
+        );
     }
 
     #[test]

@@ -93,29 +93,48 @@ pub(crate) struct Trigger {
 /// fortieth tests what happens to work already done (`I-EVID-1`).
 #[derive(Debug, Default)]
 pub(crate) struct Injections {
-    triggers: HashMap<FakeOperation, Trigger>,
+    triggers: HashMap<FakeOperation, Vec<Trigger>>,
     seen: HashMap<FakeOperation, u32>,
 }
 
 impl Injections {
     /// Records that `operation` misbehaves.
+    ///
+    /// Appended rather than replacing what is already there. A scenario names
+    /// its failures one at a time — "refuse the first call, then stall calls
+    /// three to five" is two of them on one operation — and a table that kept
+    /// only the last would drop the first silently, leaving a test asserting
+    /// against a scenario nobody wrote.
     pub(crate) fn insert(&mut self, operation: FakeOperation, trigger: Trigger) {
-        self.triggers.insert(operation, trigger);
+        self.triggers.entry(operation).or_default().push(trigger);
     }
 
     /// Counts one call to `operation`, and says what it should do.
+    ///
+    /// The first trigger whose window covers this call wins, in the order the
+    /// scenario named them.
     pub(crate) fn advance(&mut self, operation: FakeOperation) -> Option<Injection> {
         let seen = self.seen.entry(operation).or_default();
         let index = *seen;
         *seen = seen.saturating_add(1);
 
-        let trigger = self.triggers.get(&operation)?;
-        if index < trigger.after_calls {
-            return None;
+        self.triggers
+            .get(&operation)?
+            .iter()
+            .find(|trigger| trigger.covers(index))
+            .map(|trigger| trigger.injection)
+    }
+}
+
+impl Trigger {
+    /// Whether this trigger is misbehaving on the call at `index`.
+    const fn covers(&self, index: u32) -> bool {
+        if index < self.after_calls {
+            return false;
         }
-        match trigger.for_calls {
-            Some(count) if index >= trigger.after_calls.saturating_add(count) => None,
-            _ => Some(trigger.injection),
+        match self.for_calls {
+            Some(count) => index < self.after_calls.saturating_add(count),
+            None => true,
         }
     }
 }
@@ -177,6 +196,34 @@ mod tests {
             Some(Injection::Stall)
         );
         assert_eq!(injections.advance(FakeOperation::Items), None);
+    }
+
+    #[test]
+    fn two_failures_on_one_operation_both_survive() {
+        // A scenario names its failures one at a time, and a table that kept
+        // only the last would drop the first without saying so.
+        let mut injections = injections(Trigger {
+            after_calls: 0,
+            for_calls: Some(1),
+            injection: Injection::Refuse { status: 503 },
+        });
+        injections.insert(
+            FakeOperation::Items,
+            Trigger {
+                after_calls: 2,
+                for_calls: None,
+                injection: Injection::Stall,
+            },
+        );
+        assert_eq!(
+            injections.advance(FakeOperation::Items),
+            Some(Injection::Refuse { status: 503 })
+        );
+        assert_eq!(injections.advance(FakeOperation::Items), None);
+        assert_eq!(
+            injections.advance(FakeOperation::Items),
+            Some(Injection::Stall)
+        );
     }
 
     #[test]

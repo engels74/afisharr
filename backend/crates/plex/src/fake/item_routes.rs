@@ -5,7 +5,7 @@
 
 use axum::{
     Json,
-    extract::{Path, Query, State},
+    extract::{Path, Query, RawQuery, State},
     response::Response,
 };
 use serde_json::{Value, json};
@@ -13,7 +13,7 @@ use serde_json::{Value, json};
 use crate::fake::{
     json as shape,
     plan::FakeOperation,
-    routes::{Params, Running, window},
+    routes::{Params, Running, first, pairs, window},
     vocabulary,
 };
 
@@ -32,7 +32,13 @@ pub(crate) async fn items(
         if let Some(refusal) = running.gate(FakeOperation::Vocabulary).await {
             return Err(refusal);
         }
-        return Ok(Json(vocabulary::describe(&key)));
+        // Described for the type that was asked about, not always for movies:
+        // a vocabulary answered under one libtype and read as another is a
+        // discovery test asserting against a library it never queried.
+        return Ok(Json(vocabulary::describe(
+            &key,
+            params.get("type").map(String::as_str),
+        )));
     }
 
     if let Some(refusal) = running.gate(FakeOperation::Items).await {
@@ -94,9 +100,12 @@ pub(crate) async fn item(
 pub(crate) async fn edit(
     State(running): State<Running>,
     Path(key): Path<String>,
-    Query(params): Query<Params>,
+    RawQuery(query): RawQuery,
 ) -> Result<Json<Value>, Response> {
-    let labels = params.keys().any(|name| name.starts_with("label"));
+    // Read as pairs rather than as a map: a removal is sent once per label
+    // under one repeated key, and a map would honour the last of them.
+    let params = pairs(query.as_deref());
+    let labels = params.iter().any(|(name, _)| name.starts_with("label"));
     let operation = if labels {
         FakeOperation::EditLabels
     } else {
@@ -106,7 +115,7 @@ pub(crate) async fn edit(
         return Err(refusal);
     }
 
-    let Some(id) = params.get("id").cloned() else {
+    let Some(id) = first(&params, "id").map(str::to_owned) else {
         return Ok(Json(shape::container(&json!({ "size": 0 }))));
     };
     let mut world = running.world();
@@ -123,7 +132,11 @@ pub(crate) async fn edit(
 }
 
 /// Applies a label edit to one item.
-fn apply_labels(library: &mut crate::fake::state::FakeLibrary, id: &str, params: &Params) {
+fn apply_labels(
+    library: &mut crate::fake::state::FakeLibrary,
+    id: &str,
+    params: &[(String, String)],
+) {
     let Some(item) = library
         .items
         .iter_mut()
@@ -144,7 +157,11 @@ fn apply_labels(library: &mut crate::fake::state::FakeLibrary, id: &str, params:
 }
 
 /// Applies a title or sort-title edit to one collection.
-fn apply_collection_edit(library: &mut crate::fake::state::FakeLibrary, id: &str, params: &Params) {
+fn apply_collection_edit(
+    library: &mut crate::fake::state::FakeLibrary,
+    id: &str,
+    params: &[(String, String)],
+) {
     let Some(collection) = library
         .collections
         .iter_mut()
@@ -152,16 +169,16 @@ fn apply_collection_edit(library: &mut crate::fake::state::FakeLibrary, id: &str
     else {
         return;
     };
-    if let Some(title) = params.get("title.value") {
-        collection.title.clone_from(title);
+    if let Some(title) = first(params, "title.value") {
+        title.clone_into(&mut collection.title);
     }
-    if let Some(sort_title) = params.get("titleSort.value") {
-        collection.sort_title = Some(sort_title.clone());
+    if let Some(sort_title) = first(params, "titleSort.value") {
+        collection.sort_title = Some(sort_title.to_owned());
     }
     // Written whenever it is sent, including to `0`. A fake that only ever set
     // the lock would make a restore that forgot to clear it look correct
     // (`I-REV-3`).
-    if let Some(locked) = params.get("titleSort.locked") {
+    if let Some(locked) = first(params, "titleSort.locked") {
         collection.sort_title_locked = locked != "0";
     }
 }
