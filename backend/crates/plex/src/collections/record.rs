@@ -139,6 +139,20 @@ impl StringOrNumber {
             Self::Text(text) => text.trim().parse().ok(),
         }
     }
+
+    /// The value as the text it was sent as.
+    ///
+    /// For the values that are *identifiers* rather than counts. A rating key
+    /// read through [`Self::as_i64`] and re-rendered would be normalised —
+    /// somebody else's opaque identifier rewritten by this build — and any
+    /// spelling that did not parse would come back as "absent", which for a hub
+    /// is the difference between a collection row and one of Plex's own (P4).
+    pub(crate) fn into_text(self) -> String {
+        match self {
+            Self::Number(value) => value.to_string(),
+            Self::Text(text) => text,
+        }
+    }
 }
 
 impl From<CollectionBody> for Collection {

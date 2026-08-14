@@ -51,8 +51,32 @@ pub(crate) async fn run(state: &ApiState) -> AppResult<PlexConnection> {
     };
     match client.identity().await {
         Ok(identity) => Ok(observed(state, &server, identity, now).await?),
-        Err(error) => Ok(unreachable(&server, error.to_string(), now)),
+        Err(error) => Ok(unreachable(&server, detail_of(&error), now)),
     }
+}
+
+/// A failure and everything under it, as one line.
+///
+/// The whole chain, because the outer message is the part that says least:
+/// every transport failure renders as "the Plex server at {host} could not be
+/// reached", and what tells a timeout from a refused token from a proxy's own
+/// error page is the `#[source]` beneath it. Collapsing to `to_string()` put the
+/// same sentence in §8.4's collapsed detail whatever went wrong, which is a
+/// detail that details nothing.
+fn detail_of(error: &dyn std::error::Error) -> String {
+    let mut detail = error.to_string();
+    let mut cause = error.source();
+    while let Some(source) = cause {
+        let text = source.to_string();
+        // Skipped when the layer below only restates the layer above, which is
+        // what `reqwest` does for the outermost of its own wrappers.
+        if !detail.ends_with(&text) {
+            detail.push_str(": ");
+            detail.push_str(&text);
+        }
+        cause = source.source();
+    }
+    detail
 }
 
 /// The Plex server token, decrypted, or `None` when none can be presented.
@@ -251,7 +275,7 @@ mod tests {
                 body: String::new(),
             },
         };
-        let answer = unreachable(&server(), error.to_string(), Timestamp::from_millis(3_000));
+        let answer = unreachable(&server(), detail_of(&error), Timestamp::from_millis(3_000));
         assert_eq!(answer.state, PlexConnectionState::Unreachable);
         assert_eq!(answer.observed_machine_identifier, None);
         assert_eq!(
@@ -270,6 +294,40 @@ mod tests {
             (None, None),
             "nothing described itself, so this answer describes nothing"
         );
+    }
+
+    #[test]
+    fn the_collapsed_detail_carries_what_went_wrong_and_not_only_that_something_did() {
+        // Every transport failure's own message is the same sentence, so a
+        // detail built from it alone tells a refused token, an expired
+        // certificate, and a proxy's error page apart from nothing at all — and
+        // §8.4's collapsed detail exists for exactly that distinction.
+        let refused = ServerError::Transport {
+            host: "plex.lan".to_owned(),
+            source: OutboundError::Status {
+                host: "plex.lan".to_owned(),
+                status: 401,
+                body: String::new(),
+            },
+        };
+        let detail = detail_of(&refused);
+        assert!(detail.contains("401"), "{detail}");
+
+        let unread = ServerError::Transport {
+            host: "plex.lan".to_owned(),
+            source: OutboundError::Oversized {
+                host: "plex.lan".to_owned(),
+                limit_bytes: 1024,
+            },
+        };
+        assert!(detail_of(&unread).contains("1024"), "{unread}");
+
+        // And a failure with nothing under it is still exactly itself.
+        let incomplete = ServerError::Incomplete {
+            call: "GET /identity",
+            missing: "a machine identifier",
+        };
+        assert_eq!(detail_of(&incomplete), incomplete.to_string());
     }
 
     #[test]

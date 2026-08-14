@@ -155,10 +155,17 @@ impl TryFrom<HubBody> for ManagedHub {
             .filter(|value| !value.is_empty())
             .or_else(|| body.identifier.filter(|value| !value.is_empty()))
             .ok_or(())?;
+        // Kept as the text it arrived as, never parsed and re-rendered. A key
+        // this build could not read as a number would otherwise come back as
+        // `None`, and `None` here is not "no key" — it is what makes the row one
+        // of Plex's own, which cannot be unpromoted and which the placement
+        // algorithm plans around as an anchor (§15.1). A collection silently
+        // demoted to an anchor is a collection whose position is never fixed.
         let rating_key = body
             .rating_key
-            .and_then(|value| value.as_i64())
-            .map(|value| RatingKey::new(value.to_string()));
+            .map(StringOrNumber::into_text)
+            .filter(|value| !value.is_empty())
+            .map(RatingKey::new);
         Ok(Self {
             identifier: HubIdentifier::new(identifier),
             title: body.title.unwrap_or_default(),
@@ -246,6 +253,31 @@ mod tests {
         );
         assert!(!visibility.is_hidden());
         assert!(HubVisibility::default().is_hidden());
+    }
+
+    #[test]
+    fn a_rating_key_keeps_the_text_it_arrived_as_whichever_way_it_is_spelled() {
+        // Plex's identifier space is Plex's. A key parsed and re-rendered is a
+        // key this build normalised, and one it could not parse would come back
+        // as `None` — which reads as "one of Plex's own rows" and takes a
+        // collection out of the ordering space the plan can move.
+        let numeric = hub(r#"{"hubIdentifier":"h","ratingKey":5001}"#).expect("a hub");
+        let text = hub(r#"{"hubIdentifier":"h","ratingKey":"5001"}"#).expect("a hub");
+        assert_eq!(numeric.rating_key, text.rating_key);
+        assert_eq!(numeric.rating_key, Some(RatingKey::new("5001")));
+
+        let odd = hub(r#"{"hubIdentifier":"h","ratingKey":"5001a"}"#).expect("a hub");
+        assert_eq!(odd.rating_key, Some(RatingKey::new("5001a")));
+        assert_eq!(
+            odd.kind,
+            HubKind::Collection,
+            "a key this build cannot read as a number is still a key"
+        );
+
+        // An empty key is no key, and no key is what makes a row native.
+        let empty = hub(r#"{"hubIdentifier":"h","ratingKey":""}"#).expect("a hub");
+        assert_eq!(empty.rating_key, None);
+        assert_eq!(empty.kind, HubKind::Native);
     }
 
     #[test]
