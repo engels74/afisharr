@@ -142,12 +142,21 @@ pub(crate) fn hub(hub: &FakeHub) -> Value {
 
 /// One library, in the shape the section list answers with.
 pub(crate) fn section(library: &FakeLibrary) -> Value {
+    // The agent follows the library's kind. One agent for every section would
+    // have a TV library declaring the movie agent, which is a fact no real
+    // server states and exactly the drift the contract test exists to catch.
+    let agent = match library.kind.as_str() {
+        "show" => "tv.plex.agents.series",
+        "artist" => "tv.plex.agents.music",
+        "photo" => "tv.plex.agents.photo",
+        _ => "tv.plex.agents.movie",
+    };
     json!({
         "key": library.key,
         "uuid": library.uuid,
         "type": library.kind,
         "title": library.title,
-        "agent": "tv.plex.agents.movie",
+        "agent": agent,
         "language": "en-US",
         "scannedAt": 1_700_000_000,
     })

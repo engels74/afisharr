@@ -64,6 +64,16 @@ impl World {
             for item in &mut library.items {
                 item.rating_key = format!("{}9", item.rating_key);
             }
+            // Membership follows the item, because on a real server it does:
+            // the collection holds the item, not the number Plex prints for it.
+            // A fake that left the old keys behind would empty every collection
+            // on every churn, and a test that then reported the collection as
+            // lost would be reporting a failure no Plex produces (PRD §21.10.2).
+            for collection in &mut library.collections {
+                for key in &mut collection.items {
+                    *key = format!("{key}9");
+                }
+            }
         }
     }
 }
@@ -272,6 +282,24 @@ mod tests {
         for (index, item) in world.libraries[0].items.iter().enumerate() {
             assert_ne!(item.rating_key, before[index].0);
             assert_eq!(item.guid, before[index].1);
+        }
+    }
+
+    #[test]
+    fn churn_does_not_empty_the_collections_the_items_are_in() {
+        // The collection holds the item, not the number Plex prints for it. A
+        // fake that dropped membership on every re-key would fail a client for
+        // a reason no real server produces.
+        let mut world = World::build(&Scenario::behaving(1));
+        world.churn_rating_keys();
+        let library = &world.libraries[0];
+        let members = &library.collections[0].items;
+        assert_eq!(members.len(), 3);
+        for key in members {
+            assert!(
+                library.items.iter().any(|item| &item.rating_key == key),
+                "{key} is no longer an item in the library"
+            );
         }
     }
 

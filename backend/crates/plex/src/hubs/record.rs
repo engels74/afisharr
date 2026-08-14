@@ -145,10 +145,15 @@ impl TryFrom<HubBody> for ManagedHub {
     /// would address a different row. Dropped rather than defaulted, and the
     /// caller counts what it dropped.
     fn try_from(body: HubBody) -> Result<Self, Self::Error> {
+        // Emptiness is checked on each spelling before falling back, not on the
+        // winner: a server that sends `hubIdentifier: ""` alongside a usable
+        // `identifier` would otherwise have the empty one shadow the fallback,
+        // and the row would be dropped as unaddressable while it was addressable
+        // all along.
         let identifier = body
             .hub_identifier
-            .or(body.identifier)
             .filter(|value| !value.is_empty())
+            .or_else(|| body.identifier.filter(|value| !value.is_empty()))
             .ok_or(())?;
         let rating_key = body
             .rating_key
@@ -212,6 +217,16 @@ mod tests {
     fn a_row_with_no_identifier_is_dropped_rather_than_given_one() {
         assert!(hub(r#"{"title":"Nameless"}"#).is_err());
         assert!(hub(r#"{"hubIdentifier":"","title":"Nameless"}"#).is_err());
+    }
+
+    #[test]
+    fn an_empty_primary_spelling_falls_back_rather_than_shadowing_the_other() {
+        // A row that names itself under `identifier` and sends `hubIdentifier`
+        // empty is addressable, and dropping it would take a movable row out of
+        // the ordering space and count it as one this build cannot reach.
+        let hub = hub(r#"{"hubIdentifier":"","identifier":"home.continue"}"#)
+            .expect("the fallback names the row");
+        assert_eq!(hub.identifier, HubIdentifier::new("home.continue"));
     }
 
     #[test]

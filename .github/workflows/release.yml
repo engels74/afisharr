@@ -30,8 +30,9 @@ env:
 
 # The cargo jobs below set `working-directory: backend`. Cargo and rustup find
 # `.cargo/config.toml` and `rust-toolchain.toml` by walking up from the working
-# directory and never descend; both live in `backend/`. `plex-matrix` runs no
-# cargo, so it stays at the checkout root.
+# directory and never descend; both live in `backend/`. Every job that runs a
+# step of its own runs cargo — `plex-matrix` included, since the contract test
+# arrived — so all three set it; the two called workflows set their own.
 
 jobs:
   merge-lane:

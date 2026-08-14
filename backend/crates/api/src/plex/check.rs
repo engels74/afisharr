@@ -116,8 +116,13 @@ fn no_credential(server: &PlexServer, now: Timestamp) -> PlexConnection {
         base_url: Some(server.base_url.clone()),
         bound_machine_identifier: Some(server.machine_identifier.clone()),
         observed_machine_identifier: None,
-        friendly_name: Some(server.friendly_name.clone()),
-        version: Some(server.version.clone()),
+        // Nothing was asked, so nothing was reported. `friendly_name` and
+        // `version` are what the *server said about itself on this check*, and
+        // the interface renders them as exactly that — so filling them from the
+        // stored row would present a name and a version last seen weeks ago as
+        // something the server just told us (P1).
+        friendly_name: None,
+        version: None,
         detail: None,
         checked_at: now.as_millis(),
     }
@@ -134,8 +139,12 @@ fn unreachable(server: &PlexServer, detail: String, now: Timestamp) -> PlexConne
         // a machine identifier. Reporting one here would be reporting an
         // observation that was never made (P1).
         observed_machine_identifier: None,
-        friendly_name: Some(server.friendly_name.clone()),
-        version: Some(server.version.clone()),
+        // Nothing described itself, so this answer describes nothing. The
+        // stored name and version would otherwise sit directly under "the
+        // server did not answer" and read as what it just said — the same
+        // observation-that-never-happened the identifier above refuses.
+        friendly_name: None,
+        version: None,
         detail: Some(detail),
         checked_at: now.as_millis(),
     }
@@ -256,6 +265,11 @@ mod tests {
                 .is_some_and(|detail| detail.contains("plex.lan")),
             "the collapsed technical detail names the host"
         );
+        assert_eq!(
+            (answer.friendly_name, answer.version),
+            (None, None),
+            "nothing described itself, so this answer describes nothing"
+        );
     }
 
     #[test]
@@ -265,5 +279,7 @@ mod tests {
         assert_eq!(answer.base_url.as_deref(), Some("http://plex.lan:32400/"));
         assert_eq!(answer.observed_machine_identifier, None);
         assert_eq!(answer.detail, None);
+        // Nothing was asked, so nothing was reported (P1).
+        assert_eq!((answer.friendly_name, answer.version), (None, None));
     }
 }
