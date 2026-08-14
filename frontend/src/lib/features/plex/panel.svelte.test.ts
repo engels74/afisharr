@@ -111,6 +111,31 @@ describe('the connection panel', () => {
 		expect(empty?.getAttribute('data-reason')).toBe('nothingCreated');
 	});
 
+	test('a refused credential says so, and does not read as an outage', async () => {
+		// The two failures have opposite remedies. An operator whose token was
+		// revoked and who is told the server did not answer goes looking for a
+		// network fault that is not there.
+		answering({
+			state: 'credentialRefused',
+			observedMachineIdentifier: null,
+			friendlyName: null,
+			version: null,
+			detail: 'plex.lan answered 401',
+		});
+		const screen = await render(ConnectionPanel, {});
+		await settle();
+
+		const text = screen.container.textContent ?? '';
+		expect(
+			screen.container.querySelector('[data-slot="error-state"]'),
+		).not.toBeNull();
+		expect(text).toContain('refused');
+		expect(text).not.toContain('did not answer');
+		// The address and the binding still show: they are what the operator
+		// came for, and the check did happen.
+		expect(text).toContain('server-a');
+	});
+
 	test('a refused check renders the error treatment, not a blank panel', async () => {
 		checked.mockImplementation(() =>
 			Promise.resolve({

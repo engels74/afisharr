@@ -136,6 +136,21 @@
 					<WrongServerChoices />
 				{/snippet}
 			</BlockedState>
+		{:else if seen.state === 'credentialRefused'}
+			<!--
+				Its own branch, and above `unreachable` for the reason the state
+				exists: the server is there, and the remedy is a sign-in rather
+				than a network to go looking through.
+			-->
+			<ErrorState
+				state={{
+					kind: 'error',
+					summary: t('plex.connection.credentialRefused.title'),
+					consequence: t('plex.connection.credentialRefused.consequence'),
+					detail: seen.detail ?? undefined,
+				}}
+			/>
+			<ConnectionEvidence connection={seen} />
 		{:else if seen.state === 'unreachable'}
 			<ErrorState
 				state={{

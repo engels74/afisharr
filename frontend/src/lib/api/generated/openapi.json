@@ -1912,10 +1912,11 @@
       },
       "PlexConnectionState": {
         "type": "string",
-        "description": "Where the Plex connection stands.\n\nA closed enum the client narrows on, never a status code it infers from\n(`I-UX-2`). Five variants and not three, because \"nothing is configured\" and\n\"the server did not answer\" are opposite problems and an operator shown the\nsecond for the first goes looking for a network fault that is not there.",
+        "description": "Where the Plex connection stands.\n\nA closed enum the client narrows on, never a status code it infers from\n(`I-UX-2`). Six variants and not three, because \"nothing is configured\",\n\"the server did not answer\", and \"the server refused what it was given\" are\ndifferent problems with different remedies, and an operator shown the wrong\none goes looking for a network fault that is not there.",
         "enum": [
           "notConfigured",
           "noCredential",
+          "credentialRefused",
           "reachable",
           "unreachable",
           "wrongServer"

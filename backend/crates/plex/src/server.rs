@@ -22,7 +22,7 @@ mod error;
 mod machine;
 mod token;
 
-pub use address::{AddressError, ServerAddress};
+pub use address::{AddressError, ServerAddress, redact_credentials};
 pub use binding::{BindingVerdict, verify_binding};
 pub use client::PlexServerClient;
 pub use error::ServerError;

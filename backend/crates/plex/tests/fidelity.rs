@@ -3,6 +3,9 @@
 
 //! The fake's fidelity contract (D-036), one test per row.
 //!
+//! The ordering space's rows live in `ordering.rs`, beside each other because
+//! they share a subject; everything else is here.
+//!
 //! Each row is a behaviour an invariant from Phase 4 onward is written against,
 //! and each is driven through the real client rather than asserted on the
 //! fake's internals: a fake whose misbehaviour only its own state can see is a
@@ -12,9 +15,7 @@ use std::time::Duration;
 
 use afisharr_plex::{
     artwork::ArtworkKind,
-    collections::MoveTarget,
     fake::{FakeOperation, FakePlex, Injection, Scenario},
-    hubs::{HubIdentifier, HubMove},
     identity::ClientIdentity,
     libraries::{ItemKind, ItemQuery, RatingKey, ScanState, SectionKey, Window},
     server::{
@@ -88,56 +89,6 @@ async fn the_fake_answers_every_call_the_client_makes() {
         .await
         .expect("the fake answers");
     assert_eq!(choices.len(), 3);
-}
-
-#[tokio::test]
-async fn a_move_past_the_precision_budget_reports_success_and_does_not_happen() {
-    // Row one of the fidelity contract, and the reason every applied plan is
-    // verified by reading the order back (§15.3, `I-CONV-*`).
-    let fake = FakePlex::start(Scenario::behaving(1).with_move_budget(1)).await;
-    let client = client_for(&fake);
-
-    let hubs = client.hubs(&movies()).await.expect("the fake answers");
-    let first = hubs.hubs[0].identifier.clone();
-    let second = hubs.hubs[1].identifier.clone();
-
-    client
-        .move_hub(&movies(), &second, &HubMove::ToFront)
-        .await
-        .expect("the first move is inside the budget");
-    assert_eq!(
-        fake.snapshot().hub_order("1")[0],
-        second.as_str(),
-        "the first move happened"
-    );
-
-    // The second move answers exactly as the first did, and changes nothing.
-    client
-        .move_hub(&movies(), &first, &HubMove::ToFront)
-        .await
-        .expect("the call still answers 200 past the budget");
-    assert_eq!(
-        fake.snapshot().hub_order("1")[0],
-        second.as_str(),
-        "past the budget the order is unchanged and the call still succeeded"
-    );
-}
-
-#[tokio::test]
-async fn a_collection_item_move_past_the_budget_is_silent_in_the_same_way() {
-    let fake = FakePlex::start(Scenario::behaving(1).with_move_budget(0)).await;
-    let client = client_for(&fake);
-
-    let before = fake.snapshot().collection_items("15001");
-    client
-        .move_collection_item(
-            &RatingKey::new("15001"),
-            &RatingKey::new(before[2].clone()),
-            &MoveTarget::ToFront,
-        )
-        .await
-        .expect("the call answers 200");
-    assert_eq!(fake.snapshot().collection_items("15001"), before);
 }
 
 #[tokio::test]
@@ -562,33 +513,4 @@ async fn a_poster_uploaded_through_the_client_reaches_the_item() {
             .ends_with("upload-4"),
         "the uploaded bytes reached the item"
     );
-}
-
-#[tokio::test]
-async fn the_hub_visibility_axes_are_written_one_at_a_time() {
-    let fake = FakePlex::start(Scenario::behaving(1)).await;
-    let client = client_for(&fake);
-
-    client
-        .set_hub_visibility(
-            &movies(),
-            &HubIdentifier::new("collection.15001"),
-            afisharr_plex::hubs::HubVisibility {
-                own_home: false,
-                shared_home: true,
-                recommended: false,
-            },
-        )
-        .await
-        .expect("the fake answers");
-
-    let hubs = client.hubs(&movies()).await.expect("the fake answers");
-    let hub = hubs
-        .hubs
-        .iter()
-        .find(|hub| hub.identifier == HubIdentifier::new("collection.15001"))
-        .expect("the collection hub is there");
-    assert!(!hub.visibility.own_home);
-    assert!(hub.visibility.shared_home);
-    assert!(!hub.visibility.recommended);
 }

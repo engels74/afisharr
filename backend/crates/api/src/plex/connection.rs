@@ -9,9 +9,10 @@ use utoipa::ToSchema;
 /// Where the Plex connection stands.
 ///
 /// A closed enum the client narrows on, never a status code it infers from
-/// (`I-UX-2`). Five variants and not three, because "nothing is configured" and
-/// "the server did not answer" are opposite problems and an operator shown the
-/// second for the first goes looking for a network fault that is not there.
+/// (`I-UX-2`). Six variants and not three, because "nothing is configured",
+/// "the server did not answer", and "the server refused what it was given" are
+/// different problems with different remedies, and an operator shown the wrong
+/// one goes looking for a network fault that is not there.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub enum PlexConnectionState {
@@ -19,6 +20,14 @@ pub enum PlexConnectionState {
     NotConfigured,
     /// A server is bound, and no Plex credential is stored to reach it with.
     NoCredential,
+    /// The bound server answered, and refused the credential it was given.
+    ///
+    /// Its own state and not [`Self::Unreachable`], because the two send the
+    /// operator in opposite directions: a server that did not answer is a
+    /// network fault to chase, and a server that answered `401` is a sign-in to
+    /// repeat. Not [`Self::NoCredential`] either — a credential is stored, and
+    /// being refused is the whole fact.
+    CredentialRefused,
     /// The bound server answered, and it is the bound server.
     Reachable,
     /// The bound server did not answer, or answered something unusable.
@@ -89,9 +98,10 @@ impl PlexConnection {
 mod tests {
     use super::*;
 
-    const EVERY_STATE: [PlexConnectionState; 5] = [
+    const EVERY_STATE: [PlexConnectionState; 6] = [
         PlexConnectionState::NotConfigured,
         PlexConnectionState::NoCredential,
+        PlexConnectionState::CredentialRefused,
         PlexConnectionState::Reachable,
         PlexConnectionState::Unreachable,
         PlexConnectionState::WrongServer,

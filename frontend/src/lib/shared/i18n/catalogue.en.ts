@@ -154,6 +154,10 @@ export const en = {
 		'Afisharr is not managing a Plex server yet. Connect one during setup.',
 	'plex.connection.noCredential.body':
 		'Afisharr has no Plex sign-in to reach this server with. Sign in to Plex again.',
+	'plex.connection.credentialRefused.title':
+		'The server refused this Plex sign-in',
+	'plex.connection.credentialRefused.consequence':
+		'The server is there and it did not accept the Plex sign-in Afisharr has stored. Sign in to Plex again. Collections, posters, and the home screen stay as they are until you do. Nothing has been changed.',
 	'plex.connection.unreachable.title': 'The server did not answer',
 	'plex.connection.unreachable.consequence':
 		'Collections, posters, and the home screen stay as they are until it does. Nothing has been changed.',

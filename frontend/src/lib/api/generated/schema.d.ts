@@ -730,12 +730,13 @@ export interface components {
          * @description Where the Plex connection stands.
          *
          *     A closed enum the client narrows on, never a status code it infers from
-         *     (`I-UX-2`). Five variants and not three, because "nothing is configured" and
-         *     "the server did not answer" are opposite problems and an operator shown the
-         *     second for the first goes looking for a network fault that is not there.
+         *     (`I-UX-2`). Six variants and not three, because "nothing is configured",
+         *     "the server did not answer", and "the server refused what it was given" are
+         *     different problems with different remedies, and an operator shown the wrong
+         *     one goes looking for a network fault that is not there.
          * @enum {string}
          */
-        PlexConnectionState: "notConfigured" | "noCredential" | "reachable" | "unreachable" | "wrongServer";
+        PlexConnectionState: "notConfigured" | "noCredential" | "credentialRefused" | "reachable" | "unreachable" | "wrongServer";
         /**
          * @description The body of every failed response on this surface.
          *

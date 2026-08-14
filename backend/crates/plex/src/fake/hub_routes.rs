@@ -76,17 +76,42 @@ pub(crate) async fn set_visibility(
     else {
         return Ok(Json(shape::container(&json!({ "size": 0 }))));
     };
+    // A row with no rating key is one of Plex's own, and one of Plex's own
+    // cannot be unpromoted (§15.1) — that is the whole reason the placement
+    // algorithm treats it as an anchor to work around rather than a
+    // participant to move. A fake that let it be unpromoted would pass a
+    // planner that reached for a recovery move the real surface does not
+    // offer, and pass it right up to the first real server.
+    let native = row.rating_key.is_none();
     // Each axis written only when the request names it, exactly as Plex does.
     // Defaulting the two a caller omitted to `false` would hide a caller that
     // forgot one, and hide it as an accidental unpromote (§15.5).
-    if let Some(value) = params.get("promotedToOwnHome") {
-        row.own_home = value != "0";
-    }
-    if let Some(value) = params.get("promotedToSharedHome") {
-        row.shared_home = value != "0";
-    }
-    if let Some(value) = params.get("promotedToRecommended") {
-        row.recommended = value != "0";
-    }
+    write_axis(&mut row.own_home, params.get("promotedToOwnHome"), native);
+    write_axis(
+        &mut row.shared_home,
+        params.get("promotedToSharedHome"),
+        native,
+    );
+    write_axis(
+        &mut row.recommended,
+        params.get("promotedToRecommended"),
+        native,
+    );
     Ok(Json(shape::container(&json!({ "size": 1 }))))
+}
+
+/// Writes one visibility axis, refusing to unpromote one of Plex's own rows.
+///
+/// The refusal is silent, and answers 200 like everything else here: an
+/// invented status code would be this fake claiming something no real server
+/// was seen to send, and the silent no-op is the misbehaviour this surface
+/// already has (§15.3). A caller that must know reads the row back.
+fn write_axis(axis: &mut bool, value: Option<&String>, native: bool) {
+    let Some(value) = value else {
+        return;
+    };
+    let promoted = value != "0";
+    if promoted || !native {
+        *axis = promoted;
+    }
 }

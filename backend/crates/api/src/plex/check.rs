@@ -10,12 +10,18 @@ use afisharr_core::{
 };
 use afisharr_plex::server::{
     BindingVerdict, MachineIdentifier, PlexServerClient, ServerAddress, ServerIdentity,
-    ServerToken, verify_binding,
+    ServerToken, redact_credentials, verify_binding,
 };
 
 use crate::{
     error::{AppError, AppResult},
-    plex::connection::{PlexConnection, PlexConnectionState},
+    plex::{
+        answer::{
+            credential_refused, detail_of, no_credential, refused_credential, shown_address,
+            unreachable,
+        },
+        connection::{PlexConnection, PlexConnectionState},
+    },
     state::ApiState,
 };
 
@@ -51,32 +57,15 @@ pub(crate) async fn run(state: &ApiState) -> AppResult<PlexConnection> {
     };
     match client.identity().await {
         Ok(identity) => Ok(observed(state, &server, identity, now).await?),
+        // A server that refuses is a server that answered. The address is
+        // right, the network is fine, and the stored token is the thing being
+        // rejected — an operator told "the server did not answer" here spends
+        // the evening on a network fault that is not there (`I-UX-2`).
+        Err(error) if refused_credential(&error) => {
+            Ok(credential_refused(&server, detail_of(&error), now))
+        }
         Err(error) => Ok(unreachable(&server, detail_of(&error), now)),
     }
-}
-
-/// A failure and everything under it, as one line.
-///
-/// The whole chain, because the outer message is the part that says least:
-/// every transport failure renders as "the Plex server at {host} could not be
-/// reached", and what tells a timeout from a refused token from a proxy's own
-/// error page is the `#[source]` beneath it. Collapsing to `to_string()` put the
-/// same sentence in §8.4's collapsed detail whatever went wrong, which is a
-/// detail that details nothing.
-fn detail_of(error: &dyn std::error::Error) -> String {
-    let mut detail = error.to_string();
-    let mut cause = error.source();
-    while let Some(source) = cause {
-        let text = source.to_string();
-        // Skipped when the layer below only restates the layer above, which is
-        // what `reqwest` does for the outermost of its own wrappers.
-        if !detail.ends_with(&text) {
-            detail.push_str(": ");
-            detail.push_str(&text);
-        }
-        cause = source.source();
-    }
-    detail
 }
 
 /// The Plex server token, decrypted, or `None` when none can be presented.
@@ -123,7 +112,10 @@ fn client_for(
     server: &PlexServer,
     token: &str,
 ) -> Result<PlexServerClient, String> {
-    let address = ServerAddress::parse(&server.base_url).map_err(|error| error.to_string())?;
+    // Redacted for the reason `detail_of` is: `AddressError` quotes the whole
+    // configured address back, password and all.
+    let address = ServerAddress::parse(&server.base_url)
+        .map_err(|error| redact_credentials(&error.to_string()))?;
     let token = ServerToken::new(token).map_err(|error| error.to_string())?;
     Ok(PlexServerClient::new(
         state.outbound().clone(),
@@ -131,47 +123,6 @@ fn client_for(
         address,
         token,
     ))
-}
-
-/// The answer for a bound server this instance has no credential for.
-fn no_credential(server: &PlexServer, now: Timestamp) -> PlexConnection {
-    PlexConnection {
-        state: PlexConnectionState::NoCredential,
-        base_url: Some(server.base_url.clone()),
-        bound_machine_identifier: Some(server.machine_identifier.clone()),
-        observed_machine_identifier: None,
-        // Nothing was asked, so nothing was reported. `friendly_name` and
-        // `version` are what the *server said about itself on this check*, and
-        // the interface renders them as exactly that — so filling them from the
-        // stored row would present a name and a version last seen weeks ago as
-        // something the server just told us (P1).
-        friendly_name: None,
-        version: None,
-        detail: None,
-        checked_at: now.as_millis(),
-    }
-}
-
-/// The answer for a server that did not answer, or answered unusably.
-fn unreachable(server: &PlexServer, detail: String, now: Timestamp) -> PlexConnection {
-    PlexConnection {
-        state: PlexConnectionState::Unreachable,
-        base_url: Some(server.base_url.clone()),
-        bound_machine_identifier: Some(server.machine_identifier.clone()),
-        // Deliberately none. Something may have answered — a proxy, a captive
-        // portal, a different service on the port — and whatever it said is not
-        // a machine identifier. Reporting one here would be reporting an
-        // observation that was never made (P1).
-        observed_machine_identifier: None,
-        // Nothing described itself, so this answer describes nothing. The
-        // stored name and version would otherwise sit directly under "the
-        // server did not answer" and read as what it just said — the same
-        // observation-that-never-happened the identifier above refuses.
-        friendly_name: None,
-        version: None,
-        detail: Some(detail),
-        checked_at: now.as_millis(),
-    }
 }
 
 /// The answer for a server that answered, and the write that follows it.
@@ -191,7 +142,7 @@ async fn observed(
         } else {
             PlexConnectionState::Reachable
         },
-        base_url: Some(server.base_url.clone()),
+        base_url: Some(shown_address(server)),
         bound_machine_identifier: Some(server.machine_identifier.clone()),
         observed_machine_identifier: Some(identity.machine_identifier.to_string()),
         // The fallback is the *bound* server's recorded name, and `GET /identity`
@@ -240,104 +191,4 @@ async fn observed(
         .await
         .map_err(AppError::internal)?;
     Ok(answer)
-}
-
-#[cfg(test)]
-mod tests {
-    use afisharr_plex::server::ServerError;
-    use afisharr_sources::outbound::OutboundError;
-
-    use super::*;
-
-    fn server() -> PlexServer {
-        PlexServer {
-            machine_identifier: "server-a".to_owned(),
-            friendly_name: "Living Room".to_owned(),
-            version: "1.41.0".to_owned(),
-            platform: Some("Linux".to_owned()),
-            base_url: "http://plex.lan:32400/".to_owned(),
-            owner_account_id: None,
-            first_seen_at: Timestamp::from_millis(1_000),
-            last_seen_at: Timestamp::from_millis(2_000),
-            last_version_change_at: None,
-        }
-    }
-
-    #[test]
-    fn an_unreachable_answer_reports_no_observed_identifier_at_all() {
-        // Whatever answered on that port, it did not name a machine. An answer
-        // carrying one here would be an observation nobody made (P1).
-        let error = ServerError::Transport {
-            host: "plex.lan".to_owned(),
-            source: OutboundError::Status {
-                host: "plex.lan".to_owned(),
-                status: 502,
-                body: String::new(),
-            },
-        };
-        let answer = unreachable(&server(), detail_of(&error), Timestamp::from_millis(3_000));
-        assert_eq!(answer.state, PlexConnectionState::Unreachable);
-        assert_eq!(answer.observed_machine_identifier, None);
-        assert_eq!(
-            answer.bound_machine_identifier.as_deref(),
-            Some("server-a"),
-            "the operator still needs to know what it was looking for"
-        );
-        assert!(
-            answer
-                .detail
-                .is_some_and(|detail| detail.contains("plex.lan")),
-            "the collapsed technical detail names the host"
-        );
-        assert_eq!(
-            (answer.friendly_name, answer.version),
-            (None, None),
-            "nothing described itself, so this answer describes nothing"
-        );
-    }
-
-    #[test]
-    fn the_collapsed_detail_carries_what_went_wrong_and_not_only_that_something_did() {
-        // Every transport failure's own message is the same sentence, so a
-        // detail built from it alone tells a refused token, an expired
-        // certificate, and a proxy's error page apart from nothing at all — and
-        // §8.4's collapsed detail exists for exactly that distinction.
-        let refused = ServerError::Transport {
-            host: "plex.lan".to_owned(),
-            source: OutboundError::Status {
-                host: "plex.lan".to_owned(),
-                status: 401,
-                body: String::new(),
-            },
-        };
-        let detail = detail_of(&refused);
-        assert!(detail.contains("401"), "{detail}");
-
-        let unread = ServerError::Transport {
-            host: "plex.lan".to_owned(),
-            source: OutboundError::Oversized {
-                host: "plex.lan".to_owned(),
-                limit_bytes: 1024,
-            },
-        };
-        assert!(detail_of(&unread).contains("1024"), "{unread}");
-
-        // And a failure with nothing under it is still exactly itself.
-        let incomplete = ServerError::Incomplete {
-            call: "GET /identity",
-            missing: "a machine identifier",
-        };
-        assert_eq!(detail_of(&incomplete), incomplete.to_string());
-    }
-
-    #[test]
-    fn a_bound_server_with_no_credential_is_its_own_answer() {
-        let answer = no_credential(&server(), Timestamp::from_millis(3_000));
-        assert_eq!(answer.state, PlexConnectionState::NoCredential);
-        assert_eq!(answer.base_url.as_deref(), Some("http://plex.lan:32400/"));
-        assert_eq!(answer.observed_machine_identifier, None);
-        assert_eq!(answer.detail, None);
-        // Nothing was asked, so nothing was reported (P1).
-        assert_eq!((answer.friendly_name, answer.version), (None, None));
-    }
 }
