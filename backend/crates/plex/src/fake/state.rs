@@ -107,17 +107,38 @@ impl FakeLibrary {
         else {
             return false;
         };
+        // The predecessor is resolved against the space as it stands, before the
+        // removal, and a predecessor that is not a row in it is a refusal rather
+        // than an append. Looked up afterwards, `map_or(len)` read "not found"
+        // as "put it last" — so a row naming *itself* as its predecessor, or one
+        // naming a row that has since gone, teleported to the tail, spent a move
+        // from the budget, and answered 200. A verification read then sees an
+        // order nobody asked for, which is a different failure from the silent
+        // no-op §15.3 is about and would be mistaken for it.
+        let target = match after {
+            None => None,
+            Some(after) => {
+                match self
+                    .hubs
+                    .iter()
+                    .position(|other| other.identifier == after)
+                {
+                    None => return false,
+                    Some(index) if index == from => return false,
+                    Some(index) => Some(index),
+                }
+            }
+        };
         if self.moves_left == 0 {
             return false;
         }
         let hub = self.hubs.remove(from);
-        let to = match after {
+        let to = match target {
             None => 0,
-            Some(after) => self
-                .hubs
-                .iter()
-                .position(|other| other.identifier == after)
-                .map_or(self.hubs.len(), |index| index + 1),
+            // The predecessor's index shifts down by one when the row being
+            // moved sat in front of it, and does not when it sat behind.
+            Some(index) if index > from => index,
+            Some(index) => index + 1,
         };
         self.hubs.insert(to, hub);
         self.moves_left -= 1;
@@ -142,17 +163,25 @@ impl FakeLibrary {
         let Some(from) = collection.items.iter().position(|key| key == item) else {
             return false;
         };
+        // Resolved before the removal, and refused when it names nothing in the
+        // collection or names the item being moved — see `move_hub` for what
+        // the append-on-miss it replaces did to a verification read.
+        let target = match after {
+            None => None,
+            Some(after) => match collection.items.iter().position(|other| other == after) {
+                None => return false,
+                Some(index) if index == from => return false,
+                Some(index) => Some(index),
+            },
+        };
         if budget == 0 {
             return false;
         }
         let key = collection.items.remove(from);
-        let to = match after {
+        let to = match target {
             None => 0,
-            Some(after) => collection
-                .items
-                .iter()
-                .position(|other| other == after)
-                .map_or(collection.items.len(), |index| index + 1),
+            Some(index) if index > from => index,
+            Some(index) => index + 1,
         };
         collection.items.insert(to, key);
         self.moves_left -= 1;
@@ -232,6 +261,47 @@ mod tests {
     fn moving_an_item_that_is_not_there_spends_no_budget() {
         let mut library = library(3);
         assert!(!library.move_hub("nowhere", None));
+        assert_eq!(library.moves_left, 3);
+    }
+
+    #[test]
+    fn a_predecessor_that_is_not_in_the_space_moves_nothing_and_spends_nothing() {
+        // Resolved after the removal it was "not found", and not-found was read
+        // as "append": the row teleported to the tail, the budget paid for it,
+        // and the call answered 200. A verification read then sees a wrong
+        // order rather than an unchanged one, which is a different failure from
+        // the silent no-op §15.3 describes and would be mistaken for it.
+        let mut library = library(3);
+        assert!(!library.move_hub("a", Some("nowhere")));
+        assert_eq!(order(&library), ["a", "b", "c"]);
+        assert_eq!(library.moves_left, 3);
+    }
+
+    #[test]
+    fn a_row_cannot_be_moved_after_itself() {
+        // `HubMove::After` does not forbid it, and the old lookup found nothing
+        // once the row had been removed — so asking for no change moved the row
+        // to the end of the space.
+        let mut library = library(3);
+        assert!(!library.move_hub("a", Some("a")));
+        assert_eq!(order(&library), ["a", "b", "c"]);
+        assert_eq!(library.moves_left, 3);
+    }
+
+    #[test]
+    fn a_move_backwards_lands_directly_after_its_predecessor() {
+        // The index arithmetic the pre-removal lookup makes necessary: `b` sits
+        // behind `a`, so `a`'s position is unchanged by the removal.
+        let mut library = library(10);
+        assert!(library.move_hub("a", Some("b")));
+        assert_eq!(order(&library), ["b", "a", "c"]);
+    }
+
+    #[test]
+    fn a_collection_item_move_after_a_key_that_is_not_in_it_changes_nothing() {
+        let mut library = library(3);
+        assert!(!library.move_collection_item("5001", "3", Some("nowhere")));
+        assert_eq!(library.collections[0].items, ["1", "2", "3"]);
         assert_eq!(library.moves_left, 3);
     }
 

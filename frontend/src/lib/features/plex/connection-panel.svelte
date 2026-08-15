@@ -13,7 +13,12 @@
 	} from '$lib/components/state';
 	import { t } from '$lib/shared/i18n';
 	import ConnectionEvidence from './connection-evidence.svelte';
-	import { blocks, checkConnection, type PlexConnection } from './plex-client';
+	import {
+		blocks,
+		type ConnectionResult,
+		checkConnection,
+		type PlexConnection,
+	} from './plex-client';
 	import WrongServerChoices from './wrong-server-choices.svelte';
 
 	let connection = $state<PlexConnection | undefined>(undefined);
@@ -37,8 +42,21 @@
 		refusal = undefined;
 		startedAt = Date.now();
 		elapsedMs = 0;
-		const result = await checkConnection();
-		checking = false;
+		let result: ConnectionResult;
+		try {
+			result = await checkConnection();
+		} finally {
+			// In a `finally`, never after the `await`. `checkConnection` promises
+			// a value rather than a throw, but the promise can still reject —
+			// `openapi-fetch` parses a 2xx body outside the `try` the client's
+			// `onError` middleware hooks, so a truncated JSON answer throws past
+			// every wrapper. Cleared after the `await` instead, that rejection
+			// left this stuck `true`: the button disabled for the life of the
+			// page, the elapsed-time interval never torn down, and the panel
+			// frozen on "asking the server who it is" with nothing to recover
+			// with.
+			checking = false;
+		}
 		if (result.outcome === 'refused') {
 			refusal = result.problem;
 			return;
@@ -94,6 +112,21 @@
 		</button>
 	</div>
 
+	<!--
+		Beside the verdict rather than instead of it. A refusal is what the last
+		attempt did, and it says nothing about what the last completed check
+		found: rendered as a branch above `connection`, one 429 against the
+		per-address provider budget replaced a blocking `wrongServer` verdict —
+		both identifiers, both remedies — with a bare rate-limit sentence, and
+		`I-ID-5`'s block vanished off the page while it was still in hand.
+
+		Cleared at the head of every check, so it never sits alongside the
+		loading treatment for the attempt that is replacing it.
+	-->
+	{#if refusal}
+		<ErrorState state={{ kind: 'error', summary: refusal.message }} />
+	{/if}
+
 	{#if checking}
 		<LoadingState
 			state={{
@@ -102,8 +135,6 @@
 				progress: t('plex.connection.checking'),
 			}}
 		/>
-	{:else if refusal}
-		<ErrorState state={{ kind: 'error', summary: refusal.message }} />
 	{:else if connection}
 		<!--
 			Re-bound here because the blocked branch renders its choices from a

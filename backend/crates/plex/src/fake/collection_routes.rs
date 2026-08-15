@@ -14,7 +14,7 @@ use crate::fake::{
     json as shape,
     plan::FakeOperation,
     routes::{Params, Running, window},
-    state::FakeCollection,
+    state::{FakeCollection, FakeHub},
 };
 
 /// `GET /library/sections/{key}/collections`.
@@ -72,6 +72,25 @@ pub(crate) async fn create_collection(
         items,
     };
     let body = shape::collection(&collection);
+    // And into the ordering space, because on a real server it is there the
+    // moment it exists: `/hubs/sections/{key}/manage` lists every collection in
+    // the library, promoted or not. `delete_collection` already takes the row
+    // out again, and a create that did not put one in left the two halves
+    // disagreeing — a collection created through the client never appeared in
+    // the hub list, so `set_hub_visibility` and `move_hub` against it fell
+    // through their lookups and answered 200 having changed nothing. A broken
+    // promotion path passes against a fake like that.
+    //
+    // Hidden on all three surfaces, which is what a new collection is: in the
+    // space to be ordered, on nobody's home screen until something promotes it.
+    library.hubs.push(FakeHub {
+        identifier: format!("collection.{}", collection.rating_key),
+        title: collection.title.clone(),
+        rating_key: Some(collection.rating_key.clone()),
+        own_home: false,
+        shared_home: false,
+        recommended: false,
+    });
     library.collections.push(collection);
     Ok(Json(shape::container(&json!({
         "size": 1,
