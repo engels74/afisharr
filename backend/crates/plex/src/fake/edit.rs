@@ -100,7 +100,15 @@ pub(crate) fn apply_to_item(item: &mut FakeItem, arguments: &Arguments) -> bool 
     // sent — including to `0`. A fake that only ever set the lock would make a
     // restore that forgot to clear it look correct (`I-REV-3`, §15.6).
     if let Some(sort_title) = arguments.first("titleSort.value") {
-        item.sort_title = Some(sort_title.to_owned());
+        // An empty value clears the attribute rather than setting it to the
+        // empty string. Plex has no other way to say "no sort title", and the
+        // absent state is the one most items are in and the one a teardown has
+        // to be able to restore them to (section 15.6).
+        item.sort_title = if sort_title.is_empty() {
+            None
+        } else {
+            Some(sort_title.to_owned())
+        };
     }
     if let Some(locked) = arguments.first("titleSort.locked") {
         item.sort_title_locked = locked != "0";
@@ -211,6 +219,18 @@ mod tests {
             &Arguments::parse(Some("titleSort.value=Alien&titleSort.locked=0"))
         ));
         assert!(!item.sort_title_locked, "unlocking is a write too");
+    }
+
+    #[test]
+    fn clearing_a_sort_title_leaves_the_attribute_absent_rather_than_empty() {
+        // Absent and empty are two different facts, and a teardown restoring
+        // an item to "no sort title" can only say so with an empty value.
+        let mut item = item();
+        assert!(apply_to_item(
+            &mut item,
+            &Arguments::parse(Some("titleSort.value=&titleSort.locked=0"))
+        ));
+        assert_eq!(item.sort_title, None);
     }
 
     #[test]

@@ -3,7 +3,6 @@
 
 //! Adding and removing labels on one item.
 
-use afisharr_sources::outbound::Method;
 use percent_encoding::{AsciiSet, CONTROLS};
 
 use crate::{
@@ -102,6 +101,10 @@ impl LabelEdit {
 impl PlexServerClient {
     /// Applies a label edit to one item.
     ///
+    /// Answers how many rows the server says it wrote, for the reason every
+    /// edit does: an item re-keyed under the caller is an edit that wrote
+    /// nothing, and only the count says so.
+    ///
     /// # Errors
     /// Returns [`ServerError::Transport`] when the server did not answer, and
     /// [`ServerError::Incomplete`] when the edit names no label — a request
@@ -113,21 +116,15 @@ impl PlexServerClient {
         libtype: ItemKind,
         item: &RatingKey,
         edit: &LabelEdit,
-    ) -> Result<(), ServerError> {
+    ) -> Result<usize, ServerError> {
         if edit.is_empty() {
             return Err(ServerError::Incomplete {
                 call: "PUT /library/sections/{id}/all",
                 missing: "any label to add or remove",
             });
         }
-        let mut query = vec![
-            ("type".to_owned(), libtype.as_plex_type().to_string()),
-            ("id".to_owned(), item.to_string()),
-        ];
-        query.extend(edit.pairs());
-        let url = self.endpoint(&format!("library/sections/{section}/all"), &query)?;
-        self.send(Method::PUT, &url, None, &[]).await?;
-        Ok(())
+        self.edit_at(section, libtype, std::slice::from_ref(item), edit.pairs())
+            .await
     }
 }
 

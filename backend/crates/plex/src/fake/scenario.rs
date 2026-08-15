@@ -274,6 +274,18 @@ impl Scenario {
         self
     }
 
+    /// The same scenario, drawn from a different seed.
+    ///
+    /// For the assertion that makes the seed mean something: two runs of one
+    /// scenario are identical, and two seeds are two worlds. Expressed as a
+    /// change to an existing scenario so the comparison cannot accidentally be
+    /// between two differently-built worlds.
+    #[must_use]
+    pub const fn reseeded(mut self, seed: u64) -> Self {
+        self.seed = Seed::of(seed);
+        self
+    }
+
     /// The seed every behaviour in this scenario is drawn from.
     #[must_use]
     pub const fn seed(&self) -> &Seed {
@@ -350,6 +362,7 @@ mod tests {
     #[test]
     fn the_scenario_carries_the_one_seed_everything_is_drawn_from() {
         assert_eq!(Scenario::behaving(99).seed().origin(), 99);
+        assert_eq!(Scenario::behaving(99).reseeded(7).seed().origin(), 7);
     }
 
     #[test]

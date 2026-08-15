@@ -162,6 +162,11 @@ impl PlexServerClient {
 
     /// Applies an edit to one collection.
     ///
+    /// Answers how many rows the server says it wrote. An edit naming a key the
+    /// server does not hold writes nothing and answers `0`, and a caller that
+    /// discarded the count could not tell that from a success: it is how a pass
+    /// comes to believe it renamed a collection somebody else had deleted (P1).
+    ///
     /// # Errors
     /// Returns [`ServerError::Transport`] when the server did not answer, and
     /// [`ServerError::Incomplete`] when the edit would write nothing — a call
@@ -173,24 +178,20 @@ impl PlexServerClient {
         section: &SectionKey,
         collection: &RatingKey,
         edit: &CollectionEdit,
-    ) -> Result<(), ServerError> {
+    ) -> Result<usize, ServerError> {
         if edit.is_empty() {
             return Err(ServerError::Incomplete {
                 call: "PUT /library/sections/{id}/all",
                 missing: "any field to change",
             });
         }
-        let mut query = vec![
-            (
-                "type".to_owned(),
-                ItemKind::Collection.as_plex_type().to_string(),
-            ),
-            ("id".to_owned(), collection.to_string()),
-        ];
-        query.extend(edit.pairs());
-        let url = self.endpoint(&format!("library/sections/{section}/all"), &query)?;
-        self.send(Method::PUT, &url, None, &[]).await?;
-        Ok(())
+        self.edit_at(
+            section,
+            ItemKind::Collection,
+            std::slice::from_ref(collection),
+            edit.pairs(),
+        )
+        .await
     }
 
     /// Deletes one collection.
