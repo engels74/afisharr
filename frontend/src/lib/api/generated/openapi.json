@@ -791,6 +791,58 @@
         }
       }
     },
+    "/api/settings/plex/connection/check": {
+      "post": {
+        "tags": [
+          "settings"
+        ],
+        "summary": "Checks the Plex connection and reports what it saw.",
+        "description": "A `POST` because it is an act with a side effect, not a read of a cached\nvalue: it makes a request to the operator's server and records the\nobservation. Answering it from a `GET` would put a network call and a write\nbehind a method a browser prefetch may issue, and behind a method the CSRF\nlayer exempts.\n\nMetered against the provider bucket rather than the general API one: it\nreaches somebody else's server on the caller's behalf, which is the rule\nPRD §21.4.3 sets for every provider-calling endpoint.",
+        "operationId": "check_connection",
+        "responses": {
+          "200": {
+            "description": "What the check saw. A `wrongServer` state is blocking (`I-ID-5`) and carries both identifiers",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PlexConnection"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No accepted credential was presented",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "That account does not administer this instance, that key was not issued with the scope this route needs, or setup has not been completed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Too many requests",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/settings/sessions": {
       "get": {
         "tags": [
@@ -1796,6 +1848,79 @@
           }
         ],
         "description": "What one poll found.\n\nThree states, and the client renders three different things. Folding\n`expired` into `pending` would leave an operator watching a spinner for a\ncode that will never be accepted (P1)."
+      },
+      "PlexConnection": {
+        "type": "object",
+        "description": "The whole answer the Settings page renders from.",
+        "required": [
+          "state",
+          "checkedAt"
+        ],
+        "properties": {
+          "baseUrl": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The address the bound server is reached at, when one is bound."
+          },
+          "boundMachineIdentifier": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The identifier this installation is bound to, when one is bound.\n\nPresent on every state that has a binding, including\n[`PlexConnectionState::WrongServer`] — the operator's decision needs\nboth sides of the mismatch, and an answer naming only the stranger tells\nthem nothing about what they are being asked to abandon."
+          },
+          "checkedAt": {
+            "type": "integer",
+            "format": "int64",
+            "description": "When this check ran, in epoch milliseconds."
+          },
+          "detail": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The technical detail behind an unreachable answer, for the collapsed\ndetail §8.4 describes. Never a user-facing sentence: the interface\ncomposes those from its own catalogue (`I-UX-7`)."
+          },
+          "friendlyName": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The name the server reports, when it answered."
+          },
+          "observedMachineIdentifier": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The identifier that actually answered, when something did."
+          },
+          "state": {
+            "$ref": "#/components/schemas/PlexConnectionState",
+            "description": "Where the connection stands."
+          },
+          "version": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The version it reports, when it answered."
+          }
+        }
+      },
+      "PlexConnectionState": {
+        "type": "string",
+        "description": "Where the Plex connection stands.\n\nA closed enum the client narrows on, never a status code it infers from\n(`I-UX-2`). Six variants and not three, because \"nothing is configured\",\n\"the server did not answer\", and \"the server refused what it was given\" are\ndifferent problems with different remedies, and an operator shown the wrong\none goes looking for a network fault that is not there.",
+        "enum": [
+          "notConfigured",
+          "noCredential",
+          "credentialRefused",
+          "reachable",
+          "unreachable",
+          "wrongServer"
+        ]
       },
       "Problem": {
         "type": "object",

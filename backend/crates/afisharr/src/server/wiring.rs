@@ -106,9 +106,10 @@ pub async fn build_state_against(
         secret_key: Arc::clone(&booted.secret_key),
         bootstrap,
         plex: match plex_base {
-            Some(base) => PlexTvClient::against(outbound, plex_identity, base),
-            None => PlexTvClient::new(outbound, plex_identity),
+            Some(base) => PlexTvClient::against(outbound.clone(), plex_identity.clone(), base),
+            None => PlexTvClient::new(outbound.clone(), plex_identity),
         },
+        outbound,
         trusted_proxies,
         public_origin,
         assets,

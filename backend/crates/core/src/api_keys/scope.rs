@@ -38,16 +38,23 @@ pub enum Scope {
     /// outlives its own revocation, which is a thing an operator may genuinely
     /// want and must never get by accident.
     KeysManage,
+    /// Reading the Plex connection, and checking it.
+    ///
+    /// Its own scope rather than folded into another, because what it reaches
+    /// is a request to the operator's own Plex server: a key issued to browse
+    /// the filesystem has no business making this instance talk to Plex.
+    PlexRead,
 }
 
 impl Scope {
     /// Every scope, in the order the interface lists them.
-    pub const ALL: [Self; 5] = [
+    pub const ALL: [Self; 6] = [
         Self::FilesRead,
         Self::EventsRead,
         Self::SessionsManage,
         Self::AccountManage,
         Self::KeysManage,
+        Self::PlexRead,
     ];
 
     /// The name a caller writes and the interface shows.
@@ -62,6 +69,7 @@ impl Scope {
             Self::SessionsManage => "sessions:manage",
             Self::AccountManage => "account:manage",
             Self::KeysManage => "keys:manage",
+            Self::PlexRead => "plex:read",
         }
     }
 
@@ -79,6 +87,7 @@ impl Scope {
             Self::SessionsManage => 1 << 2,
             Self::AccountManage => 1 << 3,
             Self::KeysManage => 1 << 4,
+            Self::PlexRead => 1 << 5,
         }
     }
 }

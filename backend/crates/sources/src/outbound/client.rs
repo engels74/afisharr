@@ -12,7 +12,7 @@ use reqwest::{
 use tracing::{info, warn};
 use url::Url;
 
-use crate::outbound::{Deadline, OutboundError, body};
+use crate::outbound::{Deadline, OutboundError, RequestBody, body};
 
 /// A body that answered, with the status it answered under.
 #[derive(Debug, Clone)]
@@ -121,7 +121,7 @@ impl OutboundClient {
         method: Method,
         url: &Url,
         headers: &[(HeaderName, HeaderValue)],
-        body: Option<String>,
+        body: Option<RequestBody>,
         deadline: Deadline,
     ) -> Result<Response, OutboundError> {
         let host = url.host_str().unwrap_or("unknown").to_owned();
@@ -138,7 +138,7 @@ impl OutboundClient {
             .headers(header_map)
             .timeout(effective.as_duration());
         if let Some(body) = body {
-            request = request.body(body);
+            request = request.body(body.into_bytes());
         }
 
         let timeout_millis = u64::try_from(effective.as_duration().as_millis()).unwrap_or(u64::MAX);

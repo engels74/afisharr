@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT INTO plex_server (\n                 id, machine_identifier, friendly_name, version, platform, base_url,\n                 first_seen_at, last_seen_at)\n             VALUES (1, ?1, ?2, ?3, ?4, ?5, ?6, ?6)\n             ON CONFLICT(id) DO NOTHING",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 6
+    },
+    "nullable": []
+  },
+  "hash": "293f2854320d8a24418536052e2d29fe4e9fccd9d87de87e1278c39dcc2c10a4"
+}

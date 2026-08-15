@@ -16,6 +16,7 @@ authors.workspace = true
 [dependencies]
 afisharr-core.workspace = true
 afisharr-plex.workspace = true
+afisharr-sources.workspace = true
 axum.workspace = true
 axum-extra.workspace = true
 cookie.workspace = true

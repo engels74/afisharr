@@ -1,0 +1,26 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT last_seen_at FROM plex_server WHERE id = 1 AND machine_identifier = ?1",
+  "describe": {
+    "columns": [
+      {
+        "name": "last_seen_at",
+        "ordinal": 0,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "plex_server",
+            "name": "last_seen_at"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "40cb41175e1fdccfdd6dd9498c072c964a6e6d48b743c6982d5e929cba837bd4"
+}

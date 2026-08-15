@@ -141,6 +141,39 @@ export const en = {
 	'page.settings.general': 'General',
 	'page.settings.teardown': 'Teardown',
 	'page.settings.about': 'About',
+	'plex.connection.title': 'Plex connection',
+	'plex.connection.check': 'Check now',
+	'plex.connection.checking': 'Asking the server who it is',
+	'plex.connection.address': 'Address',
+	'plex.connection.identity': 'Identity',
+	'plex.connection.bound': 'Bound',
+	'plex.connection.answered': 'Answered',
+	'plex.connection.reachable.body':
+		'The server at this address is the one Afisharr manages.',
+	'plex.connection.notConfigured.body':
+		'Afisharr is not managing a Plex server yet. Connect one during setup.',
+	'plex.connection.noCredential.body':
+		'Afisharr has no Plex sign-in to reach this server with. Sign in to Plex again.',
+	'plex.connection.credentialRefused.title':
+		'The server refused this Plex sign-in',
+	'plex.connection.credentialRefused.consequence':
+		'The server is there and it did not accept the Plex sign-in Afisharr has stored. Sign in to Plex again. Collections, posters, and the home screen stay as they are until you do. Nothing has been changed.',
+	'plex.connection.unreachable.title': 'The server did not answer',
+	'plex.connection.unreachable.consequence':
+		'Collections, posters, and the home screen stay as they are until it does. Nothing has been changed.',
+	'plex.connection.wrongServer.reason':
+		'A different Plex server answered at this address. Everything Afisharr recorded — collections, posters, positions — points at the server it was set up against, and means something else on this one. Nothing has been read, written, or moved.',
+	'plex.connection.wrongServer.unblock': 'Two ways forward. Pick one:',
+	'plex.connection.wrongServer.rebind': 'Start again on the new server',
+	'plex.connection.wrongServer.rebindBody':
+		'Afisharr forgets every collection, poster, and position it recorded, and builds them again here.',
+	'plex.connection.wrongServer.rebindCost': 'Cannot be undone',
+	'plex.connection.wrongServer.restore': 'Restore a backup',
+	'plex.connection.wrongServer.restoreBody':
+		'Keeps everything Afisharr recorded and puts the original server back in front of it.',
+	'plex.connection.wrongServer.restoreCost': 'Keeps your work',
+	'plex.connection.wrongServer.notYet':
+		'Neither runs from here yet. Point the address back at the server above to carry on in the meantime.',
 	'page.notFound.title': 'No such page',
 	'page.notFound.body':
 		'That address does not resolve to anything on this instance.',

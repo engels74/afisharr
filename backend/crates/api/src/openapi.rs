@@ -48,9 +48,16 @@ use utoipa::OpenApi;
         crate::keys::routes::list,
         crate::keys::routes::create,
         crate::keys::routes::revoke,
+        crate::plex::routes::check_connection,
         crate::stream::route::stream,
     ),
-    components(schemas(crate::error::Problem, crate::error::ErrorCode, crate::error::Mismatch)),
+    components(schemas(
+        crate::error::Problem,
+        crate::error::ErrorCode,
+        crate::error::Mismatch,
+        crate::plex::PlexConnection,
+        crate::plex::PlexConnectionState,
+    )),
 )]
 pub struct ApiDoc;
 
@@ -99,6 +106,7 @@ mod tests {
             "/api/files/roots",
             "/api/settings/api-keys",
             "/api/settings/api-keys/{id}",
+            "/api/settings/plex/connection/check",
             "/api/stream",
         ];
         let document = parsed();

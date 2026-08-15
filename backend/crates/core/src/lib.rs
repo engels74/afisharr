@@ -30,6 +30,7 @@ pub mod leases;
 pub mod lifecycle;
 pub mod locale;
 pub mod plex_pin;
+pub mod plex_server;
 pub mod projection;
 pub mod secrets;
 pub mod sessions;

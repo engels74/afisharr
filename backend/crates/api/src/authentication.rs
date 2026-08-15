@@ -28,7 +28,7 @@ pub use account_routes::{
     PasswordChange, PasswordChanged, SessionView, change_password, list_sessions, revoke_session,
 };
 pub use authorization::{
-    AccountManage, Administrator, EventsRead, FilesRead, KeysManage, Requires, Scoped,
+    AccountManage, Administrator, EventsRead, FilesRead, KeysManage, PlexRead, Requires, Scoped,
     SessionsManage,
 };
 pub use budget::{presents_credential, spend_anonymous};

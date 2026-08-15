@@ -612,19 +612,19 @@ cannot express the failures the invariants from Phase 4 onward are written again
   per-library filter-metadata discovery.
 - **Where:** `backend/crates/plex`.
 - **Subtasks:**
-  - [ ] 1. Implement the `X-Plex-*` header contract and the PIN/OAuth token exchange consumed by Task 1.2.
-  - [ ] 2. Implement library listing and item listing, including the filter-query parameter shapes
+  - [x] 1. Implement the `X-Plex-*` header contract and the PIN/OAuth token exchange consumed by Task 1.2.
+  - [x] 2. Implement library listing and item listing, including the filter-query parameter shapes
      (`/library/sections/{key}/all?…`) with operator suffixes (`!=`, `>>=`, `<<=`, `&=`, doubled `=`
      for exact string matching).
-  - [ ] 3. Implement collection create, update, and item add/remove/reorder calls, plus hub reposition and
+  - [x] 3. Implement collection create, update, and item add/remove/reorder calls, plus hub reposition and
      visibility calls.
-  - [ ] 4. Implement label add/remove, media-stream fact retrieval, and artwork upload.
-  - [ ] 5. Implement the per-library, per-libtype filter-metadata discovery calls: filtering types, fields
+  - [x] 4. Implement label add/remove, media-stream fact retrieval, and artwork upload.
+  - [x] 5. Implement the per-library, per-libtype filter-metadata discovery calls: filtering types, fields
      with type and subtype, per-type legal operators, and enumerated filter choices with their fast
      keys.
-  - [ ] 6. Implement machine-identifier retrieval as its own call, since a changed value must be detectable
+  - [x] 6. Implement machine-identifier retrieval as its own call, since a changed value must be detectable
      without a full library fetch.
-- [ ] **Done when:** the crate compiles with no dependency on any other Afisharr crate's domain types, and
+- [x] **Done when:** the crate compiles with no dependency on any other Afisharr crate's domain types, and
   every call in this list is exercised by a unit test against a hand-rolled fixture response before the
   fake in Task 2.2 exists.
 
@@ -636,17 +636,17 @@ cannot express the failures the invariants from Phase 4 onward are written again
 - **Where:** a test-support module inside `backend/crates/plex`, compiled only under test, consumed by every
   later phase's test suite.
 - **Subtasks:**
-  - [ ] 1. Implement a move that reports success over the wire while not actually changing order, triggered
+  - [x] 1. Implement a move that reports success over the wire while not actually changing order, triggered
      past a configurable precision budget.
-  - [ ] 2. Implement artwork URLs in at least two unrecognised formats.
-  - [ ] 3. Implement rating-key churn: the same logical item reappearing under a new key on a later fetch.
-  - [ ] 4. Implement partial scan states — an item indexed but not yet complete.
-  - [ ] 5. Implement sort titles with independently settable value, presence, and lock state.
-  - [ ] 6. Implement timeout and 5xx injection at a caller-chosen operation, mid-pass.
-  - [ ] 7. Implement a machine-identifier change, triggerable on demand.
-  - [ ] 8. Seed every behaviour from one explicit seed value; assert byte-identical replay from the same
+  - [x] 2. Implement artwork URLs in at least two unrecognised formats.
+  - [x] 3. Implement rating-key churn: the same logical item reappearing under a new key on a later fetch.
+  - [x] 4. Implement partial scan states — an item indexed but not yet complete.
+  - [x] 5. Implement sort titles with independently settable value, presence, and lock state.
+  - [x] 6. Implement timeout and 5xx injection at a caller-chosen operation, mid-pass.
+  - [x] 7. Implement a machine-identifier change, triggerable on demand.
+  - [x] 8. Seed every behaviour from one explicit seed value; assert byte-identical replay from the same
      seed across two runs.
-- [ ] **Done when:** every row of the fidelity contract reproduces deterministically from its seed, and
+- [x] **Done when:** every row of the fidelity contract reproduces deterministically from its seed, and
   `I-ID-5` passes against the fake — a changed machine identifier is detected and treated as a possibly
   different server rather than silently reconciled.
 
@@ -655,10 +655,10 @@ cannot express the failures the invariants from Phase 4 onward are written again
   release lane, that keeps the fake honest.
 - **Where:** `backend/crates/plex/tests`, wired into the release lane from Task 0.1.
 - **Subtasks:**
-  - [ ] 1. Exercise the same call surface as Task 2.1 against a real server reachable in CI via a
+  - [x] 1. Exercise the same call surface as Task 2.1 against a real server reachable in CI via a
      release-lane credential.
-  - [ ] 2. Assert response shapes match what Task 2.1's parsers expect for the happy path on every call.
-  - [ ] 3. Fail the release lane, by name, on any call whose real-server shape has drifted from what the fake
+  - [x] 2. Assert response shapes match what Task 2.1's parsers expect for the happy path on every call.
+  - [x] 3. Fail the release lane, by name, on any call whose real-server shape has drifted from what the fake
      assumes.
 - [ ] **Done when:** the contract test passes in the release lane against a real server, and a deliberately
   introduced shape mismatch between the fake and a captured real response fails the test rather than
@@ -669,12 +669,12 @@ cannot express the failures the invariants from Phase 4 onward are written again
   using the nine-state vocabulary from Task 1.8, without displaying any library content.
 - **Where:** `frontend/src/routes` (Settings › Plex connection); `backend/crates/api`.
 - **Subtasks:**
-  - [ ] 1. Add a lightweight connectivity check hitting the machine-identifier call from Task 2.1.
-  - [ ] 2. Render the three connection states (reachable, unreachable, wrong-server per `I-ID-5`'s blocking
+  - [x] 1. Add a lightweight connectivity check hitting the machine-identifier call from Task 2.1.
+  - [x] 2. Render the three connection states (reachable, unreachable, wrong-server per `I-ID-5`'s blocking
      condition) through the shared state components.
-  - [ ] 3. Surface the blocking "this is a new server, rebind" or "restore a backup" choice as a Blocked
+  - [x] 3. Surface the blocking "this is a new server, rebind" or "restore a backup" choice as a Blocked
      state, with no library data behind it.
-- [ ] **Done when:** the Settings page shows a live connectivity state sourced from Task 2.1's calls, and a
+- [x] **Done when:** the Settings page shows a live connectivity state sourced from Task 2.1's calls, and a
   simulated machine-identifier change renders as Blocked with both recovery options offered, neither
   auto-resolved.
 

@@ -25,6 +25,20 @@ export const api = createClient<paths>({
 	credentials: 'same-origin',
 });
 
+/**
+ * Every shape the API declares, keyed by name.
+ *
+ * Re-exported here so a feature names the seam rather than the generated file
+ * behind it: `$lib/api/generated/schema` is written by
+ * `scripts/generate-openapi-client.sh`, and a feature reaching into it directly
+ * is a second import path to fix if the generator's output ever moves.
+ *
+ * Deriving a feature's types from this is the point of §24.5. A hand-declared
+ * interface beside a cast compiles just as well and is a second description of
+ * the same surface, free to drift, with nothing checking it.
+ */
+export type ApiSchemas = components['schemas'];
+
 /** The failure shape every route answers with. */
 export type Problem = components['schemas']['Problem'];
 

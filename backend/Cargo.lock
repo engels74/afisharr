@@ -46,6 +46,7 @@ version = "0.1.0"
 dependencies = [
  "afisharr-core",
  "afisharr-plex",
+ "afisharr-sources",
  "axum",
  "axum-extra",
  "cookie",
@@ -96,10 +97,14 @@ version = "0.1.0"
 name = "afisharr-plex"
 version = "0.1.0"
 dependencies = [
+ "afisharr-plex",
  "afisharr-sources",
+ "axum",
  "serde",
  "serde_json",
+ "serde_urlencoded",
  "thiserror",
+ "tokio",
  "tracing",
  "url",
 ]
