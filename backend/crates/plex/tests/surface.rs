@@ -70,6 +70,21 @@ async fn an_items_sort_title_round_trips_in_all_three_of_its_properties() {
     let item = client.item(&key).await.expect("the fake answers");
     assert_eq!(item.sort_title.value(), Some("Alien"));
     assert!(!item.sort_title.is_locked());
+
+    // And presence is its own property: clearing the field leaves the item
+    // with no sort title rather than with an empty one, which is the state
+    // most items start in and the one a teardown has to reach.
+    client
+        .edit_item_sort_title(&movies(), ItemKind::Movie, &key, None, true)
+        .await
+        .expect("the fake answers");
+    let item = client.item(&key).await.expect("the fake answers");
+    assert!(!item.sort_title.is_present());
+    assert_eq!(item.sort_title.value(), None);
+    assert!(
+        item.sort_title.is_locked(),
+        "absent and locked at once is a real state, and the one a restore gets wrong"
+    );
 }
 
 #[tokio::test]

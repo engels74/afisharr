@@ -145,6 +145,56 @@ async fn the_vocabulary_block_is_an_object_in_json_and_an_element_in_xml() {
 }
 
 #[tokio::test]
+async fn every_flag_in_every_answer_is_spelled_one_way() {
+    // Mechanically, over the whole surface, because the failure this catches is
+    // one attribute: `refreshing` as a JSON boolean beside `smart` as a string
+    // is two spellings of two facts that arrive side by side as XML attributes,
+    // and a client written against the first fails on the second.
+    let fake = FakePlex::start(Scenario::behaving(1)).await;
+    for path in [
+        "",
+        "identity",
+        "library",
+        "library/sections",
+        "library/sections/1/all",
+        "library/sections/1/all?includeMeta=1&includeAdvanced=1&X-Plex-Container-Size=0",
+        "library/sections/1/collections",
+        "library/sections/1/genre",
+        "library/metadata/10001",
+        "library/collections/15001/children",
+        "hubs/sections/1/manage",
+    ] {
+        let body: serde_json::Value = serde_json::from_str(
+            &ask(
+                &fake,
+                path,
+                &[
+                    ("x-plex-token", harness::TOKEN),
+                    ("accept", "application/json"),
+                ],
+            )
+            .await
+            .body,
+        )
+        .expect("json parses");
+        assert!(
+            no_json_booleans(&body),
+            "/{path} answers a JSON boolean somewhere: {body}"
+        );
+    }
+}
+
+/// Whether a document is free of JSON booleans, anywhere in it.
+fn no_json_booleans(value: &serde_json::Value) -> bool {
+    match value {
+        serde_json::Value::Bool(_) => false,
+        serde_json::Value::Array(items) => items.iter().all(no_json_booleans),
+        serde_json::Value::Object(fields) => fields.values().all(no_json_booleans),
+        _ => true,
+    }
+}
+
+#[tokio::test]
 async fn a_title_holding_markup_survives_both_renderings() {
     // The fake's own titles are tame, but a real library is not, and an
     // unescaped ampersand in one title makes the whole XML answer unparseable

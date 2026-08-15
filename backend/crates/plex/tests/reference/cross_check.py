@@ -33,6 +33,7 @@ from pathlib import Path
 
 try:
     import plexapi
+    from plexapi.collection import Collection
     from plexapi.server import PlexServer
 except ImportError as missing:  # pragma: no cover - reported, never swallowed
     print(
@@ -173,6 +174,22 @@ def check_search_arguments(section, report: Report):
     windowed = section.search(container_start=1, container_size=2, maxresults=2)
     report.expect("a windowed search returns the window", len(windowed) == 2)
 
+    # Applied by the reference client itself, over the answer: it needs the
+    # attribute to be on the row at all, which is a different claim about the
+    # fake from the ones above.
+    recent = section.search(**{"year__gte": pivot})
+    report.expect(
+        f"a client-side comparison at {pivot} narrows the result",
+        0 < len(recent) <= len(everything),
+    )
+
+    as_collections = section.search(libtype="collection")
+    report.require("search(libtype='collection') answers collections", as_collections)
+    report.expect(
+        "and answers collections rather than films",
+        all(row.type == "collection" for row in as_collections),
+    )
+
 
 def check_collections(section, report: Report):
     collections = section.collections()
@@ -268,6 +285,44 @@ def check_writes(section, item, collection, report: Report):
             collection.title == f"{original} (cross-check)",
         )
         collection.edit(**{"title.value": original})
+
+    # A collection nothing has promoted is in the library and not in the
+    # ordering space, and the reference client tells the two apart by getting
+    # no row back and synthesising one with `_promoted` false
+    # (`plexapi/collection.py:207-215`). Created and deleted here, because this
+    # runs on somebody's real Plex (P2).
+    fresh = Collection.create(
+        section._server,
+        "Afisharr cross-check (safe to delete)",
+        section,
+        items=[item],
+    )
+    try:
+        report.expect(
+            "a created collection is in the library",
+            fresh.ratingKey is not None,
+        )
+        unpromoted = fresh.visibility()
+        report.expect(
+            "and not in the ordering space until something promotes it",
+            unpromoted._promoted is False,
+        )
+        report.require(
+            "the synthesised row still names the collection",
+            unpromoted.identifier,
+        )
+        unpromoted.promoteHome()
+        promoted = fresh.visibility()
+        report.expect(
+            "promoting it puts a real row in the manage list",
+            promoted._promoted is True,
+        )
+        report.expect(
+            "and the row it put there is on the home screen",
+            promoted.promotedToOwnHome is True,
+        )
+    finally:
+        fresh.delete()
 
 
 def main() -> int:
