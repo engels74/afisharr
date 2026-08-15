@@ -32,6 +32,20 @@ pub enum ServerError {
         source: url::ParseError,
     },
 
+    /// The server offered an endpoint that is not on the server.
+    ///
+    /// Its own variant rather than an [`ServerError::Address`], because nothing
+    /// failed to compose: the key resolved perfectly, and it resolved somewhere
+    /// else. The request is refused instead of sent, because it would have
+    /// carried this instance's token to whatever host the answer named.
+    #[error("the Plex server at {host} offered '{key}', which is not on that server")]
+    ForeignEndpoint {
+        /// The host the client is bound to.
+        host: String,
+        /// The key the answer carried, with any credential in it redacted.
+        key: String,
+    },
+
     /// The server answered, and the answer omitted something this build needs.
     ///
     /// Its own variant rather than a `Malformed` transport failure, because the
@@ -58,7 +72,11 @@ impl ServerError {
         match self {
             Self::Transport { source, .. } => source.service_answered(),
             Self::Incomplete { .. } => true,
-            Self::Address { .. } => false,
+            // No request was made, so nothing was observed. The key came out of
+            // an earlier answer, but the call this failure belongs to never
+            // reached the server — and a caller that read this as "answered"
+            // would report an empty result as a fact about the library (P1).
+            Self::Address { .. } | Self::ForeignEndpoint { .. } => false,
         }
     }
 
@@ -110,6 +128,21 @@ mod tests {
         assert!(error.server_answered());
         assert_eq!(error.refused_status(), None);
         assert!(error.to_string().contains("machine identifier"), "{error}");
+    }
+
+    #[test]
+    fn an_endpoint_that_is_not_on_the_server_is_not_an_answer_either() {
+        // The request was refused before it was sent, so nothing was observed.
+        // A caller reading this as "answered" would report the empty result as
+        // a fact about the server's vocabulary (P1).
+        let error = ServerError::ForeignEndpoint {
+            host: "plex.lan".to_owned(),
+            key: "http://collector.example/x".to_owned(),
+        };
+        assert!(!error.server_answered());
+        assert_eq!(error.refused_status(), None);
+        assert!(error.to_string().contains("collector.example"), "{error}");
+        assert!(error.to_string().contains("plex.lan"), "{error}");
     }
 
     #[test]

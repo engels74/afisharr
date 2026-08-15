@@ -19,6 +19,7 @@ mod answer;
 mod check;
 mod connection;
 pub(crate) mod routes;
+mod shown;
 
 pub use connection::{PlexConnection, PlexConnectionState};
 pub use routes::check_connection;

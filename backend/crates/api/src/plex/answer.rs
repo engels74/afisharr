@@ -11,57 +11,12 @@
 //! would present weeks-old facts as what the server just said (P1).
 
 use afisharr_core::{plex_server::PlexServer, time::Timestamp};
-use afisharr_plex::server::{ServerError, ServerIdentity, redact_credentials};
+use afisharr_plex::server::ServerIdentity;
 
-use crate::plex::connection::{PlexConnection, PlexConnectionState};
-
-/// Whether this failure is the server rejecting the credential presented.
-///
-/// 401 and 403 and nothing else. A 404 is a server that does not serve this
-/// path, and a 5xx is the server's own failure; neither is fixed by signing in
-/// to Plex again, which is the whole remedy [`credential_refused`] names.
-pub(crate) fn refused_credential(error: &ServerError) -> bool {
-    matches!(error.refused_status(), Some(401 | 403))
-}
-
-/// A failure and everything under it, as one line.
-///
-/// The whole chain, because the outer message is the part that says least:
-/// every transport failure renders as "the Plex server at {host} could not be
-/// reached", and what tells a timeout from a refused token from a proxy's own
-/// error page is the `#[source]` beneath it. Collapsing to `to_string()` put the
-/// same sentence in §8.4's collapsed detail whatever went wrong, which is a
-/// detail that details nothing.
-///
-/// Redacted on the way out. This string is rendered on the page and pasted into
-/// bug reports, and a layer of it can quote the configured address — which, for
-/// an operator whose server sits behind basic auth, carries a password.
-pub(crate) fn detail_of(error: &dyn std::error::Error) -> String {
-    let mut detail = error.to_string();
-    let mut cause = error.source();
-    while let Some(source) = cause {
-        let text = source.to_string();
-        // Skipped when the layer below only restates the layer above, which is
-        // what `reqwest` does for the outermost of its own wrappers.
-        if !detail.ends_with(&text) {
-            detail.push_str(": ");
-            detail.push_str(&text);
-        }
-        cause = source.source();
-    }
-    redact_credentials(&detail)
-}
-
-/// The bound address, as an answer may show it.
-///
-/// The stored address is whatever the operator configured, and an operator
-/// whose server sits behind a reverse proxy configures
-/// `http://user:secret@plex.lan`. This field is read by the browser and
-/// rendered on the settings page, so the password comes off here — the request
-/// itself is built from the stored text and still carries it.
-pub(crate) fn shown_address(server: &PlexServer) -> String {
-    redact_credentials(&server.base_url)
-}
+use crate::plex::{
+    connection::{PlexConnection, PlexConnectionState},
+    shown::shown_address,
+};
 
 /// The answer for a bound server this instance has no credential for.
 pub(crate) fn no_credential(server: &PlexServer, now: Timestamp) -> PlexConnection {
@@ -183,13 +138,16 @@ fn without_a_usable_answer(
 }
 
 #[cfg(test)]
-mod tests {
-    use afisharr_plex::server::MachineIdentifier;
+pub(crate) mod tests {
+    use afisharr_plex::server::{MachineIdentifier, ServerError};
     use afisharr_sources::outbound::OutboundError;
 
     use super::*;
+    use crate::plex::shown::{detail_of, refused_credential};
 
-    fn server() -> PlexServer {
+    /// The stored row every test here answers about. Shared with `shown`,
+    /// which renders two of its fields and must render the same row.
+    pub(crate) fn server() -> PlexServer {
         PlexServer {
             machine_identifier: "server-a".to_owned(),
             friendly_name: "Living Room".to_owned(),
@@ -301,32 +259,6 @@ mod tests {
     }
 
     #[test]
-    fn the_collapsed_detail_carries_what_went_wrong_and_not_only_that_something_did() {
-        // Every transport failure's own message is the same sentence, so a
-        // detail built from it alone tells a refused token, an expired
-        // certificate, and a proxy's error page apart from nothing at all — and
-        // §8.4's collapsed detail exists for exactly that distinction.
-        let detail = detail_of(&refusal(401));
-        assert!(detail.contains("401"), "{detail}");
-
-        let unread = ServerError::Transport {
-            host: "plex.lan".to_owned(),
-            source: OutboundError::Oversized {
-                host: "plex.lan".to_owned(),
-                limit_bytes: 1024,
-            },
-        };
-        assert!(detail_of(&unread).contains("1024"), "{unread}");
-
-        // And a failure with nothing under it is still exactly itself.
-        let incomplete = ServerError::Incomplete {
-            call: "GET /identity",
-            missing: "a machine identifier",
-        };
-        assert_eq!(detail_of(&incomplete), incomplete.to_string());
-    }
-
-    #[test]
     fn a_server_that_refuses_the_token_is_not_a_server_that_did_not_answer() {
         // Opposite remedies: one is a network fault to chase, the other is a
         // sign-in to repeat. An operator sent to the first for the second
@@ -350,41 +282,39 @@ mod tests {
     }
 
     #[test]
-    fn a_failure_that_is_not_a_refusal_stays_unreachable() {
-        // 404 is a server that does not serve this path and 503 is the
-        // server's own trouble. Neither is fixed by signing in to Plex again,
-        // so neither may borrow the state whose whole remedy is that.
-        for status in [404, 429, 500, 503] {
-            assert!(!refused_credential(&refusal(status)), "{status}");
-        }
-        assert!(!refused_credential(&ServerError::Incomplete {
-            call: "GET /identity",
-            missing: "a machine identifier",
-        }));
-    }
-
-    #[test]
-    fn a_password_in_the_configured_address_reaches_neither_the_browser_nor_the_detail() {
-        // An operator whose server sits behind basic auth configures
-        // `http://user:secret@plex.lan`, and this route hands `baseUrl` and
-        // the collapsed detail straight to the page.
+    fn every_answer_shows_the_address_through_the_one_renderer_that_redacts_it() {
+        // The credential handling itself lives in `shown`, and the case that
+        // matters here is that no builder bypasses it: `baseUrl` is handed
+        // straight to the browser by all six (D-032).
         let mut behind_a_proxy = server();
-        behind_a_proxy.base_url = "http://admin:hunter2@plex.lan:32400/".to_owned();
+        behind_a_proxy.base_url = "http://admin:hunter2@plex.lan:32400/?X-Plex-Token=t".to_owned();
+        let expected = Some(shown_address(&behind_a_proxy));
 
-        let answer = no_credential(&behind_a_proxy, Timestamp::from_millis(3_000));
-        let shown = answer.base_url.expect("the address is shown");
-        assert!(!shown.contains("hunter2"), "{shown}");
-        assert!(shown.contains("plex.lan"), "{shown}");
-
-        // And the same address quoted back inside a failure message, which is
-        // how `AddressError` names what the operator typed.
-        let quoted = std::io::Error::other(format!(
-            "'{}' is not a URL",
-            behind_a_proxy.base_url.trim_end_matches('/')
-        ));
-        let detail = detail_of(&quoted);
-        assert!(!detail.contains("hunter2"), "{detail}");
-        assert!(detail.contains("admin:***@plex.lan"), "{detail}");
+        let detail = "the Plex server at plex.lan could not be reached".to_owned();
+        for answer in [
+            no_credential(&behind_a_proxy, Timestamp::from_millis(3_000)),
+            reachable(
+                &behind_a_proxy,
+                &identity("server-a"),
+                Timestamp::from_millis(3_000),
+            ),
+            wrong_server(
+                &behind_a_proxy,
+                &identity("server-b"),
+                Timestamp::from_millis(3_000),
+            ),
+            unreachable(
+                &behind_a_proxy,
+                detail.clone(),
+                Timestamp::from_millis(3_000),
+            ),
+            credential_refused(&behind_a_proxy, detail, Timestamp::from_millis(3_000)),
+        ] {
+            assert_eq!(answer.base_url, expected, "{:?}", answer.state);
+            let shown = answer.base_url.expect("the address is shown");
+            assert!(!shown.contains("hunter2"), "{shown}");
+            assert!(!shown.contains("X-Plex-Token"), "{shown}");
+        }
     }
 
     #[test]

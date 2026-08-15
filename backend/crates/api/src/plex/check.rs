@@ -16,11 +16,9 @@ use afisharr_plex::server::{
 use crate::{
     error::{AppError, AppResult},
     plex::{
-        answer::{
-            credential_refused, detail_of, no_credential, reachable, refused_credential,
-            unreachable, wrong_server,
-        },
+        answer::{credential_refused, no_credential, reachable, unreachable, wrong_server},
         connection::PlexConnection,
+        shown::{detail_of, refused_credential},
     },
     state::ApiState,
 };

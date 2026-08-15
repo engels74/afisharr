@@ -6,6 +6,8 @@
 use thiserror::Error;
 use url::Url;
 
+use crate::server::redact_credentials;
+
 /// Why an address could not be built.
 #[derive(Debug, Error)]
 #[non_exhaustive]
@@ -43,63 +45,6 @@ pub enum AddressError {
         /// What the operator typed.
         text: String,
     },
-}
-
-/// What a redacted password is rendered as.
-///
-/// Not the empty string: an address that showed `http://admin@plex.lan` would
-/// read as one configured without a password at all, and the operator checking
-/// why their proxy refuses the request needs to see that one is being sent.
-const REDACTED: &str = "***";
-
-/// `text` with any password in it replaced by [`REDACTED`].
-///
-/// A base address is whatever the operator configured, and an operator whose
-/// server sits behind a reverse proxy configures `http://user:secret@plex.lan`
-/// — a secret this build then holds in a string that is displayed, logged, and
-/// returned to the browser. The password is kept for the request and removed
-/// from every rendering of it.
-///
-/// Takes text rather than an address, so that a base which never parsed is
-/// covered too: the failure messages in [`AddressError`] quote what the
-/// operator typed, and that is the one rendering most likely to be pasted into
-/// a bug report.
-#[must_use]
-pub fn redact_credentials(text: &str) -> String {
-    match Url::parse(text.trim()) {
-        Ok(mut url) if url.password().is_some() => {
-            if url.set_password(Some(REDACTED)).is_ok() {
-                return url.into();
-            }
-            scrub(text)
-        }
-        // Nothing to hide, and the text is returned exactly as it arrived: a
-        // round trip through `Url` would normalise an address the operator has
-        // to recognise.
-        Ok(_) => text.to_owned(),
-        // Not a URL, which does not mean not a credential: `http://u:p@ plex`
-        // fails to parse and still names a password.
-        Err(_) => scrub(text),
-    }
-}
-
-/// The same redaction, by hand, for text `Url` will not parse.
-fn scrub(text: &str) -> String {
-    let Some((before, rest)) = text.split_once("://") else {
-        return text.to_owned();
-    };
-    // The authority ends where the path, query, or fragment begins; a `@` past
-    // that point belongs to some other part of the text.
-    let end = rest.find(['/', '?', '#']).unwrap_or(rest.len());
-    let (authority, tail) = rest.split_at(end);
-    let Some((userinfo, host)) = authority.rsplit_once('@') else {
-        return text.to_owned();
-    };
-    match userinfo.split_once(':') {
-        Some((user, _)) => format!("{before}://{user}:{REDACTED}@{host}{tail}"),
-        // A username and no password is not a secret.
-        None => text.to_owned(),
-    }
 }
 
 /// The base address of one Plex Media Server.
@@ -193,6 +138,41 @@ impl ServerAddress {
         }
         Ok(url)
     }
+
+    /// The same composition, for a `key` the *server* supplied.
+    ///
+    /// Its own method because the trust is different. Every other endpoint is
+    /// assembled from a literal in this crate, so it lands where this crate
+    /// meant it to. A discovered key is a string out of a response body, and
+    /// `Url::join` resolves an absolute one by replacing the origin — so a
+    /// server that answered `http://elsewhere.example/x`, or a proxy or cache
+    /// that rewrote the body to say so, would redirect the next request off
+    /// this machine. That request carries the instance's `X-Plex-Token`, so
+    /// the redirect is a credential handed to whoever the body named, and the
+    /// same move reaches any host this instance can route to.
+    ///
+    /// Returns `None` for a key that does not land on the configured server —
+    /// which is a fact to report, not a request to make. Three things have to
+    /// match, and the origin is only the first:
+    ///
+    /// 1. The origin, which is what an absolute key replaces.
+    /// 2. The base path, because an operator who configured
+    ///    `https://home.example/pms` put Plex behind that prefix, and whatever
+    ///    serves the rest of that host is somebody else's.
+    /// 3. The userinfo, which the origin does *not* cover: a key of
+    ///    `http://u:p@plex.lan:32400/x` has the same origin as the base and
+    ///    still lets the answer choose what this instance authenticates as.
+    ///
+    /// # Errors
+    /// Returns the parse failure when the key is not a valid reference at all.
+    pub fn discovered_endpoint(&self, key: &str) -> Result<Option<Url>, url::ParseError> {
+        let url = self.endpoint(key, &[])?;
+        let on_this_server = url.origin() == self.url.origin()
+            && url.path().starts_with(self.url.path())
+            && url.username() == self.url.username()
+            && url.password() == self.url.password();
+        Ok(on_this_server.then_some(url))
+    }
 }
 
 #[cfg(test)]
@@ -232,32 +212,6 @@ mod tests {
     }
 
     #[test]
-    fn redaction_covers_the_text_of_an_address_that_never_parsed() {
-        // `AddressError` quotes what the operator typed, and that message is
-        // the rendering most likely to be pasted into a bug report.
-        let error = ServerAddress::parse("http://admin:hunter2@ plex.lan")
-            .expect_err("a space is not a host");
-        let detail = redact_credentials(&error.to_string());
-        assert!(!detail.contains("hunter2"), "{detail}");
-        assert!(detail.contains("admin:***@"), "{detail}");
-    }
-
-    #[test]
-    fn redaction_leaves_an_address_with_nothing_to_hide_exactly_as_it_arrived() {
-        // Byte for byte: an operator checking the address on the page has to
-        // recognise what they typed, and a round trip through `Url` would
-        // normalise it under them.
-        for text in [
-            "http://plex.lan:32400",
-            "https://home.example/pms/",
-            "http://admin@plex.lan",
-            "not an address at all",
-        ] {
-            assert_eq!(redact_credentials(text), text);
-        }
-    }
-
-    #[test]
     fn a_base_path_is_preserved_when_an_endpoint_is_appended() {
         // The reverse-proxy case: `/pms` in front of the server. Without the
         // trailing slash `Url::join` drops the segment and the request goes to
@@ -280,6 +234,66 @@ mod tests {
             url.as_str(),
             "http://plex.lan:32400/library/sections/1/all?title=a+b%26c%3Dd"
         );
+    }
+
+    #[test]
+    fn a_discovered_key_that_lands_on_this_server_composes_the_way_a_literal_one_does() {
+        let address = ServerAddress::parse("https://home.example/pms").expect("a valid address");
+        let url = address
+            .discovered_endpoint("/library/sections/1/genre")
+            .expect("a valid reference")
+            .expect("on this server");
+        assert_eq!(
+            url.as_str(),
+            "https://home.example/pms/library/sections/1/genre"
+        );
+    }
+
+    #[test]
+    fn a_discovered_key_naming_another_host_is_refused_before_a_token_is_sent() {
+        // The key comes out of a response body. An absolute URL in it makes
+        // `Url::join` replace the origin, and the request that would follow
+        // carries this instance's `X-Plex-Token` — so a compromised server, or
+        // anything that rewrote its answer, could name a collector and be
+        // handed the credential (D-032).
+        let address = ServerAddress::parse("http://plex.lan:32400").expect("a valid address");
+        for key in [
+            "http://collector.example/library/sections/1/genre",
+            "https://plex.lan:32400/library/sections/1/genre",
+            "http://plex.lan:8080/library/sections/1/genre",
+            "http://user:pass@plex.lan:32400/library/sections/1/genre",
+        ] {
+            assert_eq!(
+                address.discovered_endpoint(key).expect("a valid reference"),
+                None,
+                "{key}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_discovered_key_that_escapes_the_configured_base_path_is_refused_too() {
+        // Same host, outside the prefix the operator put Plex behind. Whatever
+        // serves `/` on that host is not the server this client is bound to.
+        let address = ServerAddress::parse("https://home.example/pms").expect("a valid address");
+        assert_eq!(
+            address
+                .discovered_endpoint("https://home.example/library/sections/1/genre")
+                .expect("a valid reference"),
+            None
+        );
+    }
+
+    #[test]
+    fn a_protocol_relative_discovered_key_cannot_smuggle_a_host_either() {
+        // `//collector.example/x` is an origin change in two characters, and
+        // the leading-slash trim turns it into a path on this server instead.
+        let address = ServerAddress::parse("http://plex.lan:32400").expect("a valid address");
+        let url = address
+            .discovered_endpoint("//collector.example/x")
+            .expect("a valid reference")
+            .expect("resolved onto this server");
+        assert_eq!(url.host_str(), Some("plex.lan"));
     }
 
     #[test]

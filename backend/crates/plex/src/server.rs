@@ -26,13 +26,15 @@ mod container;
 mod credential;
 mod error;
 mod machine;
+mod redaction;
 mod token;
 
-pub use address::{AddressError, ServerAddress, redact_credentials};
+pub use address::{AddressError, ServerAddress};
 pub use binding::{BindingVerdict, verify_binding};
 pub use client::PlexServerClient;
 pub use error::ServerError;
 pub use machine::{MachineIdentifier, ServerIdentity};
+pub use redaction::redact_credentials;
 pub use token::ServerToken;
 
 pub(crate) use container::Container;

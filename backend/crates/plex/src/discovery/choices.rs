@@ -62,10 +62,16 @@ impl PlexServerClient {
     /// string and all, so nothing here reassembles a path from parts that could
     /// disagree with what the server said (P7).
     ///
+    /// It is also the one endpoint in this crate a *server* names, so it is the
+    /// one that has to be checked before it is requested: the request carries
+    /// this instance's `X-Plex-Token`, and an absolute key would point it off
+    /// this machine. `discovered_endpoint` is where that check lives.
+    ///
     /// # Errors
-    /// Returns [`ServerError::Transport`] when the server did not answer, and
+    /// Returns [`ServerError::Transport`] when the server did not answer,
     /// [`ServerError::Incomplete`] when the filter declared no choice endpoint
-    /// — a free-value filter has no list, which is not an empty one.
+    /// — a free-value filter has no list, which is not an empty one — and
+    /// [`ServerError::ForeignEndpoint`] when the key names another server.
     #[tracing::instrument(skip(self))]
     pub async fn filter_choices(
         &self,
@@ -75,7 +81,7 @@ impl PlexServerClient {
             call: "GET a filter's choice list",
             missing: "an endpoint to read the choices from",
         })?;
-        let url = self.endpoint(key, &[])?;
+        let url = self.discovered_endpoint(key)?;
         let body: ChoicesBody = self.container(Method::GET, &url, None).await?;
         Ok(body
             .directory
@@ -88,6 +94,20 @@ impl PlexServerClient {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A client bound to an address nothing is listening on: every test here
+    /// asserts a request was refused before it was sent, so a reachable server
+    /// would make the assertion pass for the wrong reason.
+    fn client() -> crate::server::PlexServerClient {
+        crate::server::PlexServerClient::new(
+            afisharr_sources::outbound::OutboundClient::new("afisharr/test")
+                .expect("the transport must build"),
+            crate::identity::ClientIdentity::new("01JABCDEF", "Living Room", "0.1.0")
+                .expect("a valid identity"),
+            crate::server::ServerAddress::parse("http://127.0.0.1:1").expect("a valid address"),
+            crate::server::ServerToken::new("plex-token").expect("a header-safe token"),
+        )
+    }
 
     fn choices(json: &str) -> Vec<FilterChoice> {
         let body: ChoicesBody = serde_json::from_str(json).expect("parses");
@@ -133,18 +153,36 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn a_filter_pointing_at_another_host_is_refused_before_the_token_is_sent() {
+        // The key is a string out of a response body, and this request carries
+        // the instance's `X-Plex-Token`. A server that answered with somebody
+        // else's URL — or anything that rewrote the answer on the way — would
+        // otherwise be handed the credential (D-032).
+        let client = client();
+        let filter = DiscoveredFilter {
+            filter: "genre".to_owned(),
+            filter_type: "string".to_owned(),
+            title: None,
+            key: Some("http://collector.example/library/sections/1/genre".to_owned()),
+        };
+        let error = client
+            .filter_choices(&filter)
+            .await
+            .expect_err("another host is not this server");
+        assert!(
+            matches!(error, ServerError::ForeignEndpoint { .. }),
+            "{error}"
+        );
+        assert!(!error.server_answered(), "no request was made");
+        assert!(error.to_string().contains("collector.example"), "{error}");
+    }
+
+    #[tokio::test]
     async fn a_free_value_filter_is_refused_before_a_request_is_made() {
         // `key: None` means the filter takes a typed value. Requesting `""`
         // would resolve to the server root and parse its answer as a choice
         // list, which is an empty vocabulary reported as a fact (P1).
-        let client = crate::server::PlexServerClient::new(
-            afisharr_sources::outbound::OutboundClient::new("afisharr/test")
-                .expect("the transport must build"),
-            crate::identity::ClientIdentity::new("01JABCDEF", "Living Room", "0.1.0")
-                .expect("a valid identity"),
-            crate::server::ServerAddress::parse("http://127.0.0.1:1").expect("a valid address"),
-            crate::server::ServerToken::new("plex-token").expect("a header-safe token"),
-        );
+        let client = client();
         let filter = DiscoveredFilter {
             filter: "year".to_owned(),
             filter_type: "integer".to_owned(),

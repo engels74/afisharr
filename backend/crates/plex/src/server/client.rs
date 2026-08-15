@@ -11,7 +11,7 @@ use url::Url;
 
 use crate::{
     identity::{ClientIdentity, PLEX_TOKEN},
-    server::{Container, ServerAddress, ServerError, ServerToken},
+    server::{Container, ServerAddress, ServerError, ServerToken, redact_credentials},
 };
 
 /// How long a call the connectivity check waits on may take.
@@ -93,11 +93,41 @@ impl PlexServerClient {
     ) -> Result<Url, ServerError> {
         self.address
             .endpoint(path, query)
-            .map_err(|source| ServerError::Address {
+            .map_err(|source| self.unusable_path(path, source))
+    }
+
+    /// Builds an endpoint URL from a `key` the *server* supplied.
+    ///
+    /// See [`ServerAddress::discovered_endpoint`] for what this refuses and
+    /// why. The refusal is a failure rather than a skipped call, because the
+    /// caller asked for the choices of one filter and there are none to report
+    /// — an empty list here would be an empty vocabulary presented as a fact
+    /// the server stated (P1).
+    ///
+    /// # Errors
+    /// Returns [`ServerError::ForeignEndpoint`] when the key does not land on
+    /// this server, and [`ServerError::Address`] when it is not a reference
+    /// this build can resolve at all.
+    pub(crate) fn discovered_endpoint(&self, key: &str) -> Result<Url, ServerError> {
+        self.address
+            .discovered_endpoint(key)
+            .map_err(|source| self.unusable_path(key, source))?
+            .ok_or_else(|| ServerError::ForeignEndpoint {
                 host: self.address.host().to_owned(),
-                path: path.to_owned(),
-                source,
+                // Redacted for the reason every other rendering of an address
+                // is: this string reaches the page and the logs, and a key that
+                // arrived as a whole URL can carry userinfo.
+                key: redact_credentials(key),
             })
+    }
+
+    /// Wraps a path that is not a reference this build can resolve.
+    fn unusable_path(&self, path: &str, source: url::ParseError) -> ServerError {
+        ServerError::Address {
+            host: self.address.host().to_owned(),
+            path: redact_credentials(path),
+            source,
+        }
     }
 
     /// Sends one request at the client's own deadline.
