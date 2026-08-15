@@ -1,0 +1,17 @@
+# SPDX-FileCopyrightText: 2026 Afisharr contributors
+# SPDX-License-Identifier: AGPL-3.0-or-later
+#
+# The reference client the fake is corrected against, pinned.
+#
+# `python-plexapi` is read here as *evidence* about a server nobody in this
+# repository controls: it was written against real Plex Media Servers by people
+# who were not in this room, and it fails on a wrong attribute name whether or
+# not anybody here suspected that name. An unpinned reference makes a lane that
+# goes red for a reason unrelated to this repository, and a lane like that gets
+# muted.
+#
+# Raising it is a deliberate change: read the diff of `plexapi/library.py`,
+# `plexapi/collection.py`, and `plexapi/media.py` before you do, because a new
+# attribute the reference started reading is a new claim about a real server
+# and the fake may owe it an answer.
+plexapi==4.18.2

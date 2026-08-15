@@ -66,7 +66,7 @@ pub(crate) async fn items(
     } else {
         search::select(&library.items, &arguments)
             .into_iter()
-            .map(|item| shape::item(item, detail))
+            .map(|item| shape::item(item, library, detail))
             .collect()
     };
 
@@ -113,7 +113,7 @@ pub(crate) async fn item(
             .items
             .iter()
             .find(|candidate| candidate.rating_key == key)
-            .map(|found| shape::item(found, detail));
+            .map(|found| shape::item(found, library, detail));
         return Ok(rendering.answer(container.children(row)));
     }
     if let Some(library) = world.library_of_collection(&key) {

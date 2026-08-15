@@ -6,7 +6,7 @@
 use crate::fake::{
     element::Element,
     shape::{Detail, media::media},
-    state::FakeItem,
+    state::{FakeItem, FakeLibrary},
 };
 
 /// What a real server calls a content row of this kind, in XML.
@@ -33,7 +33,12 @@ const fn is_container(kind: &str) -> bool {
 }
 
 /// One item, in the shape a content row takes.
-pub(crate) fn item(item: &FakeItem, detail: Detail) -> Element {
+///
+/// The `librarySection*` attributes are on the row as well as on the container
+/// it arrives in, because a client that reloads one item reads the row alone:
+/// the container's copy is lost, the item no longer knows its own section, and
+/// every call that starts from the section fails on a `None` (P1).
+pub(crate) fn item(item: &FakeItem, library: &FakeLibrary, detail: Detail) -> Element {
     let key = if is_container(&item.kind) {
         format!("/library/metadata/{}/children", item.rating_key)
     } else {
@@ -57,7 +62,13 @@ pub(crate) fn item(item: &FakeItem, detail: Detail) -> Element {
         )
         .number("addedAt", 1_700_000_000_i64)
         .number("updatedAt", 1_700_000_100_i64)
-        .text("thumb", item.thumb.clone());
+        .text("thumb", item.thumb.clone())
+        .text("librarySectionID", library.key.clone())
+        .text("librarySectionTitle", library.title.clone())
+        .text(
+            "librarySectionKey",
+            format!("/library/sections/{}", library.key),
+        );
 
     if item.sort_title_locked {
         row = row.child(
@@ -130,8 +141,14 @@ mod tests {
         }
     }
 
+    fn library() -> FakeLibrary {
+        crate::fake::library::World::build(&crate::fake::scenario::Scenario::behaving(1))
+            .libraries
+            .swap_remove(0)
+    }
+
     fn rendered(item_body: &FakeItem) -> serde_json::Value {
-        json::document(&item(item_body, Detail::PLAIN))
+        json::document(&item(item_body, &library(), Detail::PLAIN))
     }
 
     #[test]
@@ -190,13 +207,14 @@ mod tests {
     fn a_row_is_written_under_the_element_name_its_kind_takes() {
         // Two names for one row, and only in XML: a movie is `<Video>` and a
         // show is `<Directory>`, and both are `Metadata` in JSON.
-        let movie = xml::document(&item(&base(), Detail::PLAIN));
+        let movie = xml::document(&item(&base(), &library(), Detail::PLAIN));
         assert!(movie.contains("<Video "), "{movie}");
         let show = xml::document(&item(
             &FakeItem {
                 kind: "show".to_owned(),
                 ..base()
             },
+            &library(),
             Detail::PLAIN,
         ));
         assert!(show.contains("<Directory "), "{show}");

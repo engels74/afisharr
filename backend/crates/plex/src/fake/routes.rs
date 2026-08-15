@@ -41,6 +41,7 @@ pub(crate) fn router(running: Running) -> Router {
     Router::new()
         .route("/", get(root))
         .route("/identity", get(identity))
+        .route("/library", get(library))
         .route("/library/sections", get(sections))
         .route(
             "/library/sections/{key}/all",
@@ -179,6 +180,34 @@ async fn identity(
             .flag("claimed", true)
             .text("machineIdentifier", world.machine_identifier.clone())
             .text("version", world.version.clone()),
+    ))
+}
+
+/// `GET /library`: the index a client resolves the library from.
+///
+/// Not a call this crate's own client makes, and served all the same: a
+/// reference client asks for it before it asks for anything else
+/// (`plexapi/library.py:33`), and a fake that answered `404` here is a fake
+/// only one reader in the world can get past.
+async fn library(State(running): State<Running>, rendering: Rendering) -> Result<Answer, Response> {
+    if let Some(refusal) = running.gate(FakeOperation::Library).await {
+        return Err(refusal);
+    }
+    let world = running.world();
+    let entries = [
+        ("sections", "Library Sections"),
+        ("recentlyAdded", "Recently Added"),
+        ("onDeck", "On Deck"),
+    ];
+    Ok(rendering.answer(
+        shape::container()
+            .number("size", i64::try_from(entries.len()).unwrap_or(i64::MAX))
+            .text("title1", world.friendly_name.clone())
+            .children(entries.iter().map(|(key, title)| {
+                Element::named("Directory")
+                    .text("key", *key)
+                    .text("title", *title)
+            })),
     ))
 }
 

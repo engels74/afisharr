@@ -23,6 +23,8 @@ pub enum FakeOperation {
     Root,
     /// `GET /identity`.
     Identity,
+    /// `GET /library`: the index a client resolves the library from.
+    Library,
     /// `GET /library/sections`.
     Sections,
     /// `GET /library/sections/{key}/all`.

@@ -81,6 +81,13 @@ jobs:
       - uses: ./.github/actions/rust
         with:
           tools: nextest
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+      # The reference client reads the real server too. One that reads only the
+      # fake has proved the fake self-consistent and nothing else.
+      - name: install the pinned reference client
+        run: python -m pip install -r crates/plex/tests/reference/requirements.txt
       # The contract test against a real server is what keeps the adversarial
       # fake honest: the fake makes failures reproducible, and this makes the
       # fake truthful (D-036). It needs a real Plex server, and it says so
@@ -90,6 +97,7 @@ jobs:
         env:
           AFISHARR_PLEX_CONTRACT_URL: ${{ secrets.AFISHARR_PLEX_CONTRACT_URL }}
           AFISHARR_PLEX_CONTRACT_TOKEN: ${{ secrets.AFISHARR_PLEX_CONTRACT_TOKEN }}
+          AFISHARR_PLEX_REFERENCE_PYTHON: python
         run: |
           if [ -z "${AFISHARR_PLEX_CONTRACT_URL:-}" ] || [ -z "${AFISHARR_PLEX_CONTRACT_TOKEN:-}" ]; then
             echo "::error title=plex-matrix::No real Plex server is configured for the" \
@@ -102,7 +110,17 @@ jobs:
           # that printed only "contract test failed" would send whoever reads it
           # back to a server they may not have.
           cargo nextest run --package afisharr-plex --all-features \
-            --no-capture -E 'binary(contract)'
+            --no-capture -E 'binary(contract) + binary(reference)'
+      # The answers the real server gave, captured on every green run. A capture
+      # is what lets the fake be corrected without a server in hand, and what
+      # makes a later drift a diff rather than an argument.
+      - name: keep what the real server answered
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: plex-contract-capture
+          path: backend/crates/plex/tests/fixtures/real/
+          if-no-files-found: warn
 
   render-cache-bound:
     name: render-cache-bound

@@ -192,7 +192,7 @@ pub(crate) async fn collection_items(
                 .iter()
                 .find(|item| &item.rating_key == rating_key)
         })
-        .map(|item| shape::item(item, detail))
+        .map(|item| shape::item(item, library, detail))
         .collect();
     let total = ordered.len();
     let page: Vec<Element> = ordered
