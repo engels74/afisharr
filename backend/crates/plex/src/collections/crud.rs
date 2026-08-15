@@ -26,10 +26,13 @@ struct CollectionsBody {
 impl CollectionsBody {
     /// The rows, from whichever key this server's version used.
     ///
-    /// Plex answers the collection list under `Metadata` on current builds and
-    /// under `Directory` on older ones. Reading only one is a client that finds
-    /// no collections at all on the other, and reports the library as having
-    /// none — the empty-versus-unobserved conflation `I-SRC-1` forbids.
+    /// A collection is a `Directory` element in XML and a `Metadata` entry in
+    /// the JSON translation of the same answer. Which key a given server and a
+    /// given endpoint use is a fact this repository has no evidence for, and
+    /// the release-lane capture is what settles it; the earlier claim that the
+    /// two spellings were a server-version difference was not evidence, it was
+    /// a guess. Reading only one and finding nothing reports the library as
+    /// having no collections at all — the empty-versus-unobserved conflation `I-SRC-1` forbids.
     fn rows(self) -> Vec<CollectionBody> {
         if self.metadata.is_empty() {
             self.directory

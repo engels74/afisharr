@@ -5,7 +5,10 @@
 
 use serde::Deserialize;
 
-use crate::libraries::{RatingKey, SortTitle};
+use crate::{
+    libraries::{RatingKey, SortTitle},
+    wire::{Flag, StringOrNumber},
+};
 
 /// How Plex displays a collection in its library.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -110,49 +113,11 @@ pub(crate) struct CollectionBody {
     #[serde(default)]
     child_count: Option<StringOrNumber>,
     #[serde(default)]
-    smart: Option<StringOrNumber>,
+    smart: Flag,
     #[serde(default)]
     collection_mode: Option<StringOrNumber>,
     #[serde(default)]
     collection_sort: Option<StringOrNumber>,
-}
-
-/// A value Plex spells as a number in one version and a string in another.
-///
-/// Not defensive typing for its own sake: `childCount` arrives as `"12"` from
-/// some builds and `12` from others, and a client that accepts only one of them
-/// breaks on a server upgrade nobody here controls.
-#[derive(Debug, Deserialize)]
-#[serde(untagged)]
-pub(crate) enum StringOrNumber {
-    /// Spelled as a JSON number.
-    Number(i64),
-    /// Spelled as a JSON string.
-    Text(String),
-}
-
-impl StringOrNumber {
-    /// The value as an integer, or `None` when it is neither spelling.
-    pub(crate) fn as_i64(&self) -> Option<i64> {
-        match self {
-            Self::Number(value) => Some(*value),
-            Self::Text(text) => text.trim().parse().ok(),
-        }
-    }
-
-    /// The value as the text it was sent as.
-    ///
-    /// For the values that are *identifiers* rather than counts. A rating key
-    /// read through [`Self::as_i64`] and re-rendered would be normalised —
-    /// somebody else's opaque identifier rewritten by this build — and any
-    /// spelling that did not parse would come back as "absent", which for a hub
-    /// is the difference between a collection row and one of Plex's own (P4).
-    pub(crate) fn into_text(self) -> String {
-        match self {
-            Self::Number(value) => value.to_string(),
-            Self::Text(text) => text,
-        }
-    }
 }
 
 impl From<CollectionBody> for Collection {
@@ -172,10 +137,7 @@ impl From<CollectionBody> for Collection {
                 .child_count
                 .and_then(|value| value.as_i64())
                 .and_then(|value| u32::try_from(value).ok()),
-            smart: body
-                .smart
-                .and_then(|value| value.as_i64())
-                .is_some_and(|value| value != 0),
+            smart: body.smart.is_set(),
             mode: body
                 .collection_mode
                 .and_then(|value| value.as_i64())

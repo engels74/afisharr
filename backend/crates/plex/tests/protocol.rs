@@ -1,22 +1,24 @@
 // SPDX-FileCopyrightText: 2026 Afisharr contributors
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-//! Every call in Task 2.1's list, against a hand-rolled fixture response.
+//! Every read this build makes, against a hand-rolled fixture response.
 //!
 //! Two assertions per call, and both are needed. The request assertion says
-//! this client asks a real Plex the question it means to ask — the method, the
-//! path, and the argument shapes PRD §13.2.4 names. The response assertion says
-//! it reads what a real Plex answers. A test that only did the second would
-//! pass against a client that sent its filters to the wrong endpoint.
+//! this client asks a real Plex the question it means to ask -- the method, the
+//! path, and the argument shapes PRD section 13.2.4 names. The response
+//! assertion says it reads what a real Plex answers. A test that only did the
+//! second would pass against a client that sent its filters to the wrong
+//! endpoint.
+//!
+//! The write calls are next door, in `edits.rs`. Same fixture, same two
+//! assertions, split because a request that changes a library and one that
+//! reads it are different subjects and the file was over its limit.
 
 mod fixtures;
 
 use afisharr_plex::{
-    artwork::ArtworkUpload,
-    collections::{CollectionEdit, CollectionMode, MoveTarget, library_uri},
     discovery::DiscoveredFilter,
-    hubs::{HubIdentifier, HubMove, HubVisibility},
-    labels::LabelEdit,
+    hubs::HubKind,
     libraries::{
         FilterArgument, FilterOperator, ItemKind, ItemQuery, RatingKey, ScanState, SectionKey,
         Window,
@@ -27,10 +29,6 @@ use fixtures::FixtureServer;
 
 fn section() -> SectionKey {
     SectionKey::new("1")
-}
-
-fn server() -> MachineIdentifier {
-    MachineIdentifier::new("machine-abc")
 }
 
 #[tokio::test]
@@ -222,127 +220,17 @@ async fn one_items_media_facts_read_through_to_streams() {
 }
 
 #[tokio::test]
-async fn a_collection_is_created_against_the_named_server_and_its_items() {
-    let fixture = FixtureServer::answering(
-        r#"{"MediaContainer":{"size":1,"Metadata":[
-            {"ratingKey":"5001","type":"collection","title":"Best of 1979",
-             "childCount":"2","smart":"0"}]}}"#,
-    )
-    .await;
-
-    let created = fixture
-        .client()
-        .create_collection(
-            &section(),
-            ItemKind::Movie,
-            "Best of 1979",
-            &server(),
-            &[RatingKey::new("1001"), RatingKey::new("1002")],
-        )
-        .await
-        .expect("the fixture answers");
-
-    let request = fixture.only_request();
-    assert_eq!(request.method, "POST");
-    assert_eq!(request.path, "/library/collections");
-    assert_eq!(request.param("sectionId").as_deref(), Some("1"));
-    // The *members'* type, not the collection's: creation names what is going
-    // in, and the edit call below names the collection itself as type 18.
-    assert_eq!(request.param("type").as_deref(), Some("1"));
-    assert_eq!(
-        request.param("uri"),
-        library_uri(&server(), &[RatingKey::new("1001"), RatingKey::new("1002")])
-    );
-    assert_eq!(created.rating_key, RatingKey::new("5001"));
-    assert_eq!(created.child_count, Some(2));
-}
-
-#[tokio::test]
-async fn a_collection_edit_writes_the_sort_title_and_its_lock_together() {
-    let fixture = FixtureServer::answering(r#"{"MediaContainer":{"size":1}}"#).await;
-
-    fixture
-        .client()
-        .edit_collection(
-            &section(),
-            &RatingKey::new("5001"),
-            &CollectionEdit {
-                title: Some("Best of 1979".to_owned()),
-                sort_title: Some(("!001 Best of 1979".to_owned(), false)),
-                mode: Some(CollectionMode::HideItems),
-                ..CollectionEdit::default()
-            },
-        )
-        .await
-        .expect("the fixture answers");
-
-    let request = fixture.only_request();
-    assert_eq!(request.method, "PUT");
-    assert_eq!(request.path, "/library/sections/1/all");
-    assert_eq!(request.param("id").as_deref(), Some("5001"));
-    assert_eq!(request.param("type").as_deref(), Some("18"));
-    assert_eq!(
-        request.param("titleSort.value").as_deref(),
-        Some("!001 Best of 1979")
-    );
-    // The lock travels with the value in the same request (`I-REV-3`).
-    assert_eq!(request.param("titleSort.locked").as_deref(), Some("0"));
-    assert_eq!(request.param("collectionMode").as_deref(), Some("1"));
-}
-
-#[tokio::test]
-async fn collection_items_are_added_removed_and_reordered_by_their_own_endpoints() {
-    let add = FixtureServer::answering(r#"{"MediaContainer":{"size":1}}"#).await;
-    add.client()
-        .add_collection_items(
-            &RatingKey::new("5001"),
-            &server(),
-            &[RatingKey::new("1003")],
-        )
-        .await
-        .expect("the fixture answers");
-    let request = add.only_request();
-    assert_eq!(request.method, "PUT");
-    assert_eq!(request.path, "/library/collections/5001/items");
-    assert!(
-        request.param("uri").unwrap_or_default().ends_with("/1003"),
-        "{request:?}"
-    );
-
-    let remove = FixtureServer::answering(r#"{"MediaContainer":{"size":0}}"#).await;
-    remove
-        .client()
-        .remove_collection_item(&RatingKey::new("5001"), &RatingKey::new("1003"))
-        .await
-        .expect("the fixture answers");
-    let request = remove.only_request();
-    assert_eq!(request.method, "DELETE");
-    assert_eq!(request.path, "/library/collections/5001/items/1003");
-
-    let reorder = FixtureServer::answering(r#"{"MediaContainer":{"size":0}}"#).await;
-    reorder
-        .client()
-        .move_collection_item(
-            &RatingKey::new("5001"),
-            &RatingKey::new("1003"),
-            &MoveTarget::After(RatingKey::new("1001")),
-        )
-        .await
-        .expect("the fixture answers");
-    let request = reorder.only_request();
-    assert_eq!(request.method, "PUT");
-    assert_eq!(request.path, "/library/collections/5001/items/1003/move");
-    assert_eq!(request.param("after").as_deref(), Some("1001"));
-}
-
-#[tokio::test]
 async fn the_hub_list_tells_a_native_row_from_a_collection_row() {
+    // `identifier`, and `deletable` as the thing that tells the two apart. A
+    // reference client reads no rating key on this endpoint at all, so a build
+    // that classified on one would take every collection row out of the plan
+    // against a server that sends none.
     let fixture = FixtureServer::answering(
         r#"{"MediaContainer":{"size":2,"Hub":[
-            {"hubIdentifier":"home.continue","title":"Continue Watching",
-             "promotedToOwnHome":"1","promotedToSharedHome":"1"},
-            {"hubIdentifier":"collection.5001","title":"Best of 1979","ratingKey":"5001",
-             "promotedToOwnHome":"1","promotedToRecommended":"1"}]}}"#,
+            {"identifier":"home.continue","title":"Continue Watching","deletable":0,
+             "homeVisibility":"all","promotedToOwnHome":1,"promotedToSharedHome":1},
+            {"identifier":"custom.collection.1.5001","title":"Best of 1979","deletable":1,
+             "homeVisibility":"admin","promotedToOwnHome":1,"promotedToRecommended":1}]}}"#,
     )
     .await;
 
@@ -354,97 +242,10 @@ async fn the_hub_list_tells_a_native_row_from_a_collection_row() {
 
     assert_eq!(fixture.only_request().path, "/hubs/sections/1/manage");
     assert_eq!(listing.hubs.len(), 2);
-    assert!(
-        listing.hubs[0].rating_key.is_none(),
-        "a native row is an anchor"
-    );
-    assert_eq!(listing.hubs[1].rating_key, Some(RatingKey::new("5001")));
+    assert_eq!(listing.hubs[0].kind, HubKind::Native, "an anchor");
+    assert_eq!(listing.hubs[1].kind, HubKind::Collection);
+    assert!(listing.hubs[1].names_collection(&RatingKey::new("5001")));
     assert!(listing.hubs[1].visibility.recommended);
-}
-
-#[tokio::test]
-async fn a_hub_is_repositioned_and_its_three_visibility_axes_written_separately() {
-    let moved = FixtureServer::answering(r#"{"MediaContainer":{"size":0}}"#).await;
-    moved
-        .client()
-        .move_hub(
-            &section(),
-            &HubIdentifier::new("collection.5001"),
-            &HubMove::After(HubIdentifier::new("home.continue")),
-        )
-        .await
-        .expect("the fixture answers");
-    let request = moved.only_request();
-    assert_eq!(request.method, "PUT");
-    assert_eq!(request.path, "/hubs/sections/1/manage/collection.5001/move");
-    assert_eq!(request.param("after").as_deref(), Some("home.continue"));
-
-    let visibility = FixtureServer::answering(r#"{"MediaContainer":{"size":1}}"#).await;
-    visibility
-        .client()
-        .set_hub_visibility(
-            &section(),
-            &HubIdentifier::new("collection.5001"),
-            HubVisibility {
-                own_home: true,
-                shared_home: false,
-                recommended: true,
-            },
-        )
-        .await
-        .expect("the fixture answers");
-    let request = visibility.only_request();
-    assert_eq!(request.path, "/hubs/sections/1/manage/collection.5001");
-    assert_eq!(request.param("promotedToOwnHome").as_deref(), Some("1"));
-    assert_eq!(request.param("promotedToSharedHome").as_deref(), Some("0"));
-    assert_eq!(request.param("promotedToRecommended").as_deref(), Some("1"));
-}
-
-#[tokio::test]
-async fn a_label_edit_adds_and_removes_in_one_request_and_leaves_the_field_unlocked() {
-    let fixture = FixtureServer::answering(r#"{"MediaContainer":{"size":1}}"#).await;
-
-    fixture
-        .client()
-        .edit_labels(
-            &section(),
-            ItemKind::Movie,
-            &RatingKey::new("1001"),
-            &LabelEdit {
-                add: vec!["afisharr".to_owned()],
-                remove: vec!["old".to_owned()],
-            },
-        )
-        .await
-        .expect("the fixture answers");
-
-    let request = fixture.only_request();
-    assert_eq!(request.method, "PUT");
-    assert_eq!(request.path, "/library/sections/1/all");
-    assert_eq!(
-        request.param("label[0].tag.tag").as_deref(),
-        Some("afisharr")
-    );
-    assert_eq!(request.param("label[].tag.tag-").as_deref(), Some("old"));
-    assert_eq!(request.param("label.locked").as_deref(), Some("0"));
-}
-
-#[tokio::test]
-async fn a_poster_is_uploaded_as_bytes_under_its_own_declared_type() {
-    let fixture = FixtureServer::answering(r#"{"MediaContainer":{"size":1}}"#).await;
-
-    let bytes = vec![0x89, b'P', b'N', b'G', 0x0d, 0x0a, 0x1a, 0x0a];
-    fixture
-        .client()
-        .upload_poster(&RatingKey::new("1001"), ArtworkUpload::png(bytes.clone()))
-        .await
-        .expect("the fixture answers");
-
-    let request = fixture.only_request();
-    assert_eq!(request.method, "POST");
-    assert_eq!(request.path, "/library/metadata/1001/posters");
-    assert_eq!(request.content_type.as_deref(), Some("image/png"));
-    assert_eq!(request.body_len, bytes.len());
 }
 
 #[tokio::test]
@@ -469,6 +270,10 @@ async fn discovery_reads_the_servers_own_fields_operators_and_choices() {
     let request = vocabulary_fixture.only_request();
     assert_eq!(request.path, "/library/sections/1/all");
     assert_eq!(request.param("includeMeta").as_deref(), Some("1"));
+    // And the advanced half: without it a real server answers a short `Meta`
+    // with no field list and no operator table, and this client would discover
+    // half a vocabulary without knowing it.
+    assert_eq!(request.param("includeAdvanced").as_deref(), Some("1"));
     // Zero items: the vocabulary rides alongside a result set nobody wants, and
     // fetching a library to read a field list would put `I-PERF-1` at risk.
     assert_eq!(request.param("X-Plex-Container-Size").as_deref(), Some("0"));
@@ -559,19 +364,6 @@ async fn a_collections_own_items_are_read_in_the_order_the_server_holds_them() {
             .collect::<Vec<_>>(),
         ["1002", "1001"]
     );
-}
-
-#[tokio::test]
-async fn a_collection_is_deleted_by_its_own_key() {
-    let fixture = FixtureServer::answering(r#"{"MediaContainer":{"size":0}}"#).await;
-    fixture
-        .client()
-        .delete_collection(&RatingKey::new("5001"))
-        .await
-        .expect("the fixture answers");
-    let request = fixture.only_request();
-    assert_eq!(request.method, "DELETE");
-    assert_eq!(request.path, "/library/collections/5001");
 }
 
 #[tokio::test]

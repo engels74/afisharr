@@ -6,7 +6,10 @@
 use afisharr_sources::outbound::Method;
 use serde::Deserialize;
 
-use crate::server::{PlexServerClient, ServerError};
+use crate::{
+    server::{PlexServerClient, ServerError},
+    wire::Flag,
+};
 
 /// A Plex section key.
 ///
@@ -95,10 +98,16 @@ pub struct LibrarySection {
     pub title: String,
     /// The metadata agent, when reported.
     pub agent: Option<String>,
+    /// The scanner Plex used to build it, when reported.
+    pub scanner: Option<String>,
     /// The library's language, when reported.
     pub language: Option<String>,
     /// When Plex last finished scanning it, in epoch seconds.
     pub scanned_at: Option<i64>,
+    /// When the library was created, in epoch seconds.
+    pub created_at: Option<i64>,
+    /// When the library was last updated, in epoch seconds.
+    pub updated_at: Option<i64>,
     /// Whether Plex is scanning it right now.
     ///
     /// A pass that read an item count while this is true read a count that is
@@ -126,11 +135,17 @@ struct SectionBody {
     #[serde(default)]
     agent: Option<String>,
     #[serde(default)]
+    scanner: Option<String>,
+    #[serde(default)]
     language: Option<String>,
     #[serde(default)]
     scanned_at: Option<i64>,
     #[serde(default)]
-    refreshing: bool,
+    created_at: Option<i64>,
+    #[serde(default)]
+    updated_at: Option<i64>,
+    #[serde(default)]
+    refreshing: Flag,
 }
 
 impl From<SectionBody> for LibrarySection {
@@ -141,9 +156,12 @@ impl From<SectionBody> for LibrarySection {
             kind: LibraryKind::from_plex(&body.kind),
             title: body.title,
             agent: body.agent.filter(|value| !value.is_empty()),
+            scanner: body.scanner.filter(|value| !value.is_empty()),
             language: body.language.filter(|value| !value.is_empty()),
             scanned_at: body.scanned_at,
-            refreshing: body.refreshing,
+            created_at: body.created_at,
+            updated_at: body.updated_at,
+            refreshing: body.refreshing.is_set(),
         }
     }
 }
@@ -173,8 +191,9 @@ mod tests {
     const FIXTURE: &str = r#"{
       "Directory": [
         {"key":"1","uuid":"sec-uuid-1","type":"movie","title":"Movies",
-         "agent":"tv.plex.agents.movie","language":"en-US","scannedAt":1758000000},
-        {"key":"2","type":"show","title":"TV","refreshing":true},
+         "agent":"tv.plex.agents.movie","scanner":"Plex Movie","language":"en-US",
+         "scannedAt":1758000000,"createdAt":1690000000,"updatedAt":1700000000},
+        {"key":"2","type":"show","title":"TV","refreshing":"1"},
         {"key":"3","type":"artist","title":"Music"},
         {"key":"9","type":"holograms","title":"Something New"}
       ]
@@ -195,7 +214,10 @@ mod tests {
         assert_eq!(movies.uuid.as_deref(), Some("sec-uuid-1"));
         assert_eq!(movies.kind, LibraryKind::Movie);
         assert_eq!(movies.agent.as_deref(), Some("tv.plex.agents.movie"));
+        assert_eq!(movies.scanner.as_deref(), Some("Plex Movie"));
         assert_eq!(movies.scanned_at, Some(1_758_000_000));
+        assert_eq!(movies.created_at, Some(1_690_000_000));
+        assert_eq!(movies.updated_at, Some(1_700_000_000));
         assert!(!movies.refreshing);
     }
 
@@ -207,7 +229,9 @@ mod tests {
     }
 
     #[test]
-    fn a_scanning_section_says_so() {
+    fn a_scanning_section_says_so_in_whichever_spelling_it_uses() {
+        // `"1"` on the wire, because every one of these is an XML attribute
+        // underneath. A strict `bool` failed the whole section list.
         assert!(sections()[1].refreshing);
     }
 

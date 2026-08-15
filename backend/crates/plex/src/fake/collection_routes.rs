@@ -4,53 +4,98 @@
 //! The calls that read and write collections.
 
 use axum::{
-    Json,
-    extract::{Path, Query, State},
+    extract::{Path, State},
+    http::StatusCode,
     response::Response,
 };
-use serde_json::{Value, json};
 
 use crate::fake::{
-    json as shape,
+    element::Element,
+    negotiation::{Answer, Rendering},
     plan::FakeOperation,
-    routes::{Params, Running, window},
-    state::{FakeCollection, FakeHub},
+    request::{Arguments, Paging},
+    routes::Running,
+    shape,
+    state::FakeCollection,
+    vocabulary,
 };
 
 /// `GET /library/sections/{key}/collections`.
+///
+/// Answers `includeMeta=1` as well as `/all` does, because a client loads half
+/// its filter vocabulary from here (`plexapi/library.py:890-899`): this is
+/// where the `collection` libtype's filters come from, and a client that got no
+/// `Meta` here could not filter collections at all.
 pub(crate) async fn collections(
     State(running): State<Running>,
     Path(key): Path<String>,
-) -> Result<Json<Value>, Response> {
-    if let Some(refusal) = running.gate(FakeOperation::Collections).await {
+    rendering: Rendering,
+    arguments: Arguments,
+    paging: Paging,
+) -> Result<Answer, Response> {
+    let describing = arguments.flag("includeMeta");
+    let operation = if describing {
+        FakeOperation::Vocabulary
+    } else {
+        FakeOperation::Collections
+    };
+    if let Some(refusal) = running.gate(operation).await {
         return Err(refusal);
     }
     let mut world = running.world();
     let Some(library) = world.library(&key) else {
-        return Ok(Json(shape::container(&json!({ "size": 0 }))));
+        return Err(rendering.refusal(StatusCode::NOT_FOUND, 1000, "Not Found"));
     };
-    let metadata: Vec<Value> = library.collections.iter().map(shape::collection).collect();
-    Ok(Json(shape::container(&json!({
-        "size": metadata.len(),
-        "Metadata": metadata,
-    }))))
+    let rows: Vec<Element> = library
+        .collections
+        .iter()
+        .map(|collection| shape::collection(collection, library))
+        .collect();
+    let total = rows.len();
+    let page: Vec<Element> = rows
+        .into_iter()
+        .skip(paging.start)
+        .take(paging.size)
+        .collect();
+    let mut container = shape::library_container(library)
+        .number("size", i64::try_from(page.len()).unwrap_or(i64::MAX))
+        .number("totalSize", i64::try_from(total).unwrap_or(i64::MAX))
+        .text("title1", library.title.clone())
+        .text("viewGroup", "collection");
+    if describing {
+        container = container.child(vocabulary::describe(
+            &key,
+            &["collection"],
+            arguments.flag("includeAdvanced"),
+        ));
+    }
+    Ok(rendering.answer(container.children(page)))
 }
 
 /// `POST /library/collections`.
+///
+/// The created collection is in the library and *not* in the ordering space: a
+/// real server answers no manage row for a collection nothing has promoted
+/// (`plexapi/collection.py:207-215`). The row this used to push made a broken
+/// promotion path pass, because `set_hub_visibility` found a row to write that
+/// a real server would not have had.
 pub(crate) async fn create_collection(
     State(running): State<Running>,
-    Query(params): Query<Params>,
-) -> Result<Json<Value>, Response> {
+    rendering: Rendering,
+    arguments: Arguments,
+) -> Result<Answer, Response> {
     if let Some(refusal) = running.gate(FakeOperation::CreateCollection).await {
         return Err(refusal);
     }
-    let title = params.get("title").cloned().unwrap_or_default();
-    let section = params.get("sectionId").cloned().unwrap_or_default();
-    let items = rating_keys(params.get("uri").map(String::as_str));
+    let title = arguments.first("title").unwrap_or_default().to_owned();
+    let section = arguments.first("sectionId").unwrap_or_default().to_owned();
+    let items = rating_keys(arguments.first("uri"));
+    let smart = arguments.first("smart").is_some_and(|value| value != "0");
+    let budget = running.move_budget();
 
     let mut world = running.world();
     let Some(library) = world.library(&section) else {
-        return Ok(Json(shape::container(&json!({ "size": 0 }))));
+        return Err(rendering.refusal(StatusCode::NOT_FOUND, 1000, "Not Found"));
     };
     // Derived from the count, then advanced past anything that already holds
     // it: a create/delete/create run would otherwise mint a key a live
@@ -69,40 +114,32 @@ pub(crate) async fn create_collection(
         title,
         sort_title: None,
         sort_title_locked: false,
+        summary: None,
+        subtype: library.kind.clone(),
+        mode: -1,
+        // Release order, which is where a real server starts one
+        // (`plexapi/collection.py:73`). Custom order is a thing Afisharr must
+        // switch on, and a fake that started there tests nothing.
+        sort: 0,
+        smart,
         items,
+        moves_left: budget,
     };
-    let body = shape::collection(&collection);
-    // And into the ordering space, because on a real server it is there the
-    // moment it exists: `/hubs/sections/{key}/manage` lists every collection in
-    // the library, promoted or not. `delete_collection` already takes the row
-    // out again, and a create that did not put one in left the two halves
-    // disagreeing — a collection created through the client never appeared in
-    // the hub list, so `set_hub_visibility` and `move_hub` against it fell
-    // through their lookups and answered 200 having changed nothing. A broken
-    // promotion path passes against a fake like that.
-    //
-    // Hidden on all three surfaces, which is what a new collection is: in the
-    // space to be ordered, on nobody's home screen until something promotes it.
-    library.hubs.push(FakeHub {
-        identifier: format!("collection.{}", collection.rating_key),
-        title: collection.title.clone(),
-        rating_key: Some(collection.rating_key.clone()),
-        own_home: false,
-        shared_home: false,
-        recommended: false,
-    });
+    let body = shape::collection(&collection, library);
     library.collections.push(collection);
-    Ok(Json(shape::container(&json!({
-        "size": 1,
-        "Metadata": [body],
-    }))))
+    Ok(rendering.answer(
+        shape::library_container(library)
+            .number("size", 1_i64)
+            .child(body),
+    ))
 }
 
-/// `DELETE /library/collections/{key}`.
+/// `DELETE /library/collections/{key}` and `DELETE /library/metadata/{key}`.
 pub(crate) async fn delete_collection(
     State(running): State<Running>,
     Path(key): Path<String>,
-) -> Result<Json<Value>, Response> {
+    rendering: Rendering,
+) -> Result<Answer, Response> {
     if let Some(refusal) = running.gate(FakeOperation::DeleteCollection).await {
         return Err(refusal);
     }
@@ -111,37 +148,42 @@ pub(crate) async fn delete_collection(
         library
             .collections
             .retain(|collection| collection.rating_key != key);
+        // And out of the ordering space, if something had promoted it there.
         library
             .hubs
             .retain(|hub| hub.rating_key.as_deref() != Some(key.as_str()));
     }
-    Ok(Json(shape::container(&json!({ "size": 0 }))))
+    Ok(rendering.answer(shape::container()))
 }
 
-/// `GET /library/collections/{key}/children`.
+/// `GET /library/collections/{key}/children` and
+/// `GET /library/metadata/{key}/children`.
 pub(crate) async fn collection_items(
     State(running): State<Running>,
     Path(key): Path<String>,
-    Query(params): Query<Params>,
-) -> Result<Json<Value>, Response> {
+    rendering: Rendering,
+    arguments: Arguments,
+    paging: Paging,
+) -> Result<Answer, Response> {
     if let Some(refusal) = running.gate(FakeOperation::CollectionItems).await {
         return Err(refusal);
     }
+    let detail = running.detail(&arguments);
     let mut world = running.world();
     let Some(library) = world.library_of_collection(&key) else {
-        return Ok(Json(shape::container(&json!({ "size": 0 }))));
+        return Err(rendering.refusal(StatusCode::NOT_FOUND, 1000, "Not Found"));
     };
     let Some(collection) = library
         .collections
         .iter()
         .find(|candidate| candidate.rating_key == key)
     else {
-        return Ok(Json(shape::container(&json!({ "size": 0 }))));
+        return Err(rendering.refusal(StatusCode::NOT_FOUND, 1000, "Not Found"));
     };
     // Read in the collection's own order, which is the order a verification
     // read has to see: an answer sorted by anything else would hide exactly the
     // no-op move §15.3 describes.
-    let ordered: Vec<Value> = collection
+    let ordered: Vec<Element> = collection
         .items
         .iter()
         .filter_map(|rating_key| {
@@ -150,67 +192,69 @@ pub(crate) async fn collection_items(
                 .iter()
                 .find(|item| &item.rating_key == rating_key)
         })
-        .map(shape::item)
+        .map(|item| shape::item(item, detail))
         .collect();
     let total = ordered.len();
-    let (start, size) = window(&params);
-    let page: Vec<Value> = ordered.into_iter().skip(start).take(size).collect();
-    Ok(Json(shape::container(&json!({
-        "size": page.len(),
-        "totalSize": total,
-        "Metadata": page,
-    }))))
+    let page: Vec<Element> = ordered
+        .into_iter()
+        .skip(paging.start)
+        .take(paging.size)
+        .collect();
+    Ok(rendering.answer(
+        shape::library_container(library)
+            .number("size", i64::try_from(page.len()).unwrap_or(i64::MAX))
+            .number("totalSize", i64::try_from(total).unwrap_or(i64::MAX))
+            .text("title2", collection.title.clone())
+            .children(page),
+    ))
 }
 
-/// `PUT /library/collections/{key}/items`.
+/// `PUT /library/collections/{key}/items` and `PUT /library/metadata/{key}/items`.
 pub(crate) async fn add_items(
     State(running): State<Running>,
     Path(key): Path<String>,
-    Query(params): Query<Params>,
-) -> Result<Json<Value>, Response> {
+    rendering: Rendering,
+    arguments: Arguments,
+) -> Result<Answer, Response> {
     if let Some(refusal) = running.gate(FakeOperation::AddCollectionItems).await {
         return Err(refusal);
     }
-    let adding = rating_keys(params.get("uri").map(String::as_str));
+    let adding = rating_keys(arguments.first("uri"));
     let mut world = running.world();
     let Some(library) = world.library_of_collection(&key) else {
-        return Ok(Json(shape::container(&json!({ "size": 0 }))));
+        return Err(rendering.refusal(StatusCode::NOT_FOUND, 1000, "Not Found"));
     };
-    if let Some(collection) = library
-        .collections
-        .iter_mut()
-        .find(|candidate| candidate.rating_key == key)
-    {
+    let mut added = 0_i64;
+    if let Some(collection) = library.collection(&key) {
         for rating_key in adding {
             if !collection.items.contains(&rating_key) {
                 collection.items.push(rating_key);
+                added += 1;
             }
         }
     }
-    Ok(Json(shape::container(&json!({ "size": 1 }))))
+    Ok(rendering.answer(shape::container().number("size", added)))
 }
 
-/// `DELETE /library/collections/{key}/items/{item}`.
+/// `DELETE /library/collections/{key}/items/{item}` and its metadata twin.
 pub(crate) async fn remove_item(
     State(running): State<Running>,
     Path((key, item)): Path<(String, String)>,
-) -> Result<Json<Value>, Response> {
+    rendering: Rendering,
+) -> Result<Answer, Response> {
     if let Some(refusal) = running.gate(FakeOperation::RemoveCollectionItem).await {
         return Err(refusal);
     }
     let mut world = running.world();
     if let Some(library) = world.library_of_collection(&key)
-        && let Some(collection) = library
-            .collections
-            .iter_mut()
-            .find(|candidate| candidate.rating_key == key)
+        && let Some(collection) = library.collection(&key)
     {
         collection.items.retain(|candidate| candidate != &item);
     }
-    Ok(Json(shape::container(&json!({ "size": 0 }))))
+    Ok(rendering.answer(shape::container()))
 }
 
-/// `PUT /library/collections/{key}/items/{item}/move`.
+/// `PUT /library/collections/{key}/items/{item}/move` and its metadata twin.
 ///
 /// Answers 200 whether or not the order changed. That is the misbehaviour, not
 /// an oversight: past the precision budget a real server reports success and
@@ -219,17 +263,18 @@ pub(crate) async fn remove_item(
 pub(crate) async fn move_item(
     State(running): State<Running>,
     Path((key, item)): Path<(String, String)>,
-    Query(params): Query<Params>,
-) -> Result<Json<Value>, Response> {
+    rendering: Rendering,
+    arguments: Arguments,
+) -> Result<Answer, Response> {
     if let Some(refusal) = running.gate(FakeOperation::MoveCollectionItem).await {
         return Err(refusal);
     }
-    let after = params.get("after").cloned();
+    let after = arguments.first("after").map(str::to_owned);
     let mut world = running.world();
     if let Some(library) = world.library_of_collection(&key) {
         library.move_collection_item(&key, &item, after.as_deref());
     }
-    Ok(Json(shape::container(&json!({ "size": 0 }))))
+    Ok(rendering.answer(shape::container()))
 }
 
 /// The rating keys named by a `server://…` URI.

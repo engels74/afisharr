@@ -1,15 +1,29 @@
 // SPDX-FileCopyrightText: 2026 Afisharr contributors
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-//! The world the fake serves, and the ways it can be made to misbehave.
+//! The world the fake serves.
+//!
+//! The data only. What the world *does* when a move is asked for lives in
+//! [`crate::fake::ordering`], because the precision budget is a behaviour with
+//! its own tests rather than a field with a getter.
 
 /// One item in the fake's library.
+//
+// The lint's usual remedy — collapse the flags into a state enum — is what this
+// type exists to refuse: each flag is an independent fact a scenario sets on
+// its own, and §15.6 turns on exactly that independence.
+#[allow(clippy::struct_excessive_bools)]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FakeItem {
     /// The key Plex currently answers with. Churns (`I-ID-1`).
     pub rating_key: String,
     /// The identity that survives churn — what the item actually is.
     pub guid: String,
+    /// The external ids Plex reports alongside the primary guid.
+    ///
+    /// A separate list because they are separate facts: the primary guid is
+    /// Plex's own, and these are the provider ids the resolver matches on.
+    pub external_guids: Vec<String>,
     /// `movie`, `show`, and so on.
     pub kind: String,
     /// The title.
@@ -21,6 +35,12 @@ pub struct FakeItem {
     pub sort_title_locked: bool,
     /// The release year.
     pub year: Option<i32>,
+    /// The season or episode number, when the kind has one.
+    pub index: Option<i32>,
+    /// The parent's key — the show for a season, the season for an episode.
+    pub parent_rating_key: Option<String>,
+    /// The civil release date, as Plex spells it.
+    pub originally_available_at: Option<String>,
     /// The poster reference, in whatever format this scenario chose.
     pub thumb: String,
     /// Whether Plex has finished indexing it. `false` is the partial scan
@@ -28,8 +48,16 @@ pub struct FakeItem {
     pub indexed: bool,
     /// Whether the item has a media file this scenario reports.
     pub has_media: bool,
+    /// The genre tags on it, which the filter arguments match against.
+    pub genres: Vec<String>,
     /// The labels on it.
     pub labels: Vec<String>,
+    /// Whether Plex's metadata lock is set on the label field.
+    ///
+    /// Written by every tag edit that names it (`plexapi/mixins/edit.py:328`).
+    /// A field left locked is the `I-REV-3` failure on the one field the
+    /// operator touches daily, so the fake has to be able to show it.
+    pub labels_locked: bool,
 }
 
 /// One collection in the fake's library.
@@ -43,11 +71,39 @@ pub struct FakeCollection {
     pub sort_title: Option<String>,
     /// Whether the sort title is locked.
     pub sort_title_locked: bool,
+    /// The summary, absent until something writes one.
+    pub summary: Option<String>,
+    /// The libtype of the items in it, which Plex reports as `subtype`.
+    pub subtype: String,
+    /// Plex's `collectionMode`. `-1` is the library default.
+    pub mode: i32,
+    /// Plex's `collectionSort`. `0` on a new collection — release order — and
+    /// custom order is `2`, which is a thing something has to switch on
+    /// (`plexapi/collection.py:73`).
+    pub sort: i32,
+    /// Whether Plex maintains it from a filter rather than from a list.
+    ///
+    /// A smart collection refuses item edits (`plexapi/collection.py:317`),
+    /// which is a refusal nothing could reach while the fake had no way to
+    /// mark one.
+    pub smart: bool,
     /// The rating keys it holds, in order.
     pub items: Vec<String>,
+    /// How many moves this collection accepts before they silently no-op.
+    ///
+    /// Its own budget, not the library's: one counter across every sequence
+    /// made a per-collection budget untestable, and an escalation-ladder test
+    /// ambiguous about which sequence ran out (§15.3).
+    pub moves_left: u32,
 }
 
 /// One row in the fake's ordering space.
+//
+// Four independent facts a real server reports separately: whether the row can
+// leave the space, and its three visibility axes. §15.5 exists because the
+// three are independent, so an enum over them would be a vocabulary Afisharr
+// invented on top of somebody else's.
+#[allow(clippy::struct_excessive_bools)]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FakeHub {
     /// Plex's identifier for the row.
@@ -56,15 +112,41 @@ pub struct FakeHub {
     pub title: String,
     /// The collection behind it, or `None` for one of Plex's own rows.
     ///
-    /// A native row cannot be unpromoted, which is what makes it an anchor
-    /// rather than a participant (§15.1).
+    /// Known to the fake and never sent: `python-plexapi`'s `ManagedHub` reads
+    /// no rating key here (`plexapi/library.py:3033-3046`), so this build has
+    /// no evidence a real server puts one in the answer. What the answer says
+    /// instead is `deletable`.
     pub rating_key: Option<String>,
+    /// Whether the row can be removed from the ordering space.
+    ///
+    /// How a real server says one of its own rows is an anchor
+    /// (`plexapi/library.py:3035`), and the fact §15.1 rests on.
+    pub deletable: bool,
     /// Visible on the owner's home screen.
     pub own_home: bool,
     /// Visible on shared users' home screens.
     pub shared_home: bool,
     /// Visible on the library's recommended row.
     pub recommended: bool,
+}
+
+impl FakeHub {
+    /// How a real server spells the home-screen visibility of this row.
+    #[must_use]
+    pub(crate) const fn home_visibility(&self) -> &'static str {
+        match (self.own_home, self.shared_home) {
+            (true, true) => "all",
+            (true, false) => "admin",
+            (false, true) => "shared",
+            (false, false) => "none",
+        }
+    }
+
+    /// How a real server spells the recommended-row visibility of this row.
+    #[must_use]
+    pub(crate) const fn recommendations_visibility(&self) -> &'static str {
+        if self.recommended { "all" } else { "none" }
+    }
 }
 
 /// One library in the fake.
@@ -78,241 +160,32 @@ pub struct FakeLibrary {
     pub kind: String,
     /// The title.
     pub title: String,
+    /// The scanner Plex reports for it.
+    pub scanner: String,
+    /// The folders the library is built from.
+    pub locations: Vec<String>,
     /// The items in it, in the order they are listed.
     pub items: Vec<FakeItem>,
     /// The collections in it.
     pub collections: Vec<FakeCollection>,
     /// The ordering space, in order.
     pub hubs: Vec<FakeHub>,
-    /// How many moves this surface has left before they silently no-op.
-    ///
-    /// The precision budget §15.3 describes, counted down rather than modelled
-    /// as midpoint arithmetic: the observable behaviour is what a test needs,
-    /// and the arithmetic is Plex's business.
-    pub moves_left: u32,
+    /// How many hub moves this library accepts before they silently no-op.
+    pub hub_moves_left: u32,
 }
 
 impl FakeLibrary {
-    /// Moves a hub after another, honouring the precision budget.
-    ///
-    /// Returns `true` when the order actually changed. Either way the caller
-    /// answers 200 — that is the whole misbehaviour: past the budget Plex
-    /// reports success and leaves the order alone, and only a verification read
-    /// can tell the difference (`I-CONV-*`, §15.3).
-    pub fn move_hub(&mut self, identifier: &str, after: Option<&str>) -> bool {
-        let Some(from) = self
-            .hubs
-            .iter()
-            .position(|hub| hub.identifier == identifier)
-        else {
-            return false;
-        };
-        // The predecessor is resolved against the space as it stands, before the
-        // removal, and a predecessor that is not a row in it is a refusal rather
-        // than an append. Looked up afterwards, `map_or(len)` read "not found"
-        // as "put it last" — so a row naming *itself* as its predecessor, or one
-        // naming a row that has since gone, teleported to the tail, spent a move
-        // from the budget, and answered 200. A verification read then sees an
-        // order nobody asked for, which is a different failure from the silent
-        // no-op §15.3 is about and would be mistaken for it.
-        let target = match after {
-            None => None,
-            Some(after) => {
-                match self
-                    .hubs
-                    .iter()
-                    .position(|other| other.identifier == after)
-                {
-                    None => return false,
-                    Some(index) if index == from => return false,
-                    Some(index) => Some(index),
-                }
-            }
-        };
-        if self.moves_left == 0 {
-            return false;
-        }
-        let hub = self.hubs.remove(from);
-        let to = match target {
-            None => 0,
-            // The predecessor's index shifts down by one when the row being
-            // moved sat in front of it, and does not when it sat behind.
-            Some(index) if index > from => index,
-            Some(index) => index + 1,
-        };
-        self.hubs.insert(to, hub);
-        self.moves_left -= 1;
-        true
-    }
-
-    /// Moves an item inside a collection, honouring the same budget.
-    pub fn move_collection_item(
-        &mut self,
-        collection: &str,
-        item: &str,
-        after: Option<&str>,
-    ) -> bool {
-        let budget = self.moves_left;
-        let Some(collection) = self
-            .collections
+    /// The collection with this key.
+    pub(crate) fn collection(&mut self, rating_key: &str) -> Option<&mut FakeCollection> {
+        self.collections
             .iter_mut()
-            .find(|candidate| candidate.rating_key == collection)
-        else {
-            return false;
-        };
-        let Some(from) = collection.items.iter().position(|key| key == item) else {
-            return false;
-        };
-        // Resolved before the removal, and refused when it names nothing in the
-        // collection or names the item being moved — see `move_hub` for what
-        // the append-on-miss it replaces did to a verification read.
-        let target = match after {
-            None => None,
-            Some(after) => match collection.items.iter().position(|other| other == after) {
-                None => return false,
-                Some(index) if index == from => return false,
-                Some(index) => Some(index),
-            },
-        };
-        if budget == 0 {
-            return false;
-        }
-        let key = collection.items.remove(from);
-        let to = match target {
-            None => 0,
-            Some(index) if index > from => index,
-            Some(index) => index + 1,
-        };
-        collection.items.insert(to, key);
-        self.moves_left -= 1;
-        true
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn hub(identifier: &str) -> FakeHub {
-        FakeHub {
-            identifier: identifier.to_owned(),
-            title: identifier.to_owned(),
-            rating_key: None,
-            own_home: true,
-            shared_home: false,
-            recommended: false,
-        }
+            .find(|candidate| candidate.rating_key == rating_key)
     }
 
-    fn library(moves_left: u32) -> FakeLibrary {
-        FakeLibrary {
-            key: "1".to_owned(),
-            uuid: "uuid-1".to_owned(),
-            kind: "movie".to_owned(),
-            title: "Movies".to_owned(),
-            items: Vec::new(),
-            collections: vec![FakeCollection {
-                rating_key: "5001".to_owned(),
-                title: "Best".to_owned(),
-                sort_title: None,
-                sort_title_locked: false,
-                items: vec!["1".to_owned(), "2".to_owned(), "3".to_owned()],
-            }],
-            hubs: vec![hub("a"), hub("b"), hub("c")],
-            moves_left,
-        }
-    }
-
-    fn order(library: &FakeLibrary) -> Vec<&str> {
-        library
-            .hubs
-            .iter()
-            .map(|hub| hub.identifier.as_str())
-            .collect()
-    }
-
-    #[test]
-    fn a_move_within_budget_changes_the_order() {
-        let mut library = library(10);
-        assert!(library.move_hub("c", Some("a")));
-        assert_eq!(order(&library), ["a", "c", "b"]);
-        assert_eq!(library.moves_left, 9);
-    }
-
-    #[test]
-    fn a_move_to_the_front_has_no_predecessor() {
-        let mut library = library(10);
-        assert!(library.move_hub("c", None));
-        assert_eq!(order(&library), ["c", "a", "b"]);
-    }
-
-    #[test]
-    fn a_move_past_the_budget_reports_nothing_and_changes_nothing() {
-        // The silent no-op: the endpoint still answers 200, and only reading
-        // the order back shows the item never moved (§15.3).
-        let mut library = library(1);
-        assert!(library.move_hub("c", Some("a")));
-        assert!(!library.move_hub("b", Some("c")));
-        assert_eq!(order(&library), ["a", "c", "b"]);
-        assert_eq!(library.moves_left, 0);
-    }
-
-    #[test]
-    fn moving_an_item_that_is_not_there_spends_no_budget() {
-        let mut library = library(3);
-        assert!(!library.move_hub("nowhere", None));
-        assert_eq!(library.moves_left, 3);
-    }
-
-    #[test]
-    fn a_predecessor_that_is_not_in_the_space_moves_nothing_and_spends_nothing() {
-        // Resolved after the removal it was "not found", and not-found was read
-        // as "append": the row teleported to the tail, the budget paid for it,
-        // and the call answered 200. A verification read then sees a wrong
-        // order rather than an unchanged one, which is a different failure from
-        // the silent no-op §15.3 describes and would be mistaken for it.
-        let mut library = library(3);
-        assert!(!library.move_hub("a", Some("nowhere")));
-        assert_eq!(order(&library), ["a", "b", "c"]);
-        assert_eq!(library.moves_left, 3);
-    }
-
-    #[test]
-    fn a_row_cannot_be_moved_after_itself() {
-        // `HubMove::After` does not forbid it, and the old lookup found nothing
-        // once the row had been removed — so asking for no change moved the row
-        // to the end of the space.
-        let mut library = library(3);
-        assert!(!library.move_hub("a", Some("a")));
-        assert_eq!(order(&library), ["a", "b", "c"]);
-        assert_eq!(library.moves_left, 3);
-    }
-
-    #[test]
-    fn a_move_backwards_lands_directly_after_its_predecessor() {
-        // The index arithmetic the pre-removal lookup makes necessary: `b` sits
-        // behind `a`, so `a`'s position is unchanged by the removal.
-        let mut library = library(10);
-        assert!(library.move_hub("a", Some("b")));
-        assert_eq!(order(&library), ["b", "a", "c"]);
-    }
-
-    #[test]
-    fn a_collection_item_move_after_a_key_that_is_not_in_it_changes_nothing() {
-        let mut library = library(3);
-        assert!(!library.move_collection_item("5001", "3", Some("nowhere")));
-        assert_eq!(library.collections[0].items, ["1", "2", "3"]);
-        assert_eq!(library.moves_left, 3);
-    }
-
-    #[test]
-    fn a_collection_item_move_uses_the_same_budget_as_a_hub_move() {
-        // One ordering space, one budget: a test that spent hub moves and then
-        // found collection moves still working would be testing a fake with
-        // more precision than Plex has.
-        let mut library = library(1);
-        assert!(library.move_collection_item("5001", "3", None));
-        assert_eq!(library.collections[0].items, ["3", "1", "2"]);
-        assert!(!library.move_hub("c", Some("a")));
+    /// The item with this key.
+    pub(crate) fn item(&mut self, rating_key: &str) -> Option<&mut FakeItem> {
+        self.items
+            .iter_mut()
+            .find(|candidate| candidate.rating_key == rating_key)
     }
 }

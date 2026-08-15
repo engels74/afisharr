@@ -18,6 +18,11 @@ afisharr-sources.workspace = true
 # `axum` and `tokio` serve the adversarial fake and nothing else, so both are
 # optional and reached only through the `fake` feature below.
 axum = { workspace = true, optional = true }
+# A tag removal travels as one comma-joined value whose entries are quoted
+# individually (`plexapi/mixins/edit.py:333`), so a label holding a comma
+# survives the join. Both halves of that live in this crate: the client quotes,
+# the fake unquotes.
+percent-encoding.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true

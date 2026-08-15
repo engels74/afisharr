@@ -38,3 +38,4 @@ pub mod libraries;
 pub mod pin;
 pub mod server;
 pub mod streams;
+mod wire;

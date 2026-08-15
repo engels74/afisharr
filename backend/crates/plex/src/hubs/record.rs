@@ -5,7 +5,10 @@
 
 use serde::Deserialize;
 
-use crate::{collections::record::StringOrNumber, libraries::RatingKey};
+use crate::{
+    libraries::RatingKey,
+    wire::{Flag, StringOrNumber},
+};
 
 /// Plex's identifier for one manageable hub.
 ///
@@ -40,6 +43,13 @@ impl std::fmt::Display for HubIdentifier {
 /// The distinction §15.1 makes the whole placement algorithm out of: a
 /// collection can leave the ordering space and come back with fresh spacing,
 /// and a native hub is an anchor the plan works around.
+///
+/// Read from `deletable`, which is the server's own statement that a row can
+/// leave the space (`plexapi/library.py:3035`). It used to be read from the
+/// presence of a `ratingKey`, and no reference client reads a rating key on
+/// this endpoint at all — so a real server sending none would have had every
+/// collection row classified as one of Plex's own, which is a collection whose
+/// position is never fixed.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum HubKind {
     /// A collection promoted onto the home screen.
@@ -103,10 +113,35 @@ pub struct ManagedHub {
     pub title: String,
     /// Whether it is a collection or one of Plex's own rows.
     pub kind: HubKind,
-    /// The collection behind it, for a collection hub.
+    /// The collection behind it, when the server named one.
+    ///
+    /// A real server was never observed to send one here, so this is `None` far
+    /// more often than not — [`ManagedHub::names_collection`] is how a row is
+    /// matched to a collection, and it reads the identifier.
     pub rating_key: Option<RatingKey>,
     /// Where the three visibility axes stand.
     pub visibility: HubVisibility,
+}
+
+impl ManagedHub {
+    /// Whether this row is the ordering-space row of `collection`.
+    ///
+    /// The last dot-segment of the identifier is the collection's rating key —
+    /// the same reading a reference client makes when it promotes one
+    /// (`plexapi/library.py:3115`) — and the answer's own `ratingKey` is used
+    /// when a server sends it. Neither is invented: a row that names no
+    /// collection either way is not that collection's row.
+    #[must_use]
+    pub fn names_collection(&self, collection: &RatingKey) -> bool {
+        if self.rating_key.as_ref() == Some(collection) {
+            return true;
+        }
+        self.identifier
+            .as_str()
+            .rsplit('.')
+            .next()
+            .is_some_and(|segment| segment == collection.as_str())
+    }
 }
 
 /// A hub exactly as Plex's JSON carries it.
@@ -114,26 +149,30 @@ pub struct ManagedHub {
 #[serde(rename_all = "camelCase")]
 pub(crate) struct HubBody {
     #[serde(default)]
-    hub_identifier: Option<String>,
-    #[serde(default)]
     identifier: Option<String>,
     #[serde(default)]
     title: Option<String>,
     #[serde(default)]
     rating_key: Option<StringOrNumber>,
+    /// Whether the row can leave the ordering space.
+    ///
+    /// Absent means it can, which is the reading a reference client makes
+    /// (`plexapi/library.py:3035`). Defaulting the other way would classify
+    /// every collection row on a server that omits the attribute as one of
+    /// Plex's own, and take every one of them out of the plan.
+    #[serde(default = "removable")]
+    deletable: Flag,
     #[serde(default)]
-    promoted_to_own_home: Option<StringOrNumber>,
+    promoted_to_own_home: Flag,
     #[serde(default)]
-    promoted_to_shared_home: Option<StringOrNumber>,
+    promoted_to_shared_home: Flag,
     #[serde(default)]
-    promoted_to_recommended: Option<StringOrNumber>,
+    promoted_to_recommended: Flag,
 }
 
-/// Whether a flag Plex spells either way is set.
-fn flag(value: Option<StringOrNumber>) -> bool {
-    value
-        .and_then(|value| value.as_i64())
-        .is_some_and(|value| value != 0)
+/// What `deletable` means when a server does not send it.
+fn removable() -> Flag {
+    Flag::from(true)
 }
 
 impl TryFrom<HubBody> for ManagedHub {
@@ -145,15 +184,9 @@ impl TryFrom<HubBody> for ManagedHub {
     /// would address a different row. Dropped rather than defaulted, and the
     /// caller counts what it dropped.
     fn try_from(body: HubBody) -> Result<Self, Self::Error> {
-        // Emptiness is checked on each spelling before falling back, not on the
-        // winner: a server that sends `hubIdentifier: ""` alongside a usable
-        // `identifier` would otherwise have the empty one shadow the fallback,
-        // and the row would be dropped as unaddressable while it was addressable
-        // all along.
         let identifier = body
-            .hub_identifier
+            .identifier
             .filter(|value| !value.is_empty())
-            .or_else(|| body.identifier.filter(|value| !value.is_empty()))
             .ok_or(())?;
         // Kept as the text it arrived as, never parsed and re-rendered. A key
         // this build could not read as a number would otherwise come back as
@@ -169,19 +202,19 @@ impl TryFrom<HubBody> for ManagedHub {
         Ok(Self {
             identifier: HubIdentifier::new(identifier),
             title: body.title.unwrap_or_default(),
-            // A hub with a rating key is a collection; one without is Plex's
-            // own row. Read from the answer rather than from the identifier's
-            // spelling, which changes between versions.
-            kind: if rating_key.is_some() {
+            // A row that says it cannot be removed is one of Plex's own, and a
+            // row that can be is a promoted collection. The server states it;
+            // nothing here infers it from a field the server may not send.
+            kind: if body.deletable.is_set() {
                 HubKind::Collection
             } else {
                 HubKind::Native
             },
             rating_key,
             visibility: HubVisibility {
-                own_home: flag(body.promoted_to_own_home),
-                shared_home: flag(body.promoted_to_shared_home),
-                recommended: flag(body.promoted_to_recommended),
+                own_home: body.promoted_to_own_home.is_set(),
+                shared_home: body.promoted_to_shared_home.is_set(),
+                recommended: body.promoted_to_recommended.is_set(),
             },
         })
     }
@@ -197,43 +230,48 @@ mod tests {
     }
 
     #[test]
-    fn a_collection_hub_carries_its_rating_key() {
+    fn a_row_that_can_leave_the_space_is_a_collection() {
         let hub = hub(
-            r#"{"hubIdentifier":"collection.5001","title":"Best of 1979","ratingKey":"5001",
-                "promotedToOwnHome":"1","promotedToRecommended":"1"}"#,
+            r#"{"identifier":"custom.collection.1.5001","title":"Best of 1979",
+                "deletable":"1","promotedToOwnHome":"1","promotedToRecommended":"1"}"#,
         )
         .expect("a hub with an identifier");
         assert_eq!(hub.kind, HubKind::Collection);
-        assert_eq!(hub.rating_key, Some(RatingKey::new("5001")));
         assert!(hub.visibility.own_home);
         assert!(!hub.visibility.shared_home);
         assert!(hub.visibility.recommended);
+        assert!(
+            hub.names_collection(&RatingKey::new("5001")),
+            "the last segment of the identifier is the collection"
+        );
+        assert!(!hub.names_collection(&RatingKey::new("5002")));
     }
 
     #[test]
-    fn a_native_hub_has_no_rating_key_and_is_an_anchor() {
+    fn a_row_that_cannot_be_removed_is_one_of_plexs_own_and_an_anchor() {
         // The distinction the whole placement algorithm is built on: this row
-        // cannot be unpromoted, so it has no recovery move (§15.1).
-        let hub = hub(r#"{"hubIdentifier":"home.continue","title":"Continue Watching"}"#)
-            .expect("a hub with an identifier");
+        // cannot be unpromoted, so it has no recovery move (§15.1). It is the
+        // server's own statement, not an inference from a missing rating key —
+        // no reference client reads a rating key on this endpoint at all.
+        let hub =
+            hub(r#"{"identifier":"home.continue","title":"Continue Watching","deletable":"0"}"#)
+                .expect("a hub with an identifier");
         assert_eq!(hub.kind, HubKind::Native);
-        assert_eq!(hub.rating_key, None);
+    }
+
+    #[test]
+    fn a_row_that_says_nothing_about_removal_is_treated_as_removable() {
+        // The reading a reference client makes (`plexapi/library.py:3035`).
+        // Defaulting the other way would take every collection row on a server
+        // that omits the attribute out of the plan.
+        let hub = hub(r#"{"identifier":"custom.collection.1.5001"}"#).expect("a hub");
+        assert_eq!(hub.kind, HubKind::Collection);
     }
 
     #[test]
     fn a_row_with_no_identifier_is_dropped_rather_than_given_one() {
         assert!(hub(r#"{"title":"Nameless"}"#).is_err());
-        assert!(hub(r#"{"hubIdentifier":"","title":"Nameless"}"#).is_err());
-    }
-
-    #[test]
-    fn an_empty_primary_spelling_falls_back_rather_than_shadowing_the_other() {
-        // A row that names itself under `identifier` and sends `hubIdentifier`
-        // empty is addressable, and dropping it would take a movable row out of
-        // the ordering space and count it as one this build cannot reach.
-        let hub = hub(r#"{"hubIdentifier":"","identifier":"home.continue"}"#)
-            .expect("the fallback names the row");
-        assert_eq!(hub.identifier, HubIdentifier::new("home.continue"));
+        assert!(hub(r#"{"identifier":"","title":"Nameless"}"#).is_err());
     }
 
     #[test]
@@ -256,36 +294,31 @@ mod tests {
     }
 
     #[test]
-    fn a_rating_key_keeps_the_text_it_arrived_as_whichever_way_it_is_spelled() {
+    fn a_rating_key_keeps_the_text_it_arrived_as_when_a_server_sends_one() {
         // Plex's identifier space is Plex's. A key parsed and re-rendered is a
-        // key this build normalised, and one it could not parse would come back
-        // as `None` — which reads as "one of Plex's own rows" and takes a
-        // collection out of the ordering space the plan can move.
-        let numeric = hub(r#"{"hubIdentifier":"h","ratingKey":5001}"#).expect("a hub");
-        let text = hub(r#"{"hubIdentifier":"h","ratingKey":"5001"}"#).expect("a hub");
+        // key this build normalised. No reference client reads one here, so
+        // this is tolerance for a server that turns out to send it — never a
+        // fact the classification depends on.
+        let numeric = hub(r#"{"identifier":"h","ratingKey":5001}"#).expect("a hub");
+        let text = hub(r#"{"identifier":"h","ratingKey":"5001"}"#).expect("a hub");
         assert_eq!(numeric.rating_key, text.rating_key);
         assert_eq!(numeric.rating_key, Some(RatingKey::new("5001")));
+        assert!(numeric.names_collection(&RatingKey::new("5001")));
 
-        let odd = hub(r#"{"hubIdentifier":"h","ratingKey":"5001a"}"#).expect("a hub");
+        let odd = hub(r#"{"identifier":"h","ratingKey":"5001a"}"#).expect("a hub");
         assert_eq!(odd.rating_key, Some(RatingKey::new("5001a")));
-        assert_eq!(
-            odd.kind,
-            HubKind::Collection,
-            "a key this build cannot read as a number is still a key"
-        );
 
-        // An empty key is no key, and no key is what makes a row native.
-        let empty = hub(r#"{"hubIdentifier":"h","ratingKey":""}"#).expect("a hub");
+        let empty = hub(r#"{"identifier":"h","ratingKey":""}"#).expect("a hub");
         assert_eq!(empty.rating_key, None);
-        assert_eq!(empty.kind, HubKind::Native);
     }
 
     #[test]
-    fn a_flag_spelled_as_a_number_reads_the_same_as_one_spelled_as_a_string() {
-        let numeric = hub(r#"{"hubIdentifier":"h","promotedToOwnHome":1}"#)
-            .expect("a hub with an identifier");
-        let text = hub(r#"{"hubIdentifier":"h","promotedToOwnHome":"1"}"#)
-            .expect("a hub with an identifier");
+    fn a_flag_reads_the_same_in_every_spelling_a_server_uses() {
+        let numeric = hub(r#"{"identifier":"h","promotedToOwnHome":1}"#).expect("a hub");
+        let text = hub(r#"{"identifier":"h","promotedToOwnHome":"1"}"#).expect("a hub");
+        let boolean = hub(r#"{"identifier":"h","promotedToOwnHome":true}"#).expect("a hub");
         assert_eq!(numeric.visibility, text.visibility);
+        assert_eq!(numeric.visibility, boolean.visibility);
+        assert!(numeric.visibility.own_home);
     }
 }

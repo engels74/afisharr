@@ -5,77 +5,12 @@
 
 use serde::Deserialize;
 
-use crate::{artwork::ArtworkRef, streams::MediaEntry};
-
-/// A Plex rating key.
-///
-/// Plex assigns it, and Plex changes it — a re-scan, a metadata refresh, or a
-/// file move is enough. It is a *binding*, never an identity (P4), and it is a
-/// newtype so it cannot be handed to a call expecting a section key.
-#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub struct RatingKey(String);
-
-impl RatingKey {
-    /// Wraps a key read back from storage or from an answer.
-    #[must_use]
-    pub fn new(value: impl Into<String>) -> Self {
-        Self(value.into())
-    }
-
-    /// The key as text, for a path segment or a query value.
-    #[must_use]
-    pub fn as_str(&self) -> &str {
-        &self.0
-    }
-}
-
-impl std::fmt::Display for RatingKey {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(&self.0)
-    }
-}
-
-/// What kind of thing an item is.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ItemKind {
-    /// A film.
-    Movie,
-    /// A series.
-    Show,
-    /// A season of a series.
-    Season,
-    /// An episode.
-    Episode,
-    /// A collection, which Plex models as an item of its own.
-    Collection,
-}
-
-impl ItemKind {
-    /// The numeric `type` Plex's query parameters take.
-    #[must_use]
-    pub const fn as_plex_type(self) -> u8 {
-        match self {
-            Self::Movie => 1,
-            Self::Show => 2,
-            Self::Season => 3,
-            Self::Episode => 4,
-            Self::Collection => 18,
-        }
-    }
-
-    /// Reads the value Plex reports in an item's `type` attribute.
-    #[must_use]
-    pub fn from_plex(value: &str) -> Option<Self> {
-        match value {
-            "movie" => Some(Self::Movie),
-            "show" => Some(Self::Show),
-            "season" => Some(Self::Season),
-            "episode" => Some(Self::Episode),
-            "collection" => Some(Self::Collection),
-            _ => None,
-        }
-    }
-}
+use crate::{
+    artwork::ArtworkRef,
+    libraries::{ItemKind, RatingKey, SortTitle},
+    streams::MediaEntry,
+    wire::Flag,
+};
 
 /// Whether Plex has finished indexing an item.
 ///
@@ -93,61 +28,6 @@ pub enum ScanState {
     Indexing,
 }
 
-/// An item's sort title, in the three properties §15.6 requires.
-///
-/// Value, presence, and lock state are independent, and all three round-trip.
-/// Presence is read from the raw attribute rather than from a parsed value
-/// because Plex clients substitute the title for a missing sort title, which
-/// makes "absent" and "equal to the title" indistinguishable afterwards — and a
-/// teardown that restored the substituted value would write a sort title the
-/// operator never had.
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
-pub struct SortTitle {
-    value: Option<String>,
-    locked: bool,
-}
-
-impl SortTitle {
-    /// A sort title with `value` present and the given lock state.
-    #[must_use]
-    pub fn present(value: impl Into<String>, locked: bool) -> Self {
-        Self {
-            value: Some(value.into()),
-            locked,
-        }
-    }
-
-    /// A sort title Plex did not report, with the given lock state.
-    #[must_use]
-    pub const fn absent(locked: bool) -> Self {
-        Self {
-            value: None,
-            locked,
-        }
-    }
-
-    /// The raw value, or `None` when the attribute was absent.
-    #[must_use]
-    pub fn value(&self) -> Option<&str> {
-        self.value.as_deref()
-    }
-
-    /// Whether the attribute was present at all.
-    #[must_use]
-    pub const fn is_present(&self) -> bool {
-        self.value.is_some()
-    }
-
-    /// Whether Plex's own metadata lock is set on the field.
-    ///
-    /// A restore that leaves the field locked has permanently disabled the
-    /// server's metadata refresh for that item, silently (`I-REV-3`).
-    #[must_use]
-    pub const fn is_locked(&self) -> bool {
-        self.locked
-    }
-}
-
 /// One item in a library.
 //
 // `PartialEq` without `Eq`: a media entry carries an aspect ratio, which is a
@@ -158,6 +38,13 @@ pub struct LibraryItem {
     pub rating_key: RatingKey,
     /// The primary guid, when reported.
     pub guid: Option<String>,
+    /// The external ids Plex reports alongside the primary guid.
+    ///
+    /// `imdb://tt0078748`, `tmdb://348`, and so on: the values external-id
+    /// resolution matches on, which PRD section 21.2 calls the highest-volume
+    /// lookup in the product. A separate list because they are separate facts,
+    /// and the primary guid is Plex's own.
+    pub external_guids: Vec<String>,
     /// What kind of item it is, or `None` for a type this build does not model.
     pub kind: Option<ItemKind>,
     /// The title.
@@ -235,8 +122,13 @@ pub(crate) struct ItemBody {
     added_at: Option<i64>,
     #[serde(default)]
     updated_at: Option<i64>,
+    /// Whether Plex is still analysing the item.
+    ///
+    /// Read through the permissive flag every neighbouring field goes through.
+    /// Typed as a strict `bool`, a server sending `1` here failed the whole
+    /// item parse — one attribute costing every other fact on the item.
     #[serde(default)]
-    refreshing: bool,
+    refreshing: Flag,
     #[serde(default)]
     thumb: Option<String>,
     #[serde(default, rename = "Media")]
@@ -245,6 +137,15 @@ pub(crate) struct ItemBody {
     label: Vec<TagBody>,
     #[serde(default, rename = "Field")]
     field: Vec<FieldBody>,
+    #[serde(default, rename = "Guid")]
+    guids: Vec<GuidBody>,
+}
+
+/// An external id as Plex nests it, `{"id": "imdb://tt0078748"}`.
+#[derive(Debug, Deserialize)]
+struct GuidBody {
+    #[serde(default)]
+    id: Option<String>,
 }
 
 /// A tag as Plex nests it — `{"tag": "4K"}`.
@@ -260,7 +161,7 @@ struct FieldBody {
     #[serde(default)]
     name: Option<String>,
     #[serde(default)]
-    locked: bool,
+    locked: Flag,
 }
 
 impl From<ItemBody> for LibraryItem {
@@ -268,7 +169,7 @@ impl From<ItemBody> for LibraryItem {
         let locked = body
             .field
             .iter()
-            .any(|field| field.name.as_deref() == Some("titleSort") && field.locked);
+            .any(|field| field.name.as_deref() == Some("titleSort") && field.locked.is_set());
         let sort_title = match body.title_sort {
             Some(value) => SortTitle::present(value, locked),
             None => SortTitle::absent(locked),
@@ -276,6 +177,12 @@ impl From<ItemBody> for LibraryItem {
         Self {
             rating_key: RatingKey::new(body.rating_key),
             guid: body.guid.filter(|value| !value.is_empty()),
+            external_guids: body
+                .guids
+                .into_iter()
+                .filter_map(|guid| guid.id)
+                .filter(|id| !id.is_empty())
+                .collect(),
             kind: ItemKind::from_plex(&body.kind),
             title: body.title.unwrap_or_default(),
             sort_title,
@@ -285,7 +192,7 @@ impl From<ItemBody> for LibraryItem {
             originally_available_at: body.originally_available_at,
             added_at: body.added_at,
             updated_at: body.updated_at,
-            scan: if body.refreshing {
+            scan: if body.refreshing.is_set() {
                 ScanState::Indexing
             } else {
                 ScanState::Complete
@@ -385,11 +292,45 @@ mod tests {
     }
 
     #[test]
-    fn every_kind_maps_to_the_numeric_type_plexs_queries_take() {
-        assert_eq!(ItemKind::Movie.as_plex_type(), 1);
-        assert_eq!(ItemKind::Show.as_plex_type(), 2);
-        assert_eq!(ItemKind::Season.as_plex_type(), 3);
-        assert_eq!(ItemKind::Episode.as_plex_type(), 4);
-        assert_eq!(ItemKind::Collection.as_plex_type(), 18);
+    fn a_flag_reads_the_same_in_every_spelling_a_server_uses() {
+        // Both of these are XML attributes on the wire, and a strict `bool`
+        // did not read the wrong value — it failed the whole item parse, and
+        // took every other fact on the item with it.
+        for spelling in ["1", "true", r#""1""#] {
+            let movie = item(&format!(
+                r#"{{"ratingKey":"1","type":"movie","refreshing":{spelling},
+                    "Field":[{{"name":"titleSort","locked":{spelling}}}]}}"#
+            ));
+            assert_eq!(movie.scan, ScanState::Indexing, "{spelling}");
+            assert!(movie.sort_title.is_locked(), "{spelling}");
+        }
+        for spelling in ["0", "false", r#""0""#] {
+            let movie = item(&format!(
+                r#"{{"ratingKey":"1","type":"movie","refreshing":{spelling}}}"#
+            ));
+            assert_eq!(movie.scan, ScanState::Complete, "{spelling}");
+        }
+    }
+
+    #[test]
+    fn the_facts_a_resolver_matches_on_are_read_off_the_answer() {
+        let movie = item(
+            r#"{"ratingKey":"1","type":"episode","title":"Alien","index":3,
+                "parentRatingKey":"77","originallyAvailableAt":"1979-05-25"}"#,
+        );
+        assert_eq!(movie.index, Some(3));
+        assert_eq!(movie.parent_rating_key, Some(RatingKey::new("77")));
+        assert_eq!(movie.originally_available_at.as_deref(), Some("1979-05-25"));
+    }
+
+    #[test]
+    fn the_external_ids_a_resolver_matches_on_are_read_off_the_answer() {
+        // Parsed nowhere before this, and sent by the fake nowhere either, so
+        // the highest-volume lookup in the product had no input at all.
+        let movie = item(
+            r#"{"ratingKey":"1","type":"movie",
+                "Guid":[{"id":"imdb://tt0078748"},{"id":"tmdb://348"},{"id":""},{}]}"#,
+        );
+        assert_eq!(movie.external_guids, ["imdb://tt0078748", "tmdb://348"]);
     }
 }

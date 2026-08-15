@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2026 Afisharr contributors
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-//! One running fake: its world, and the misbehaviours it owes.
+//! One running fake: its world, what it refuses, and the misbehaviours it owes.
 
 use std::{
     sync::{Mutex, MutexGuard},
@@ -16,7 +16,9 @@ use axum::{
 use crate::fake::{
     library::World,
     plan::{FakeOperation, Injection, Injections},
+    request::Arguments,
     scenario::Scenario,
+    shape::Detail,
 };
 
 /// How long a stalled request is held.
@@ -42,6 +44,10 @@ pub(crate) struct FakeInstance {
     world: Mutex<World>,
     injections: Mutex<Injections>,
     churn_at_fetch: Mutex<Option<u32>>,
+    accepted_token: Option<String>,
+    missing_item_answers_empty: bool,
+    withholds_media_details: bool,
+    move_budget: u32,
 }
 
 impl FakeInstance {
@@ -55,6 +61,10 @@ impl FakeInstance {
             world: Mutex::new(World::build(scenario)),
             injections: Mutex::new(injections),
             churn_at_fetch: Mutex::new(None),
+            accepted_token: scenario.accepted_token.clone(),
+            missing_item_answers_empty: scenario.missing_item_answers_empty,
+            withholds_media_details: scenario.withholds_media_details,
+            move_budget: scenario.move_budget,
         }
     }
 
@@ -66,6 +76,38 @@ impl FakeInstance {
             // keeps the failure the test's rather than a second panic here.
             poisoned.into_inner()
         })
+    }
+
+    /// Whether this server accepts the token a request presented.
+    ///
+    /// A scenario that names one accepts only that. A scenario that names none
+    /// accepts any token at all and refuses a request carrying none — which is
+    /// what a claimed server does, and what makes `verify_credential` provable
+    /// by the condition rather than only by an injected refusal.
+    pub(crate) fn accepts_token(&self, presented: Option<&str>) -> bool {
+        match (&self.accepted_token, presented) {
+            (_, None) => false,
+            (None, Some(_)) => true,
+            (Some(accepted), Some(presented)) => accepted == presented,
+        }
+    }
+
+    /// Whether a missing item is an empty container rather than a `404`.
+    pub(crate) const fn missing_item_answers_empty(&self) -> bool {
+        self.missing_item_answers_empty
+    }
+
+    /// The move budget every sequence this world builds starts with.
+    pub(crate) const fn move_budget(&self) -> u32 {
+        self.move_budget
+    }
+
+    /// What one request is told about media, given what it asked for.
+    pub(crate) fn detail(&self, arguments: &Arguments) -> Detail {
+        Detail {
+            check_files: arguments.flag("checkFiles"),
+            withhold: self.withholds_media_details,
+        }
     }
 
     /// Asks for rating-key churn on the `after`-th item-list fetch.
@@ -141,6 +183,38 @@ mod tests {
             .await
             .expect("the first call refuses");
         assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
+    }
+
+    #[test]
+    fn a_server_that_names_no_token_still_refuses_a_request_carrying_none() {
+        let running = FakeInstance::new(&Scenario::behaving(1));
+        assert!(running.accepts_token(Some("anything")));
+        assert!(!running.accepts_token(None));
+    }
+
+    #[test]
+    fn a_server_that_names_a_token_accepts_only_that_one() {
+        let running = FakeInstance::new(&Scenario::behaving(1).accepting_token("the-only-one"));
+        assert!(running.accepts_token(Some("the-only-one")));
+        assert!(!running.accepts_token(Some("a-revoked-one")));
+        assert!(!running.accepts_token(None));
+    }
+
+    #[test]
+    fn a_file_check_is_reported_only_when_the_request_asked_for_one() {
+        let running = FakeInstance::new(&Scenario::behaving(1));
+        assert!(!running.detail(&Arguments::default()).check_files);
+        assert!(
+            running
+                .detail(&Arguments::parse(Some("checkFiles=1")))
+                .check_files
+        );
+        assert!(!running.detail(&Arguments::default()).withhold);
+        assert!(
+            FakeInstance::new(&Scenario::behaving(1).withholding_media_details())
+                .detail(&Arguments::default())
+                .withhold
+        );
     }
 
     #[test]

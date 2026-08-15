@@ -80,6 +80,27 @@ impl FakePlex {
         self.instance.churn_at_fetch(Some(fetches));
     }
 
+    /// Re-keys one item, leaving every other key where it was.
+    ///
+    /// The case a wholesale churn cannot reach: a caller comparing two windows
+    /// sees a whole library move and knows something happened, and sees one
+    /// item move and does not.
+    pub fn churn_one_rating_key(&self, rating_key: &str) {
+        self.instance.world().churn_one(rating_key);
+    }
+
+    /// Gives one library a different section key, keeping its uuid.
+    ///
+    /// The same class of failure as a changed machine identifier, one level
+    /// down: every stored section key now addresses something else, and `uuid`
+    /// is what PRD §19.7 matches on first.
+    ///
+    /// Returns whether a library answered to the old key.
+    #[must_use]
+    pub fn section_key_becomes(&self, from: &str, to: &str) -> bool {
+        self.instance.world().rekey_section(from, to)
+    }
+
     /// Puts a label on one item, as a Plex-side edit this instance did not make.
     ///
     /// The shape an adoption test needs: something changed in Plex, and the
@@ -188,11 +209,88 @@ impl WorldSnapshot {
     /// The sort title of one collection: its value and its lock state.
     #[must_use]
     pub fn collection_sort_title(&self, collection: &str) -> Option<(Option<String>, bool)> {
+        self.collection(collection)
+            .map(|candidate| (candidate.sort_title.clone(), candidate.sort_title_locked))
+    }
+
+    /// The sort title of one item: its value and its lock state.
+    ///
+    /// The three properties §15.6 requires, read back off the world: presence
+    /// is `None` inside the `Some`, and the lock is its own answer.
+    #[must_use]
+    pub fn item_sort_title(&self, rating_key: &str) -> Option<(Option<String>, bool)> {
+        self.item(rating_key)
+            .map(|item| (item.sort_title.clone(), item.sort_title_locked))
+    }
+
+    /// Whether Plex's metadata lock is set on one item's label field.
+    #[must_use]
+    pub fn labels_locked(&self, rating_key: &str) -> Option<bool> {
+        self.item(rating_key).map(|item| item.labels_locked)
+    }
+
+    /// How Plex orders the items inside one collection.
+    #[must_use]
+    pub fn collection_sort(&self, collection: &str) -> Option<i32> {
+        self.collection(collection).map(|candidate| candidate.sort)
+    }
+
+    /// One collection's display mode and summary.
+    #[must_use]
+    pub fn collection_presentation(&self, collection: &str) -> Option<(i32, Option<String>)> {
+        self.collection(collection)
+            .map(|candidate| (candidate.mode, candidate.summary.clone()))
+    }
+
+    /// Whether one collection is in the library's ordering space at all.
+    ///
+    /// Being in the library and being in the ordering space are two states, and
+    /// a collection nothing has promoted is only in the first.
+    #[must_use]
+    pub fn is_promoted(&self, collection: &str) -> bool {
+        self.0
+            .libraries
+            .iter()
+            .flat_map(|library| library.hubs.iter())
+            .any(|hub| hub.rating_key.as_deref() == Some(collection))
+    }
+
+    /// The three visibility axes of one row, by identifier.
+    #[must_use]
+    pub fn hub_visibility(&self, identifier: &str) -> Option<(bool, bool, bool)> {
+        self.0
+            .libraries
+            .iter()
+            .flat_map(|library| library.hubs.iter())
+            .find(|hub| hub.identifier == identifier)
+            .map(|hub| (hub.own_home, hub.shared_home, hub.recommended))
+    }
+
+    /// The section keys this world currently answers to, in order.
+    #[must_use]
+    pub fn section_keys(&self) -> Vec<String> {
+        self.0
+            .libraries
+            .iter()
+            .map(|library| library.key.clone())
+            .collect()
+    }
+
+    /// One collection, wherever it is.
+    fn collection(&self, collection: &str) -> Option<&crate::fake::state::FakeCollection> {
         self.0
             .libraries
             .iter()
             .flat_map(|library| library.collections.iter())
             .find(|candidate| candidate.rating_key == collection)
-            .map(|candidate| (candidate.sort_title.clone(), candidate.sort_title_locked))
+    }
+
+    /// One item, wherever it is.
+    fn item(&self, rating_key: &str) -> Option<&crate::fake::state::FakeItem> {
+        self.0
+            .libraries
+            .iter()
+            .flat_map(|library| library.items.iter())
+            .find(|item| item.rating_key == rating_key)
     }
 }
