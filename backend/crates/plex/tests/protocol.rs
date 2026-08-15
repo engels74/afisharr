@@ -65,6 +65,47 @@ async fn the_identity_call_reads_the_machine_identifier_and_the_version() {
 }
 
 #[tokio::test]
+async fn the_credential_call_asks_the_server_root_and_presents_the_token() {
+    // The whole point of the call is the header. A request to the root without
+    // the token is one a claimed server answers `401` to for a reason that has
+    // nothing to do with the stored credential, which is the opposite of what
+    // this call is asked to find out.
+    let fixture = FixtureServer::answering(
+        r#"{"MediaContainer":{"size":0,"machineIdentifier":"machine-abc",
+            "version":"1.41.0.1234","friendlyName":"Living Room"}}"#,
+    )
+    .await;
+
+    fixture
+        .client()
+        .verify_credential()
+        .await
+        .expect("the fixture answers");
+
+    let request = fixture.only_request();
+    assert_eq!(request.method, "GET");
+    assert_eq!(request.path, "/");
+    assert_eq!(request.query, "");
+    assert_eq!(request.token.as_deref(), Some("test-plex-token"));
+}
+
+#[tokio::test]
+async fn a_refused_credential_call_carries_the_status_the_server_refused_with() {
+    // 401 and "the server did not answer" send an operator in opposite
+    // directions, and the status is the only thing that tells them apart.
+    let fixture = FixtureServer::answering_with(401, r#"{"error":"unauthorized"}"#).await;
+
+    let error = fixture
+        .client()
+        .verify_credential()
+        .await
+        .expect_err("a refused token is not a working connection");
+
+    assert_eq!(error.refused_status(), Some(401));
+    assert!(error.server_answered());
+}
+
+#[tokio::test]
 async fn the_section_list_reads_every_library_including_the_unmanageable_ones() {
     let fixture = FixtureServer::answering(
         r#"{"MediaContainer":{"size":2,"Directory":[

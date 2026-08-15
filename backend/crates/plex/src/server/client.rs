@@ -14,6 +14,16 @@ use crate::{
     server::{Container, ServerAddress, ServerError, ServerToken},
 };
 
+/// How long a call the connectivity check waits on may take.
+///
+/// Far shorter than the client default, because this is what the Settings page
+/// renders a live connection state from: an operator waiting thirty seconds for
+/// "unreachable" has been told nothing they did not already suspect, and the
+/// server is on their own network. One constant for every call the check makes,
+/// so the page's worst case stays a multiple of a single number rather than the
+/// sum of two that drifted apart.
+pub(crate) const CHECK_DEADLINE: Deadline = Deadline::of(std::time::Duration::from_secs(5));
+
 /// A client bound to one Plex Media Server.
 ///
 /// Cloning is cheap: the transport underneath is an `Arc`, and everything else

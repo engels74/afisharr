@@ -13,11 +13,17 @@
 //! fetched by its own call, because `I-ID-5` has to be checkable without
 //! reading a library: a server swap must be detectable in one cheap request at
 //! the head of every pass, not discovered part-way through one.
+//!
+//! That call answers before authentication, so it says nothing about the token.
+//! Whether the server still accepts the credential is a second question, asked
+//! by [`PlexServerClient::verify_credential`]; a connection reported as working
+//! on the strength of the first alone would report a revoked token as healthy.
 
 mod address;
 mod binding;
 mod client;
 mod container;
+mod credential;
 mod error;
 mod machine;
 mod token;

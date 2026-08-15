@@ -24,6 +24,7 @@ pub(crate) type Running = Arc<FakeInstance>;
 /// The routes, in the order this crate's modules call them.
 pub(crate) fn router(running: Running) -> Router {
     Router::new()
+        .route("/", get(root))
         .route("/identity", get(identity))
         .route("/library/sections", get(sections))
         .route(
@@ -106,6 +107,26 @@ pub(crate) fn first<'a>(pairs: &'a [(String, String)], name: &str) -> Option<&'a
         .iter()
         .find(|(key, _)| key == name)
         .map(|(_, value)| value.as_str())
+}
+
+/// `GET /` — the server root, which a real Plex answers only to a live token.
+///
+/// The fake checks no token of its own: a scenario that refuses this operation
+/// is how a test asks for a revoked credential, and a fake that decided for
+/// itself would make that scenario unaskable. What it answers is a subset of a
+/// real root — every field here is one a real server sends, because a fake that
+/// claimed more would put a shape in the contract test that no Plex produces.
+async fn root(State(running): State<Running>) -> Result<Json<Value>, Response> {
+    if let Some(refusal) = running.gate(FakeOperation::Root).await {
+        return Err(refusal);
+    }
+    let world = running.world();
+    Ok(Json(shape::container(&json!({
+        "size": 0,
+        "machineIdentifier": world.machine_identifier,
+        "version": world.version,
+        "friendlyName": world.friendly_name,
+    }))))
 }
 
 /// `GET /identity`.

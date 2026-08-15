@@ -13,12 +13,12 @@
 mod harness;
 
 use afisharr_core::{
-    plex_server::PlexServer,
+    plex_server::{Observed, PlexServer, RecordObservation},
     secrets::{PutSecret, SecretKey},
     storage::WriteOperation,
     time::Timestamp,
 };
-use afisharr_plex::fake::{FakePlex, Scenario};
+use afisharr_plex::fake::{FakeOperation, FakePlex, Injection, Scenario};
 use harness::{RunningInstance, TempInstance, Wizard, browser, csrf_from};
 use reqwest::{Client, StatusCode};
 
@@ -214,6 +214,97 @@ async fn a_server_that_does_not_answer_is_unreachable_and_nothing_is_rebound() {
     let row = recorded(&running).await.expect("the binding survives");
     assert_eq!(row.machine_identifier, "server-a");
     assert_eq!(row.base_url, base_url);
+
+    running.stop().await;
+}
+
+#[tokio::test]
+async fn a_revoked_token_is_refused_rather_than_reported_as_a_working_connection() {
+    // The commonest way this connection breaks, and the one a check built on
+    // `GET /identity` alone can never see: that endpoint answers before
+    // authentication, so a server holding a token it no longer honours names
+    // itself exactly as it always did. The fake answers the identity call and
+    // refuses the root, which is what a revoked token looks like from here.
+    let fake = FakePlex::start(Scenario::behaving(1).identified_as("server-a").failing(
+        FakeOperation::Root,
+        0,
+        Injection::Refuse { status: 401 },
+    ))
+    .await;
+    let instance = TempInstance::new();
+    let (running, client, csrf) = signed_in(&instance).await;
+    bind(&running, &fake).await;
+    store_token(&running, &running.booted.secret_key).await;
+
+    let answer = check(&running, &client, &csrf).await;
+    assert_eq!(answer["state"], "credentialRefused");
+    assert_eq!(answer["boundMachineIdentifier"], "server-a");
+    // A refusal names no machine and describes no server, whatever the identity
+    // call said a moment earlier (P1).
+    assert!(answer["observedMachineIdentifier"].is_null());
+    assert!(answer["version"].is_null());
+    assert!(
+        answer["detail"]
+            .as_str()
+            .is_some_and(|detail| detail.contains("401")),
+        "the collapsed technical detail says what the server answered (§8.4)"
+    );
+
+    // And nothing was recorded. A refused credential is not an observation, and
+    // a row refreshed on the strength of one would report a connection that
+    // last worked as a connection that works.
+    let row = recorded(&running).await.expect("the binding survives");
+    assert_eq!(row.version, "1.0.0-before");
+    assert_eq!(row.last_seen_at, Timestamp::from_millis(1_000));
+
+    running.stop().await;
+}
+
+#[tokio::test]
+async fn an_older_check_finishing_last_does_not_overwrite_a_newer_observation() {
+    // Two checks overlap, and the one that started first finishes last. Its
+    // instant was stamped before its request went out, so the record it carries
+    // is the older of the two — and writing it would move the stored version,
+    // name, and `last_seen_at` backwards while both checks report success.
+    let fake = FakePlex::start(Scenario::behaving(1).identified_as("server-a")).await;
+    let instance = TempInstance::new();
+    let running = RunningInstance::start(&instance).await;
+    bind(&running, &fake).await;
+
+    let observation = |version: &str, at: i64| RecordObservation {
+        machine_identifier: "server-a".to_owned(),
+        friendly_name: "Fake Plex".to_owned(),
+        version: version.to_owned(),
+        platform: None,
+        base_url: fake.base_url().to_owned(),
+        at: Timestamp::from_millis(at),
+    };
+
+    let newer = running
+        .booted
+        .database
+        .writer()
+        .submit(observation("1.41.9-newer", 5_000))
+        .await
+        .expect("the observation must be writable");
+    assert_eq!(newer, Observed::Refreshed);
+
+    let older = running
+        .booted
+        .database
+        .writer()
+        .submit(observation("1.41.0-older", 3_000))
+        .await
+        .expect("the observation must be writable");
+    assert_eq!(
+        older,
+        Observed::Stale,
+        "an observation older than the stored one is not a refresh"
+    );
+
+    let row = recorded(&running).await.expect("the binding survives");
+    assert_eq!(row.version, "1.41.9-newer");
+    assert_eq!(row.last_seen_at, Timestamp::from_millis(5_000));
 
     running.stop().await;
 }

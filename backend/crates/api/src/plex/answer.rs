@@ -4,14 +4,14 @@
 //! What each outcome of the check is reported as.
 //!
 //! Split from the check itself because the two are answerable separately: what
-//! one round trip against `GET /identity` produces is one question, and what an
-//! operator is told about it is another. Everything here decides the second,
+//! the calls the check makes produce is one question, and what an operator is
+//! told about it is another. Everything here decides the second,
 //! and every function in it withholds more than it reports — a failing check
 //! observed nothing, and an answer that filled the gaps from the stored row
 //! would present weeks-old facts as what the server just said (P1).
 
 use afisharr_core::{plex_server::PlexServer, time::Timestamp};
-use afisharr_plex::server::{ServerError, redact_credentials};
+use afisharr_plex::server::{ServerError, ServerIdentity, redact_credentials};
 
 use crate::plex::connection::{PlexConnection, PlexConnectionState};
 
@@ -82,6 +82,61 @@ pub(crate) fn no_credential(server: &PlexServer, now: Timestamp) -> PlexConnecti
     }
 }
 
+/// The answer for the bound server, answering, with the token accepted.
+///
+/// All three conditions, and the third is not free: the identity call behind
+/// `identity` answers before authentication, so a caller that reported this
+/// state on the strength of it alone would report a revoked token as a working
+/// connection.
+pub(crate) fn reachable(
+    server: &PlexServer,
+    identity: &ServerIdentity,
+    now: Timestamp,
+) -> PlexConnection {
+    PlexConnection {
+        state: PlexConnectionState::Reachable,
+        base_url: Some(shown_address(server)),
+        bound_machine_identifier: Some(server.machine_identifier.clone()),
+        observed_machine_identifier: Some(identity.machine_identifier.to_string()),
+        // `GET /identity` carries no name, and this is the server the row
+        // describes — so the stored name is the operator's own answer to "which
+        // machine is this", not a fact invented here.
+        friendly_name: identity
+            .friendly_name
+            .clone()
+            .or_else(|| Some(server.friendly_name.clone())),
+        version: Some(identity.version.clone()),
+        detail: None,
+        checked_at: now.as_millis(),
+    }
+}
+
+/// The answer for a *different* server answering at the bound address.
+///
+/// Names both identifiers, because the decision it hands back to the operator
+/// needs both: an answer naming only the stranger says nothing about what they
+/// are being asked to abandon (`I-ID-5`).
+pub(crate) fn wrong_server(
+    server: &PlexServer,
+    identity: &ServerIdentity,
+    now: Timestamp,
+) -> PlexConnection {
+    PlexConnection {
+        state: PlexConnectionState::WrongServer,
+        base_url: Some(shown_address(server)),
+        bound_machine_identifier: Some(server.machine_identifier.clone()),
+        observed_machine_identifier: Some(identity.machine_identifier.to_string()),
+        // No fallback to the stored name here, unlike [`reachable`]. The stored
+        // name belongs to the *bound* server, and pairing it with the
+        // stranger's version would present the two as one machine describing
+        // itself (P1). Nobody named the machine that answered.
+        friendly_name: identity.friendly_name.clone(),
+        version: Some(identity.version.clone()),
+        detail: None,
+        checked_at: now.as_millis(),
+    }
+}
+
 /// The answer for a server that did not answer, or answered unusably.
 pub(crate) fn unreachable(server: &PlexServer, detail: String, now: Timestamp) -> PlexConnection {
     without_a_usable_answer(server, PlexConnectionState::Unreachable, detail, now)
@@ -129,6 +184,7 @@ fn without_a_usable_answer(
 
 #[cfg(test)]
 mod tests {
+    use afisharr_plex::server::MachineIdentifier;
     use afisharr_sources::outbound::OutboundError;
 
     use super::*;
@@ -156,6 +212,66 @@ mod tests {
                 body: String::new(),
             },
         }
+    }
+
+    fn identity(machine_identifier: &str) -> ServerIdentity {
+        ServerIdentity {
+            machine_identifier: MachineIdentifier::new(machine_identifier),
+            version: "1.41.9".to_owned(),
+            // `GET /identity` carries no name, which is the case both builders
+            // below have to differ on.
+            friendly_name: None,
+            platform: Some("Linux".to_owned()),
+        }
+    }
+
+    #[test]
+    fn a_reachable_answer_names_the_server_the_row_describes() {
+        let answer = reachable(
+            &server(),
+            &identity("server-a"),
+            Timestamp::from_millis(3_000),
+        );
+        assert_eq!(answer.state, PlexConnectionState::Reachable);
+        assert_eq!(
+            answer.observed_machine_identifier.as_deref(),
+            Some("server-a")
+        );
+        assert_eq!(
+            answer.friendly_name.as_deref(),
+            Some("Living Room"),
+            "the identity call carries no name, and this is the bound server"
+        );
+        assert_eq!(answer.version.as_deref(), Some("1.41.9"));
+        assert_eq!(answer.detail, None);
+    }
+
+    #[test]
+    fn a_wrong_server_answer_names_both_machines_and_borrows_no_name() {
+        // The stored name belongs to the bound server. Paired with the
+        // stranger's version it would read as one machine describing itself,
+        // which is an observation nobody made (P1).
+        let answer = wrong_server(
+            &server(),
+            &identity("server-b"),
+            Timestamp::from_millis(3_000),
+        );
+        assert_eq!(answer.state, PlexConnectionState::WrongServer);
+        assert_eq!(answer.bound_machine_identifier.as_deref(), Some("server-a"));
+        assert_eq!(
+            answer.observed_machine_identifier.as_deref(),
+            Some("server-b")
+        );
+        assert_eq!(answer.friendly_name, None);
+        assert_eq!(answer.version.as_deref(), Some("1.41.9"));
+    }
+
+    #[test]
+    fn a_name_the_server_reported_is_preferred_to_the_stored_one() {
+        let mut named = identity("server-a");
+        named.friendly_name = Some("Basement".to_owned());
+        let answer = reachable(&server(), &named, Timestamp::from_millis(3_000));
+        assert_eq!(answer.friendly_name.as_deref(), Some("Basement"));
     }
 
     #[test]

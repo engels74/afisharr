@@ -9,18 +9,18 @@ use afisharr_core::{
     time::Timestamp,
 };
 use afisharr_plex::server::{
-    BindingVerdict, MachineIdentifier, PlexServerClient, ServerAddress, ServerIdentity,
-    ServerToken, redact_credentials, verify_binding,
+    MachineIdentifier, PlexServerClient, ServerAddress, ServerIdentity, ServerToken,
+    redact_credentials, verify_binding,
 };
 
 use crate::{
     error::{AppError, AppResult},
     plex::{
         answer::{
-            credential_refused, detail_of, no_credential, refused_credential, shown_address,
-            unreachable,
+            credential_refused, detail_of, no_credential, reachable, refused_credential,
+            unreachable, wrong_server,
         },
-        connection::{PlexConnection, PlexConnectionState},
+        connection::PlexConnection,
     },
     state::ApiState,
 };
@@ -30,9 +30,16 @@ const PLEX_TOKEN_SECRET: &str = "plex.token";
 
 /// Reads the binding, asks the server who it is, and reports what it saw.
 ///
-/// The whole check, and one round trip. Nothing here reads a library: `I-ID-5`
-/// has to be answerable before anything touches a rating key, so the question
-/// this asks costs one request against `GET /identity`.
+/// The whole check, in two questions that are genuinely two. `GET /identity`
+/// says which machine answered, and it says so before authentication — so it is
+/// the call `I-ID-5` needs (a server swap is detectable without touching a
+/// rating key) and it is *not* evidence that the stored token still works. The
+/// second question is the token's, and it is asked only once the machine that
+/// answered is the machine this installation is bound to: a stranger at the
+/// address is the operator's decision to make, and "your token was refused" is
+/// the wrong sentence to hand them for it.
+///
+/// Neither call reads a library.
 pub(crate) async fn run(state: &ApiState) -> AppResult<PlexConnection> {
     let now = state.clock().now();
     let Some(server) = afisharr_core::plex_server::load(state.database().readers())
@@ -55,17 +62,45 @@ pub(crate) async fn run(state: &ApiState) -> AppResult<PlexConnection> {
         Ok(client) => client,
         Err(detail) => return Ok(unreachable(&server, detail, now)),
     };
-    match client.identity().await {
-        Ok(identity) => Ok(observed(state, &server, identity, now).await?),
+    let identity = match client.identity().await {
+        Ok(identity) => identity,
         // A server that refuses is a server that answered. The address is
         // right, the network is fine, and the stored token is the thing being
         // rejected — an operator told "the server did not answer" here spends
         // the evening on a network fault that is not there (`I-UX-2`).
         Err(error) if refused_credential(&error) => {
-            Ok(credential_refused(&server, detail_of(&error), now))
+            return Ok(credential_refused(&server, detail_of(&error), now));
         }
-        Err(error) => Ok(unreachable(&server, detail_of(&error), now)),
+        Err(error) => return Ok(unreachable(&server, detail_of(&error), now)),
+    };
+
+    let bound = MachineIdentifier::new(server.machine_identifier.clone());
+    if verify_binding(Some(&bound), &identity.machine_identifier).blocks() {
+        // Zero writes. Not even `last_seen_at`: the row describes the server
+        // this installation is bound to, and touching any of it on the strength
+        // of a stranger's answer is the beginning of the silent rebind `I-ID-5`
+        // exists to forbid.
+        tracing::warn!(
+            expected = %server.machine_identifier,
+            found = %identity.machine_identifier,
+            "a different Plex server answered at the bound address; nothing was written"
+        );
+        return Ok(wrong_server(&server, &identity, now));
     }
+
+    // Everything above is equally true of a token Plex revoked last week, which
+    // is the commonest way this connection breaks. Nothing is reported as
+    // working, and nothing is written, until the server accepts the credential.
+    if let Err(error) = client.verify_credential().await {
+        return Ok(if refused_credential(&error) {
+            credential_refused(&server, detail_of(&error), now)
+        } else {
+            unreachable(&server, detail_of(&error), now)
+        });
+    }
+
+    record(state, &server, &identity, now).await?;
+    Ok(reachable(&server, &identity, now))
 }
 
 /// The Plex server token, decrypted, or `None` when none can be presented.
@@ -125,56 +160,19 @@ fn client_for(
     ))
 }
 
-/// The answer for a server that answered, and the write that follows it.
-async fn observed(
+/// Records what the bound server just reported about itself.
+///
+/// The version is why this happens at all: it invalidates the discovered field
+/// cache (PRD §19.8), and a check that read it and threw it away would leave the
+/// cache keyed on a version the server no longer runs. The statement itself
+/// refuses to move the machine identifier, so this is the write half of `I-ID-5`
+/// as well as its read half.
+async fn record(
     state: &ApiState,
     server: &PlexServer,
-    identity: ServerIdentity,
+    identity: &ServerIdentity,
     now: Timestamp,
-) -> AppResult<PlexConnection> {
-    let bound = MachineIdentifier::new(server.machine_identifier.clone());
-    let verdict = verify_binding(Some(&bound), &identity.machine_identifier);
-
-    let blocked = verdict.blocks();
-    let answer = PlexConnection {
-        state: if blocked {
-            PlexConnectionState::WrongServer
-        } else {
-            PlexConnectionState::Reachable
-        },
-        base_url: Some(shown_address(server)),
-        bound_machine_identifier: Some(server.machine_identifier.clone()),
-        observed_machine_identifier: Some(identity.machine_identifier.to_string()),
-        // The fallback is the *bound* server's recorded name, and `GET /identity`
-        // never carries one — so on a blocked verdict it would pair the old
-        // server's name with the stranger's version and present the two as one
-        // server describing itself (P1). Nobody named the machine that answered,
-        // so this answer does not either.
-        friendly_name: identity.friendly_name.clone().or_else(|| {
-            if blocked {
-                None
-            } else {
-                Some(server.friendly_name.clone())
-            }
-        }),
-        version: Some(identity.version.clone()),
-        detail: None,
-        checked_at: now.as_millis(),
-    };
-
-    if matches!(verdict, BindingVerdict::DifferentServer { .. }) {
-        // Zero writes. Not even `last_seen_at`: the row describes the server
-        // this installation is bound to, and touching any of it on the strength
-        // of a stranger's answer is the beginning of the silent rebind
-        // `I-ID-5` exists to forbid.
-        tracing::warn!(
-            expected = %server.machine_identifier,
-            found = %identity.machine_identifier,
-            "a different Plex server answered at the bound address; nothing was written"
-        );
-        return Ok(answer);
-    }
-
+) -> AppResult<()> {
     state
         .database()
         .writer()
@@ -182,13 +180,17 @@ async fn observed(
             machine_identifier: identity.machine_identifier.to_string(),
             friendly_name: identity
                 .friendly_name
+                .clone()
                 .unwrap_or_else(|| server.friendly_name.clone()),
-            version: identity.version,
-            platform: identity.platform.or_else(|| server.platform.clone()),
+            version: identity.version.clone(),
+            platform: identity
+                .platform
+                .clone()
+                .or_else(|| server.platform.clone()),
             base_url: server.base_url.clone(),
             at: now,
         })
         .await
         .map_err(AppError::internal)?;
-    Ok(answer)
+    Ok(())
 }

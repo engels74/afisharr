@@ -54,6 +54,12 @@ pub async fn load(readers: &SqlitePool) -> Result<Option<PlexServer>, sqlx::Erro
 /// identifier, so an observation of a *different* server matches no row and
 /// writes nothing — the zero-writes half of `I-ID-5`, enforced by the statement
 /// rather than by every caller remembering to check first.
+///
+/// Never backwards, either. [`RecordObservation::at`] is stamped before the
+/// request goes out, so two overlapping checks can finish in the order they did
+/// not start in; the update is scoped to the recorded instant as well, and an
+/// observation older than the one already stored writes nothing rather than
+/// replacing a newer server description with a staler one.
 #[derive(Debug, Clone)]
 pub struct RecordObservation {
     /// The identifier that answered.
@@ -79,6 +85,12 @@ pub enum Observed {
     Refreshed,
     /// A different server answered. Nothing was written.
     Ignored,
+    /// The bound server answered, and a later observation is already recorded.
+    ///
+    /// Its own outcome and not [`Self::Refreshed`], because nothing was
+    /// refreshed: a caller told the record was updated would report a stored
+    /// version that is not the one it just wrote.
+    Stale,
 }
 
 impl WriteOperation for RecordObservation {
@@ -100,6 +112,13 @@ impl WriteOperation for RecordObservation {
         // version really changed: it is what invalidates the discovered field
         // cache, and stamping it every pass would rediscover the whole field
         // vocabulary on every check (PRD §19.8).
+        //
+        // Scoped to `last_seen_at` too, and that is not the same condition. The
+        // instant is taken before the request, so the check that started first
+        // can finish last: without this clause its answer would overwrite the
+        // newer one's version, name, platform, and `last_seen_at` — a record
+        // that goes backwards while both checks report success. `<=` rather
+        // than `<`, so a re-check inside the same millisecond still refreshes.
         let updated = sqlx::query!(
             "UPDATE plex_server
                 SET friendly_name = ?2,
@@ -109,7 +128,7 @@ impl WriteOperation for RecordObservation {
                     last_version_change_at =
                         CASE WHEN version = ?3 THEN last_version_change_at ELSE ?6 END,
                     version       = ?3
-              WHERE id = 1 AND machine_identifier = ?1",
+              WHERE id = 1 AND machine_identifier = ?1 AND last_seen_at <= ?6",
             machine_identifier,
             friendly_name,
             version,
@@ -124,10 +143,25 @@ impl WriteOperation for RecordObservation {
             return Ok(Observed::Refreshed);
         }
 
-        // No row matched. Either nothing is bound — in which case this is the
-        // first bind — or something else is, and this observation is of a
-        // server this installation is not bound to. `INSERT` on the constrained
-        // primary key distinguishes the two without a second read.
+        // No row matched, which now has one more meaning than it used to: the
+        // bound server may be recorded already, from an observation newer than
+        // this one. Reported as itself rather than folded into either outcome
+        // below — it is neither a first bind nor a different server, and a
+        // caller that read it as `Ignored` would be told `I-ID-5` had fired.
+        let recorded = sqlx::query_scalar!(
+            "SELECT last_seen_at FROM plex_server WHERE id = 1 AND machine_identifier = ?1",
+            machine_identifier
+        )
+        .fetch_optional(&mut *conn)
+        .await?;
+        if recorded.is_some() {
+            return Ok(Observed::Stale);
+        }
+
+        // Either nothing is bound — in which case this is the first bind — or
+        // something else is, and this observation is of a server this
+        // installation is not bound to. `INSERT` on the constrained primary key
+        // distinguishes the two without a second read.
         let inserted = sqlx::query!(
             "INSERT INTO plex_server (
                  id, machine_identifier, friendly_name, version, platform, base_url,

@@ -14,6 +14,13 @@ use std::collections::HashMap;
 /// passes.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum FakeOperation {
+    /// `GET /` — the call a real server answers only to an accepted token.
+    ///
+    /// Its own operation rather than a variant of [`Self::Identity`], because
+    /// the two differ in exactly the way a test needs: refusing this one and
+    /// answering that one is what a revoked token looks like from outside, and
+    /// it is the state a check built on the identity call alone cannot see.
+    Root,
     /// `GET /identity`.
     Identity,
     /// `GET /library/sections`.

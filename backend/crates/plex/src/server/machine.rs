@@ -10,10 +10,10 @@
 //! one round trip. Discovering a server swap half-way through a library sync is
 //! discovering it after the writes have started.
 
-use afisharr_sources::outbound::{Deadline, Method};
+use afisharr_sources::outbound::Method;
 use serde::Deserialize;
 
-use crate::server::{PlexServerClient, ServerError};
+use crate::server::{PlexServerClient, ServerError, client::CHECK_DEADLINE};
 
 /// A Plex server's machine identifier.
 ///
@@ -63,14 +63,6 @@ pub struct ServerIdentity {
     pub platform: Option<String>,
 }
 
-/// How long the identity call may take.
-///
-/// Far shorter than the client default, because this is what the Settings page
-/// renders a live connection state from: an operator waiting thirty seconds for
-/// "unreachable" has been told nothing they did not already suspect, and the
-/// server is on their own network.
-const IDENTITY_DEADLINE: Deadline = Deadline::of(std::time::Duration::from_secs(5));
-
 /// `GET /identity` exactly as Plex answers it.
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -88,6 +80,12 @@ struct IdentityBody {
 impl PlexServerClient {
     /// Asks the server who it is.
     ///
+    /// **It does not check the token.** Plex answers this endpoint before
+    /// authentication, so a server whose credential was revoked names itself
+    /// exactly as it always did — which is what makes it the right call for
+    /// `I-ID-5` and the wrong one for "is this connection working"
+    /// ([`PlexServerClient::verify_credential`] is the second half).
+    ///
     /// # Errors
     /// Returns [`ServerError::Transport`] when the server did not answer, and
     /// [`ServerError::Incomplete`] when it answered without an identifier —
@@ -97,7 +95,7 @@ impl PlexServerClient {
     pub async fn identity(&self) -> Result<ServerIdentity, ServerError> {
         let url = self.endpoint("identity", &[])?;
         let response = self
-            .send_within(Method::GET, &url, None, &[], IDENTITY_DEADLINE)
+            .send_within(Method::GET, &url, None, &[], CHECK_DEADLINE)
             .await?;
         let body: IdentityBody = self.parse_container(&response)?;
         ServerIdentity::try_from(body)
@@ -194,7 +192,7 @@ mod tests {
         // The Settings page renders a live state from this call. The default
         // deadline is a budget for a cold provider on a WAN, not for one round
         // trip to a server on the operator's own network.
-        assert!(IDENTITY_DEADLINE < Deadline::DEFAULT);
+        assert!(CHECK_DEADLINE < afisharr_sources::outbound::Deadline::DEFAULT);
     }
 
     #[test]
