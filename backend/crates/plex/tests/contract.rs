@@ -250,19 +250,6 @@ async fn write_cycle(client: &PlexServerClient, surface: &Surface) -> Vec<(&'sta
         )
         .await
         .expect("POST /library/collections must answer");
-    // The *read back* of what the create made, not the create's own answer:
-    // `raw` can only issue a `GET`, so the `POST` body itself is still
-    // uncompared. Named for what it is, because a capture filed under the
-    // wrong call is worse than no capture at all.
-    answers.push((
-        "GET /library/collections/{key}/children",
-        real::raw(
-            client,
-            &format!("library/collections/{}/children", created.rating_key),
-            &ItemQuery::new(Window::first(20)).pairs(),
-        )
-        .await,
-    ));
 
     let outcome = exercise(client, surface, &created.rating_key, &server, &mut answers).await;
 
@@ -294,6 +281,22 @@ async fn exercise(
     answers: &mut Vec<(&'static str, Value)>,
 ) -> Result<(), String> {
     let section = &surface.section;
+
+    // The *read back* of what the create made, not the create's own answer:
+    // `try_raw` can only issue a `GET`, so the `POST` body itself is still
+    // uncompared. Named for what it is, because a capture filed under the
+    // wrong call is worse than no capture at all. Reported rather than
+    // panicked, like every other step here: a panic between the create and the
+    // delete leaves the scratch collection on somebody's real Plex (P2).
+    answers.push((
+        "GET /library/collections/{key}/children",
+        real::try_raw(
+            client,
+            &format!("library/collections/{collection}/children"),
+            &ItemQuery::new(Window::first(20)).pairs(),
+        )
+        .await?,
+    ));
 
     let edit = afisharr_plex::collections::CollectionEdit {
         sort: Some(afisharr_plex::collections::CollectionSort::Custom),
@@ -337,12 +340,12 @@ async fn exercise(
         .map_err(|error| format!("promotion must answer: {error}"))?;
     answers.push((
         "GET /hubs/sections/{key}/manage?metadataItemId",
-        real::raw(
+        real::try_raw(
             client,
             &format!("hubs/sections/{section}/manage"),
             &[("metadataItemId".to_owned(), collection.to_string())],
         )
-        .await,
+        .await?,
     ));
 
     let after = client

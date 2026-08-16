@@ -137,13 +137,23 @@ impl<S: Send + Sync> FromRequestParts<S> for Paging {
 ///
 /// Both, because a real server accepts both and a browser embedding an image
 /// URL can only use the second.
+///
+/// Emptiness is checked on each spelling before falling back, not on the
+/// winner: a request carrying an empty header alongside a usable query argument
+/// is a request that presented a token, and letting the empty one shadow the
+/// fallback would refuse it as though it had presented none.
 pub(crate) fn token(headers: &HeaderMap, arguments: &Arguments) -> Option<String> {
     headers
         .get(TOKEN_HEADER)
         .and_then(|value| value.to_str().ok())
-        .map(str::to_owned)
-        .or_else(|| arguments.first("X-Plex-Token").map(str::to_owned))
         .filter(|value| !value.is_empty())
+        .map(str::to_owned)
+        .or_else(|| {
+            arguments
+                .first("X-Plex-Token")
+                .filter(|value| !value.is_empty())
+                .map(str::to_owned)
+        })
 }
 
 #[cfg(test)]
@@ -253,6 +263,15 @@ mod tests {
             token(&headers(&[("x-plex-token", "")]), &Arguments::default()),
             None,
             "an empty token is no token"
+        );
+        assert_eq!(
+            token(
+                &headers(&[("x-plex-token", "")]),
+                &Arguments::parse(Some("X-Plex-Token=abc"))
+            )
+            .as_deref(),
+            Some("abc"),
+            "an empty header does not shadow a usable query argument"
         );
     }
 }

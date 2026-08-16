@@ -124,12 +124,17 @@ pub(crate) fn apply_to_item(item: &mut FakeItem, arguments: &Arguments) -> bool 
 }
 
 /// Applies one edit to one collection. Returns whether anything was written.
+///
+/// Counted field by field rather than from [`writes_anything`], because a
+/// collection holds fewer fields than an item does: a tag edit aimed at one
+/// names a field this fake does not keep, so it writes nothing — and answering
+/// `size: 1` for it is the fake claiming a write it never made, which is the
+/// failure the count exists to expose.
 pub(crate) fn apply_to_collection(collection: &mut FakeCollection, arguments: &Arguments) -> bool {
-    if !writes_anything(arguments) {
-        return false;
-    }
+    let mut wrote = false;
     if let Some(title) = arguments.first("title.value") {
         title.clone_into(&mut collection.title);
+        wrote = true;
     }
     if let Some(sort_title) = arguments.first("titleSort.value") {
         // The same reading as an item's. It is one argument on one endpoint, so
@@ -137,12 +142,15 @@ pub(crate) fn apply_to_collection(collection: &mut FakeCollection, arguments: &A
         // be the fake disagreeing with itself — and the collection half of the
         // §15.6 round trip would be checked against a state no server holds.
         collection.sort_title = written_sort_title(sort_title);
+        wrote = true;
     }
     if let Some(locked) = arguments.first("titleSort.locked") {
         collection.sort_title_locked = locked != "0";
+        wrote = true;
     }
     if let Some(summary) = arguments.first("summary.value") {
         collection.summary = Some(summary.to_owned());
+        wrote = true;
     }
     // Dropped on the floor before, so a collection switched to custom order
     // reported the order it had always reported and every item move under it
@@ -152,14 +160,16 @@ pub(crate) fn apply_to_collection(collection: &mut FakeCollection, arguments: &A
         .and_then(|v| v.parse().ok())
     {
         collection.mode = mode;
+        wrote = true;
     }
     if let Some(sort) = arguments
         .first("collectionSort")
         .and_then(|v| v.parse().ok())
     {
         collection.sort = sort;
+        wrote = true;
     }
-    true
+    wrote
 }
 
 /// Adds, removes, and locks one tag field.
@@ -323,6 +333,18 @@ mod tests {
         assert_eq!(collection.summary.as_deref(), Some("A few films"));
         assert_eq!(collection.mode, 1);
         assert_eq!(collection.sort, 2);
+    }
+
+    #[test]
+    fn a_tag_edit_aimed_at_a_collection_writes_nothing_and_says_so() {
+        // This fake keeps no tags on a collection, so the edit wrote nothing.
+        // Answering `size: 1` for it would be the fake claiming a write it
+        // never made — the failure the count exists to expose.
+        let mut collection = collection();
+        assert!(!apply_to_collection(
+            &mut collection,
+            &Arguments::parse(Some("label[0].tag.tag=afisharr&label.locked=0"))
+        ));
     }
 
     #[test]
