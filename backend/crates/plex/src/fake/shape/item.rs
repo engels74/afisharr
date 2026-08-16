@@ -94,13 +94,19 @@ pub(crate) fn item(item: &FakeItem, library: &FakeLibrary, detail: Detail) -> El
             .iter()
             .map(|label| Element::named("Label").text("tag", label.clone())),
     );
-    // The external ids a resolver matches on. Parsed by this build and never
-    // sent by the fake, which made the parser a claim checked against nothing.
-    row = row.children(
-        item.external_guids
-            .iter()
-            .map(|guid| Element::named("Guid").text("id", guid.clone())),
-    );
+    // The external ids a resolver matches on, and only when the request asked
+    // for them. A reference client sends `includeGuids=1` on every listing and
+    // every detail fetch (`plexapi/library.py:1266`, `plexapi/base.py:209`), so
+    // there is no evidence a server answers them unasked — and a fake that did
+    // would let a client that never sends the argument read external ids here
+    // and none at all from a real Plex.
+    if detail.include_guids {
+        row = row.children(
+            item.external_guids
+                .iter()
+                .map(|guid| Element::named("Guid").text("id", guid.clone())),
+        );
+    }
 
     if item.indexed {
         if item.has_media {
@@ -157,7 +163,24 @@ mod tests {
         assert!(body["Metadata"].get("Media").is_some());
         assert!(body["Metadata"].get("refreshing").is_none());
         assert_eq!(body["Metadata"]["Label"][0]["tag"], "afisharr");
-        assert_eq!(body["Metadata"]["Guid"][0]["id"], "imdb://tt0078748");
+    }
+
+    #[test]
+    fn the_external_ids_are_answered_only_when_the_request_asked_for_them() {
+        // Answered unconditionally, the fake hid a client that never sends
+        // `includeGuids=1` — it read external ids here and would read none at
+        // all from a real server, which is the highest-volume lookup in the
+        // product resolving against nothing (P1).
+        assert!(rendered(&base())["Metadata"].get("Guid").is_none());
+        let asked = json::document(&item(
+            &base(),
+            &library(),
+            Detail {
+                include_guids: true,
+                ..Detail::PLAIN
+            },
+        ));
+        assert_eq!(asked["Metadata"]["Guid"][0]["id"], "imdb://tt0078748");
     }
 
     #[test]

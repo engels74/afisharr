@@ -44,6 +44,7 @@ pub struct ItemQuery {
     sort: Option<String>,
     window: Window,
     include_meta: bool,
+    include_guids: bool,
     check_files: bool,
 }
 
@@ -57,6 +58,7 @@ impl ItemQuery {
             sort: None,
             window,
             include_meta: false,
+            include_guids: false,
             check_files: false,
         }
     }
@@ -96,6 +98,22 @@ impl ItemQuery {
         self
     }
 
+    /// Asks the server for the external ids on every row.
+    ///
+    /// `Guid` children need it: a reference client sends `includeGuids=1` on
+    /// every listing and every detail fetch (`plexapi/library.py:1266`,
+    /// `plexapi/base.py:209`), which is the only evidence in reach about
+    /// whether the answer carries them unasked. Without it
+    /// [`crate::libraries::LibraryItem::external_guids`] comes back empty, and
+    /// empty is *unknown* rather than "this item has no external ids" — which
+    /// is the highest-volume lookup in the product resolving against nothing
+    /// (PRD §21.2, P1).
+    #[must_use]
+    pub const fn including_guids(mut self) -> Self {
+        self.include_guids = true;
+        self
+    }
+
     /// Asks the server to go and look at the files behind the result.
     ///
     /// `Part.accessible` and `Part.exists` require it: without it a real server
@@ -121,9 +139,9 @@ impl ItemQuery {
     /// would be two cache entries for one question.
     #[must_use]
     pub fn pairs(&self) -> Vec<(String, String)> {
-        // Seven, not five: `type`, `sort`, `includeMeta`, `includeAdvanced`,
-        // `checkFiles`, and the two window arguments.
-        let mut pairs = Vec::with_capacity(self.filters.len() + 7);
+        // Eight, not five: `type`, `sort`, `includeMeta`, `includeAdvanced`,
+        // `includeGuids`, `checkFiles`, and the two window arguments.
+        let mut pairs = Vec::with_capacity(self.filters.len() + 8);
         if let Some(libtype) = self.libtype {
             pairs.push(("type".to_owned(), libtype.as_plex_type().to_string()));
         }
@@ -136,6 +154,9 @@ impl ItemQuery {
         if self.include_meta {
             pairs.push(("includeMeta".to_owned(), "1".to_owned()));
             pairs.push(("includeAdvanced".to_owned(), "1".to_owned()));
+        }
+        if self.include_guids {
+            pairs.push(("includeGuids".to_owned(), "1".to_owned()));
         }
         if self.check_files {
             pairs.push(("checkFiles".to_owned(), "1".to_owned()));
@@ -232,6 +253,16 @@ mod tests {
         assert_eq!(value_for(&pairs, "includeMeta").as_deref(), Some("1"));
         assert_eq!(value_for(&pairs, "includeAdvanced").as_deref(), Some("1"));
         assert!(value_for(&ItemQuery::new(Window::first(0)).pairs(), "includeMeta").is_none());
+    }
+
+    #[test]
+    fn asking_for_the_external_ids_is_explicit() {
+        // Without it a real server sends no `Guid` children at all, and an
+        // empty external-id list is *unknown* rather than "this item has
+        // none".
+        let pairs = ItemQuery::new(Window::first(50)).including_guids().pairs();
+        assert_eq!(value_for(&pairs, "includeGuids").as_deref(), Some("1"));
+        assert!(value_for(&ItemQuery::new(Window::first(50)).pairs(), "includeGuids").is_none());
     }
 
     #[test]

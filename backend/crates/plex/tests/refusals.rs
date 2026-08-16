@@ -162,7 +162,8 @@ async fn a_scenario_can_withhold_the_media_attributes_a_server_reports_only_some
 #[tokio::test]
 async fn the_attributes_a_server_does_send_are_read_rather_than_invented() {
     let fake = FakePlex::start(Scenario::behaving(1)).await;
-    let page = client_for(&fake)
+    let client = client_for(&fake);
+    let page = client
         .items(&movies(), &ItemQuery::new(Window::first(1)))
         .await
         .expect("the fake answers");
@@ -175,9 +176,25 @@ async fn the_attributes_a_server_does_send_are_read_rather_than_invented() {
     assert_eq!(media.video_profile.as_deref(), Some("high"));
     assert_eq!(media.video_frame_rate.as_deref(), Some("24p"));
     assert!(media.aspect_ratio.is_some());
+    assert_eq!(item.originally_available_at.as_deref(), Some("1980-05-25"));
+    // Absent until the query asks for them, exactly as a real server answers:
+    // a reference client sends `includeGuids=1` on every read
+    // (`plexapi/library.py:1266`), so a fake that sent them unasked would let
+    // a query that forgot the argument read external ids here and none from a
+    // real Plex.
     assert!(
-        !item.external_guids.is_empty(),
+        item.external_guids.is_empty(),
+        "a query that did not ask for the external ids is not told them"
+    );
+    let asked = client
+        .items(
+            &movies(),
+            &ItemQuery::new(Window::first(1)).including_guids(),
+        )
+        .await
+        .expect("the fake answers");
+    assert!(
+        !asked.items[0].external_guids.is_empty(),
         "the external ids a resolver matches on"
     );
-    assert_eq!(item.originally_available_at.as_deref(), Some("1980-05-25"));
 }

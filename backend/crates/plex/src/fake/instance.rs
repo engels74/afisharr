@@ -104,6 +104,7 @@ impl FakeInstance {
     pub(crate) fn detail(&self, arguments: &Arguments) -> Detail {
         Detail {
             check_files: arguments.flag("checkFiles"),
+            include_guids: arguments.flag("includeGuids"),
             withhold: self.withholds_media_details,
         }
     }

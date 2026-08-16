@@ -151,11 +151,26 @@ def check_filters(section, report: Report):
 
 def check_search_arguments(section, report: Report):
     everything = section.search()
-    comedies = section.search(genre="Comedy")
-    report.expect(
-        "search(genre=...) narrows the result",
-        0 < len(comedies) < len(everything),
-    )
+    # The genre is read off the library for the same reason the year pivot
+    # below is: this runs against a real server too, and a hard-coded `Comedy`
+    # there is a filter that matches everything or nothing for a reason that is
+    # not the fake's. A library with no genre that narrows is a named failure
+    # rather than a check that quietly asserts nothing.
+    carried: dict[str, int] = {}
+    for item in everything:
+        for genre in getattr(item, "genres", None) or []:
+            carried[genre.tag] = carried.get(genre.tag, 0) + 1
+    narrowing = sorted(tag for tag, count in carried.items() if 0 < count < len(everything))
+    if report.expect(
+        "some genre is carried by some but not all items, to narrow on",
+        bool(narrowing),
+    ):
+        wanted = narrowing[0]
+        matching = section.search(genre=wanted)
+        report.expect(
+            f"search(genre={wanted!r}) narrows the result",
+            0 < len(matching) < len(everything),
+        )
     # The pivot is read off the library rather than written down: this runs
     # against a real server too, and a hard-coded year there is a filter that
     # matches everything or nothing for a reason that is not the fake's. A
@@ -213,9 +228,14 @@ def check_collections(section, report: Report):
         "collection.librarySectionID resolves to its own section",
         collection.librarySectionID == section.key,
     )
+    # Read off the payload for the same reason the manage row's flags are: the
+    # reference client defaults `collectionSort` to `0`
+    # (`plexapi/collection.py:72`), so `is not None` passes on an answer that
+    # never mentioned it -- and "release order" would then be a fact this
+    # repository invented about somebody's collection (P1).
     report.expect(
-        "collection.collectionSort is readable",
-        collection.collectionSort is not None,
+        "the server states collectionSort",
+        "collectionSort" in collection._data.attrib,
     )
     report.require("collection.items()", collection.items())
     return collection
@@ -227,24 +247,29 @@ def check_hubs(section, collection, report: Report):
     for hub in hubs:
         report.require("hub.identifier", hub.identifier)
         report.require("hub.title", hub.title)
-        report.expect(
-            f"hub.deletable is readable on {hub.identifier}",
-            hub.deletable is not None,
-        )
-        report.require(f"hub.homeVisibility on {hub.identifier}", hub.homeVisibility)
-        report.require(
-            f"hub.recommendationsVisibility on {hub.identifier}",
-            hub.recommendationsVisibility,
-        )
-        for axis in (
+        # Read off the payload, not off the parsed object. The reference client
+        # substitutes a default for every one of these when the attribute is
+        # absent -- `deletable` defaults to True and the three axes to False
+        # (`plexapi/library.py:3035-3040`) -- so `hub.deletable is not None`
+        # can never fail and a fake that stopped sending the attribute
+        # altogether would still read green here. `deletable` is what
+        # `HubKind` is classified from and the axes are what §15.5 turns on, so
+        # what has to be checked is that the *server* stated them.
+        for stated in (
+            "deletable",
             "promotedToOwnHome",
             "promotedToSharedHome",
             "promotedToRecommended",
         ):
             report.expect(
-                f"hub.{axis} is readable on {hub.identifier}",
-                getattr(hub, axis, None) is not None,
+                f"the server states {stated} on {hub.identifier}",
+                stated in hub._data.attrib,
             )
+        report.require(f"hub.homeVisibility on {hub.identifier}", hub.homeVisibility)
+        report.require(
+            f"hub.recommendationsVisibility on {hub.identifier}",
+            hub.recommendationsVisibility,
+        )
 
     if collection is None:
         return
@@ -254,19 +279,26 @@ def check_hubs(section, collection, report: Report):
 
 
 def check_writes(section, item, collection, report: Report):
-    """The writes, all of them reversed before this returns.
+    """The writes, every reversible one of them reversed before this returns.
 
-    Run against somebody's real Plex as well as against the fake, so nothing
-    here may be left behind (P2).
+    **Never run against a server this run must not touch.** `uploadPoster`
+    below cannot be undone -- Plex selects an uploaded poster the moment it
+    arrives and the one it replaced is not addressable from here -- so the
+    real-server lane passes `--read-only` and never reaches this function
+    (`tests/reference.rs`). Everything else is wrapped so a failure mid-way
+    still unwinds to its own reversal, because a check that raises between a
+    write and its undo leaves the library changed (P2).
     """
     before = {label.tag for label in item.labels}
     item.addLabel("afisharr-cross-check", locked=False)
-    item.reload()
-    report.expect(
-        "editTags() adds a label the server reports back",
-        "afisharr-cross-check" in {label.tag for label in item.labels},
-    )
-    item.removeLabel("afisharr-cross-check", locked=False)
+    try:
+        item.reload()
+        report.expect(
+            "editTags() adds a label the server reports back",
+            "afisharr-cross-check" in {label.tag for label in item.labels},
+        )
+    finally:
+        item.removeLabel("afisharr-cross-check", locked=False)
     item.reload()
     report.expect(
         "editTags() removes it again, leaving what was there",
@@ -289,12 +321,14 @@ def check_writes(section, item, collection, report: Report):
     if collection is not None:
         original = collection.title
         collection.edit(**{"title.value": f"{original} (cross-check)"})
-        collection.reload()
-        report.expect(
-            "collection.edit() writes the title the server reports back",
-            collection.title == f"{original} (cross-check)",
-        )
-        collection.edit(**{"title.value": original})
+        try:
+            collection.reload()
+            report.expect(
+                "collection.edit() writes the title the server reports back",
+                collection.title == f"{original} (cross-check)",
+            )
+        finally:
+            collection.edit(**{"title.value": original})
 
     # A collection nothing has promoted is in the library and not in the
     # ordering space, and the reference client tells the two apart by getting

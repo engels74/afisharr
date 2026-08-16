@@ -118,16 +118,36 @@ pub(crate) struct CollectionBody {
     collection_mode: Option<StringOrNumber>,
     #[serde(default)]
     collection_sort: Option<StringOrNumber>,
+    /// The fields Plex reports a metadata lock on.
+    ///
+    /// A collection row carries them exactly as an item row does — it is the
+    /// same `Field` child on the same envelope. Read here because §15.6 wants
+    /// all three properties of a sort title, and a lock dropped on the way in
+    /// reads as *unlocked*: a teardown checking this would leave the
+    /// operator's collection permanently locked and report that it had not
+    /// (`I-REV-3`, P1).
+    #[serde(default, rename = "Field")]
+    field: Vec<FieldBody>,
+}
+
+/// One field's lock state, as Plex nests it.
+#[derive(Debug, Deserialize)]
+struct FieldBody {
+    #[serde(default)]
+    name: Option<String>,
+    #[serde(default)]
+    locked: Flag,
 }
 
 impl From<CollectionBody> for Collection {
     fn from(body: CollectionBody) -> Self {
+        let locked = body
+            .field
+            .iter()
+            .any(|field| field.name.as_deref() == Some("titleSort") && field.locked.is_set());
         let sort_title = match body.title_sort {
-            // Lock state is not carried on a collection list answer, and `false`
-            // here is "not reported", which is why nothing writes a sort title
-            // from a list read — the capture reads the item itself (§15.6).
-            Some(value) => SortTitle::present(value, false),
-            None => SortTitle::absent(false),
+            Some(value) => SortTitle::present(value, locked),
+            None => SortTitle::absent(locked),
         };
         Self {
             rating_key: RatingKey::new(body.rating_key),
@@ -187,6 +207,40 @@ mod tests {
         // Zero is a claim that the collection is empty, which is the fact
         // `I-SRC-1` refuses to synthesise from an answer that did not carry it.
         assert_eq!(collection(r#"{"ratingKey":"1"}"#).child_count, None);
+    }
+
+    #[test]
+    fn a_locked_sort_title_is_read_off_the_collection_row_it_arrived_on() {
+        // Dropped on the way in, a locked field read as unlocked — and a
+        // teardown that checked this would leave the operator's collection
+        // permanently locked and report that it had not (`I-REV-3`, P1). The
+        // same `Field` child an item row carries, because it is the same
+        // envelope.
+        let record = collection(
+            r#"{"ratingKey":"1","titleSort":"!001 Best",
+                "Field":[{"name":"titleSort","locked":1}]}"#,
+        );
+        assert!(record.sort_title.is_locked());
+        assert!(
+            !collection(r#"{"ratingKey":"1","titleSort":"!001 Best"}"#)
+                .sort_title
+                .is_locked()
+        );
+    }
+
+    #[test]
+    fn a_sort_title_can_be_absent_and_locked_on_a_collection_too() {
+        // The state a restore gets wrong, and the reason §15.6 names three
+        // properties rather than one.
+        let record = collection(r#"{"ratingKey":"1","Field":[{"name":"titleSort","locked":"1"}]}"#);
+        assert!(!record.sort_title.is_present());
+        assert!(record.sort_title.is_locked());
+    }
+
+    #[test]
+    fn a_lock_on_another_field_is_not_a_lock_on_the_sort_title() {
+        let record = collection(r#"{"ratingKey":"1","Field":[{"name":"label","locked":1}]}"#);
+        assert!(!record.sort_title.is_locked());
     }
 
     #[test]

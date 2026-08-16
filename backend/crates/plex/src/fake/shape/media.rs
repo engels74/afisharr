@@ -112,7 +112,7 @@ mod tests {
             &item(),
             Detail {
                 check_files: true,
-                withhold: false,
+                ..Detail::PLAIN
             },
         ));
         assert_eq!(rendered["Media"]["Part"][0]["accessible"], 1);
@@ -137,8 +137,8 @@ mod tests {
         let rendered = json::document(&media(
             &item(),
             Detail {
-                check_files: false,
                 withhold: true,
+                ..Detail::PLAIN
             },
         ));
         assert!(rendered["Media"].get("aspectRatio").is_none());
