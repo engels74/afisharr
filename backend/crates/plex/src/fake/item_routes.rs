@@ -58,9 +58,12 @@ pub(crate) async fn items(
     let wants_collections = edit::libtype(&arguments) == Some(plex_type("collection"));
     let mut container = shape::library_container(library).text("title1", library.title.clone());
     let rows: Vec<Element> = if wants_collections {
-        library
-            .collections
-            .iter()
+        // Filtered and ordered like any other row. Handing back the whole
+        // collection list to a caller that asked for one label is the failure
+        // `search` exists to remove, one libtype short — and `label` is the
+        // only filter the `collection` libtype declares.
+        search::select(&library.collections, &arguments)
+            .into_iter()
             .map(|collection| shape::collection(collection, library))
             .collect()
     } else {

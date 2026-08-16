@@ -502,10 +502,28 @@ async fn probe_blockers(
     // operator's own item carrying this test's sort title with nobody told
     // (P3, `I-REV-3`). The restore request went out either way; what this
     // catches is the restore that did not land.
-    if restored.is_err() {
+    //
+    // Read back rather than taken from the restore's own answer. `Incomplete`
+    // says the server did not report a count, not that the write missed
+    // (`edits.rs::edit_at`) — so a server that answers a write with an empty
+    // body would have every restore here reported as a failure, and the
+    // operator told their item was left changed when it was not. The item
+    // settles it, and it settles it whichever way Q-016 resolves.
+    let after = server
+        .item(&surface.item)
+        .await
+        .map_err(|error| {
+            format!(
+                "this test wrote the item's sort title and could not read the item back to \
+                 check the restore: {error} (the restore answered {restored:?})"
+            )
+        })?
+        .sort_title;
+    if after != before {
         return Err(format!(
-            "the item's sort title may have been changed and could not be put back: \
-             {restored:?} (the write answered {written:?})"
+            "the item's sort title was changed and could not be put back: it reads {after:?} \
+             and was {before:?} (the restore answered {restored:?}, the write answered \
+             {written:?})"
         ));
     }
 

@@ -331,6 +331,29 @@ def check_writes(section, item, collection, report: Report):
             "and the row it put there is on the home screen",
             promoted.promotedToOwnHome is True,
         )
+
+        # A collection carries labels exactly as an item does — `LabelMixin` is
+        # in `CollectionEditMixins` (`plexapi/mixins/__init__.py:115-120`) — and
+        # `label` is the only filter the `collection` libtype declares. Checked
+        # together, because a fake could hold the label and still hand back
+        # every collection to the filter that asked for it.
+        fresh.addLabel("afisharr-cross-check", locked=False)
+        fresh.reload()
+        report.expect(
+            "a collection reports back the label it was given",
+            "afisharr-cross-check" in {label.tag for label in fresh.labels},
+        )
+        labelled = section.search(libtype="collection", label="afisharr-cross-check")
+        report.expect(
+            "and a label filter answers that collection and no other",
+            [row.ratingKey for row in labelled] == [fresh.ratingKey],
+        )
+        fresh.removeLabel("afisharr-cross-check", locked=False)
+        fresh.reload()
+        report.expect(
+            "and removing it leaves the collection carrying none",
+            not fresh.labels,
+        )
     finally:
         fresh.delete()
 

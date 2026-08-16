@@ -38,6 +38,12 @@ pub(crate) fn library(scenario: &Scenario, seed: &mut Seed, spec: &LibrarySpec) 
         // switch on, and a fake that started there tests nothing.
         sort: 0,
         smart: spec.smart_collection,
+        // None, which is what a collection nothing has labelled carries. The
+        // labels a test wants come through the edit endpoint, so the filter is
+        // exercised against state a write produced rather than against state
+        // the seed handed it.
+        labels: Vec::new(),
+        labels_locked: false,
         items: items
             .iter()
             .take(3)

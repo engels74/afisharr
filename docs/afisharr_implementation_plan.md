@@ -890,10 +890,18 @@ is Task 7.7. Row 4 is the precondition for every item move meaning anything, whi
   - [x] 8. Answer a filter's choices only at the endpoint the vocabulary declared, and make the declared
      `key` and the served route agree for every filter — including the dotted field keys a real server
      uses (`plexapi/library.py:1082`, `:1004`), which the fake spells bare (`fake/vocabulary.rs:58-64`).
+  - [x] 9. Filter and order the **collection** listings too, at both endpoints that answer them —
+     `/all?type=18` and `/collections`. Subtasks 3 and 4 covered items only, and the collection branch
+     built its rows straight from `library.collections`, so a filter was ignored for the one libtype
+     whose vocabulary declares exactly one filter and nothing else. This needs `FakeCollection` to carry
+     `labels` at all: without the field, `label` was a filter the fake advertised and could not apply,
+     and a label edit aimed at a collection wrote nothing while a real server writes it
+     (`plexapi/library.py:890-899`).
 - [x] **Done when:** `python-plexapi`'s `search(libtype='collection')`, `search(genre=…)`,
   `search(year__gte=…)`, `listFilters('collection')`, and `listFilterChoices('genre')` each return the
-  right set against the fake, and a windowed read paged by headers returns the same items as one paged
-  by query arguments.
+  right set against the fake; `search(libtype='collection', label=…)` answers only the labelled
+  collections at both endpoints; and a windowed read paged by headers returns the same items as one
+  paged by query arguments.
 
 ### Task 2.1.6 Wire types, the token gate, and the facts a server withholds
 - **Build:** the spellings and the refusals a real server uses, and the absent-fact cases the fake
@@ -947,6 +955,14 @@ is Task 7.7. Row 4 is the precondition for every item move meaning anything, whi
      itself rather than as a shape set that differs somewhere.
   - [x] 5. Run the Task 2.1.1 cross-check against the real server too, not only against the fake. A
      reference client that reads the fake and not the server has proved the fake self-consistent.
+  - [ ] 6. Capture what a real server answers to `PUT /library/sections/{id}/all` — a size, an empty
+     body, or `204` — and report it by name. This is **Q-016**, and every edit this build makes turns on
+     it: `edit_at` reads an empty answer as `ServerError::Incomplete` while the reference it cites in
+     the same comment reads a blank body on a write as success (`edits.rs:69-83`,
+     `plexapi/server.py:759`, `plexapi/utils.py:836-839`). If a real server answers empty, this build
+     reports every landed edit as a failure. Left as it is until a server says, because reversing it
+     swaps one unevidenced claim for another — the probe reads the item back rather than trusting the
+     write's own answer, so it is correct either way (`tests/contract.rs::probe_blockers`).
 - [ ] **Done when:** the contract test passes in the release lane against a real server; a field
   deleted from the fake's answer fails it by name; and a field added to the fake that the real server
   does not send fails it by name.

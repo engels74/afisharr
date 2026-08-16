@@ -87,6 +87,17 @@ pub struct FakeCollection {
     /// which is a refusal nothing could reach while the fake had no way to
     /// mark one.
     pub smart: bool,
+    /// The labels on it.
+    ///
+    /// A collection carries them exactly as an item does: the same edit
+    /// endpoint writes them, and the `collection` libtype's own filter
+    /// vocabulary declares `label` and nothing else
+    /// (`plexapi/library.py:890-899`). A collection that held none could not
+    /// answer that filter, and a label edit aimed at one wrote nothing and
+    /// answered that it had.
+    pub labels: Vec<String>,
+    /// Whether Plex's metadata lock is set on the label field.
+    pub labels_locked: bool,
     /// The rating keys it holds, in order.
     pub items: Vec<String>,
     /// How many moves this collection accepts before they silently no-op.

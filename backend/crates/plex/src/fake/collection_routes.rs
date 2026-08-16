@@ -15,7 +15,7 @@ use crate::fake::{
     plan::FakeOperation,
     request::{Arguments, Paging},
     routes::Running,
-    shape,
+    search, shape,
     state::FakeCollection,
     vocabulary,
 };
@@ -46,9 +46,12 @@ pub(crate) async fn collections(
     let Some(library) = world.library(&key) else {
         return Err(rendering.refusal(StatusCode::NOT_FOUND, 1000, "Not Found"));
     };
-    let rows: Vec<Element> = library
-        .collections
-        .iter()
+    // The same selection `/all?type=18` makes, because it is the same question
+    // asked at the other endpoint a client lists collections from. A filter
+    // honoured at one and ignored at the other is a fake that answers
+    // differently depending on which route the caller happened to pick.
+    let rows: Vec<Element> = search::select(&library.collections, &arguments)
+        .into_iter()
         .map(|collection| shape::collection(collection, library))
         .collect();
     let total = rows.len();
@@ -125,6 +128,8 @@ pub(crate) async fn create_collection(
         // switch on, and a fake that started there tests nothing.
         sort: 0,
         smart,
+        labels: Vec::new(),
+        labels_locked: false,
         items,
         moves_left: budget,
     };

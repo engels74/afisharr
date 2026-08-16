@@ -126,12 +126,16 @@ pub(crate) fn apply_to_item(item: &mut FakeItem, arguments: &Arguments) -> bool 
 /// Applies one edit to one collection. Returns whether anything was written.
 ///
 /// Counted field by field rather than from [`writes_anything`], because a
-/// collection holds fewer fields than an item does: a tag edit aimed at one
-/// names a field this fake does not keep, so it writes nothing — and answering
+/// collection holds fewer fields than an item does: an edit naming only a field
+/// this fake does not keep on a collection writes nothing, and answering
 /// `size: 1` for it is the fake claiming a write it never made, which is the
 /// failure the count exists to expose.
 pub(crate) fn apply_to_collection(collection: &mut FakeCollection, arguments: &Arguments) -> bool {
-    let mut wrote = false;
+    let mut wrote = apply_tags(
+        &mut collection.labels,
+        &mut collection.labels_locked,
+        arguments,
+    );
     if let Some(title) = arguments.first("title.value") {
         title.clone_into(&mut collection.title);
         wrote = true;
@@ -172,23 +176,32 @@ pub(crate) fn apply_to_collection(collection: &mut FakeCollection, arguments: &A
     wrote
 }
 
-/// Adds, removes, and locks one tag field.
-fn apply_tags(tags: &mut Vec<String>, locked: &mut bool, arguments: &Arguments) {
-    for removed in removals(arguments, "label") {
-        tags.retain(|tag| tag != &removed);
+/// Adds, removes, and locks one tag field. Returns whether the edit named it.
+///
+/// Named rather than changed: removing a tag the row does not carry is still a
+/// write a real server performs and counts, and a fake that answered `0` for it
+/// would report a successful teardown as a failed one.
+fn apply_tags(tags: &mut Vec<String>, locked: &mut bool, arguments: &Arguments) -> bool {
+    let removed = removals(arguments, "label");
+    let added = additions(arguments, "label");
+    for tag in &removed {
+        tags.retain(|held| held != tag);
     }
-    for added in additions(arguments, "label") {
-        if !tags.contains(&added) {
-            tags.push(added);
+    for tag in added.iter().cloned() {
+        if !tags.contains(&tag) {
+            tags.push(tag);
         }
     }
     // The lock accompanies every tag edit a real client sends
     // (`plexapi/mixins/edit.py:328-330`), and it defaults to *locked* there. A
     // field left locked is the `I-REV-3` failure on the one field the operator
     // touches daily, so the fake has to be able to show it.
+    let mut named = !removed.is_empty() || !added.is_empty();
     if let Some(value) = arguments.first("label.locked") {
         *locked = value != "0";
+        named = true;
     }
+    named
 }
 
 #[cfg(test)]
@@ -336,14 +349,32 @@ mod tests {
     }
 
     #[test]
-    fn a_tag_edit_aimed_at_a_collection_writes_nothing_and_says_so() {
-        // This fake keeps no tags on a collection, so the edit wrote nothing.
-        // Answering `size: 1` for it would be the fake claiming a write it
-        // never made — the failure the count exists to expose.
+    fn a_collections_labels_round_trip_the_way_an_items_do() {
+        // One tag, one endpoint, one libtype argument apart. A collection that
+        // held no labels could not answer the `label` filter its own libtype
+        // declares, and answered a label edit with a write it never made.
         let mut collection = collection();
-        assert!(!apply_to_collection(
+        assert!(apply_to_collection(
             &mut collection,
             &Arguments::parse(Some("label[0].tag.tag=afisharr&label.locked=0"))
+        ));
+        assert_eq!(collection.labels, ["afisharr"]);
+        assert!(!collection.labels_locked);
+        assert!(apply_to_collection(
+            &mut collection,
+            &Arguments::parse(Some("label%5B%5D.tag.tag-=afisharr"))
+        ));
+        assert!(collection.labels.is_empty());
+    }
+
+    #[test]
+    fn a_removal_of_a_label_a_collection_does_not_carry_is_still_a_write() {
+        // A real server writes the row and counts it. Answering `0` would
+        // report a teardown that landed as one that failed (`I-REV-3`).
+        let mut collection = collection();
+        assert!(apply_to_collection(
+            &mut collection,
+            &Arguments::parse(Some("label%5B%5D.tag.tag-=never-applied"))
         ));
     }
 

@@ -134,6 +134,8 @@ mod tests {
             mode: -1,
             sort: 0,
             smart: false,
+            labels: Vec::new(),
+            labels_locked: false,
             items: vec!["1".to_owned(), "2".to_owned(), "3".to_owned()],
             moves_left,
         }

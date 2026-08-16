@@ -8300,8 +8300,9 @@ decision in §22.2 or §22.3, not an entry here.
 
 ### 23.2 Questions only a real server can answer
 
-Two questions cannot be settled by discussion. Both belong in the implementation plan as explicit
-spikes rather than folded into implementation tasks, where they would be answered by assumption.
+Three questions cannot be settled by discussion. The first two belong in the implementation plan as
+explicit spikes rather than folded into implementation tasks, where they would be answered by
+assumption. The third is answered by a capture the release lane already takes.
 
 **Q-014 — What is the real precision budget before exhaustion?** `gapBudget` defaults to 8, which is
 a guess. Too high and moves start failing silently; too low and rebalances run constantly, burning
@@ -8314,6 +8315,16 @@ is the most consequential unknown left in the design.** It determines whether or
 planning problem or several — which changes the planner, the gap accounting, and the lease scope —
 and it also blocks Q-013. Schedule it first.
 *Design: Placement and ordering §2.*
+
+**Q-016 — What does a real server answer to `PUT /library/sections/{id}/all`?** A size, an empty
+body, or `204`. Every edit this build makes turns on it. The client reads an empty answer as "the
+server did not say" and reports the edit as incomplete; the reference client reads a blank body on a
+write as success (`plexapi/server.py:759`, `plexapi/utils.py:836-839`). If a real server answers
+empty, this build reports every landed edit — a collection edit, a label edit, a sort-title write —
+as a failure. Not a spike: the release lane's contract test already writes and captures, so it
+answers this by name (implementation plan, Task 2.1.7). Until it does, the current reading stands,
+because reversing it swaps one unevidenced claim for another.
+*Design: §15.6, and the reversibility invariant `I-REV-3`.*
 
 ### 23.3 Superseded artifacts
 

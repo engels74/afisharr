@@ -50,6 +50,22 @@ pub(crate) fn collection(collection: &FakeCollection, library: &FakeLibrary) -> 
                 .flag("locked", true),
         );
     }
+    if collection.labels_locked {
+        row = row.child(
+            Element::named("Field")
+                .text("name", "label")
+                .flag("locked", true),
+        );
+    }
+    // The same children an item's row carries, because it is the same tag on
+    // the same endpoint: a label written to a collection and never read back
+    // would make the write unprovable from the answer.
+    row = row.children(
+        collection
+            .labels
+            .iter()
+            .map(|label| Element::named("Label").text("tag", label.clone())),
+    );
     row
 }
 

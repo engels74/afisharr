@@ -18,179 +18,12 @@
 //!   matching nothing. An unknown argument answering an empty library is a
 //!   fetch failure wearing the shape of an empty result (`I-SRC-1`).
 
-use crate::fake::{request::Arguments, state::FakeItem, vocabulary::GENRES};
+mod predicate;
+mod row;
 
-/// The fields the fake filters on — the ones its own vocabulary declares.
-const FILTERED: [&str; 4] = ["genre", "year", "title", "label"];
-
-/// How one filter argument compares.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Operator {
-    /// `=` — any of the values.
-    Any,
-    /// `!` — none of the values.
-    None,
-    /// `=` doubled — exactly one of the values, rather than a contains match.
-    Exact,
-    /// `!=` — not exactly any of the values.
-    NotExact,
-    /// `>>` — at or above.
-    AtLeast,
-    /// `<<` — at or below.
-    AtMost,
-    /// `&` — every value, rather than any.
-    All,
-}
-
-impl Operator {
-    /// Splits a query key into its field and its operator.
-    ///
-    /// The longest suffix first: `!=` before `!`, or `title!=` would read as
-    /// the field `title=` compared with `!`.
-    fn split(key: &str) -> (&str, Self) {
-        for (suffix, operator) in [
-            ("!=", Self::NotExact),
-            (">>", Self::AtLeast),
-            ("<<", Self::AtMost),
-            ("!", Self::None),
-            ("=", Self::Exact),
-            ("&", Self::All),
-        ] {
-            if let Some(field) = key.strip_suffix(suffix) {
-                return (field, operator);
-            }
-        }
-        (key, Self::Any)
-    }
-}
-
-/// One filter argument, resolved against the fields the fake knows.
-#[derive(Debug, Clone)]
-struct Predicate {
-    field: String,
-    operator: Operator,
-    values: Vec<String>,
-}
-
-impl Predicate {
-    /// Whether one item satisfies this predicate.
-    fn matches(&self, item: &FakeItem) -> bool {
-        match self.field.as_str() {
-            // Only the genre choice list has numeric keys, so only a genre
-            // value is resolved through it. Resolving a label the same way
-            // would answer `label=93` with everything tagged `Comedy`.
-            "genre" => self.tags(&item.genres, true),
-            "label" => self.tags(&item.labels, false),
-            "year" => self.number(item.year),
-            "title" => self.text(&item.title),
-            // Unreachable: nothing outside `FILTERED` builds a predicate.
-            _ => true,
-        }
-    }
-
-    /// A tag comparison, over the values a choice list resolves to.
-    fn tags(&self, carried: &[String], resolve: bool) -> bool {
-        let wanted: Vec<String> = self
-            .values
-            .iter()
-            .map(|value| {
-                if resolve {
-                    tag_title(value)
-                } else {
-                    value.clone()
-                }
-            })
-            .collect();
-        let holds = |value: &String| carried.iter().any(|tag| tag.eq_ignore_ascii_case(value));
-        match self.operator {
-            Operator::All => wanted.iter().all(holds),
-            Operator::None | Operator::NotExact => !wanted.iter().any(holds),
-            _ => wanted.iter().any(holds),
-        }
-    }
-
-    /// A numeric comparison.
-    fn number(&self, carried: Option<i32>) -> bool {
-        // An item with no value for the field is not a match, and is not a
-        // failure either: `year>>=2000` on an item with no year is a question
-        // the item cannot answer (P1).
-        let Some(carried) = carried else {
-            return false;
-        };
-        let numbers: Vec<i32> = self
-            .values
-            .iter()
-            .filter_map(|value| value.parse().ok())
-            .collect();
-        match self.operator {
-            Operator::AtLeast => numbers.iter().any(|value| carried >= *value),
-            Operator::AtMost => numbers.iter().any(|value| carried <= *value),
-            Operator::None | Operator::NotExact => !numbers.contains(&carried),
-            Operator::All => numbers.iter().all(|value| carried == *value),
-            _ => numbers.contains(&carried),
-        }
-    }
-
-    /// A string comparison. Plex's bare `=` is a contains match, and the
-    /// doubled one is equality — which is the whole reason `==` exists.
-    fn text(&self, carried: &str) -> bool {
-        let lowered = carried.to_lowercase();
-        let contains = |value: &String| lowered.contains(&value.to_lowercase());
-        let equals = |value: &String| carried.eq_ignore_ascii_case(value);
-        match self.operator {
-            Operator::Exact => self.values.iter().any(equals),
-            Operator::NotExact => !self.values.iter().any(equals),
-            Operator::None => !self.values.iter().any(contains),
-            Operator::All => self.values.iter().all(contains),
-            _ => self.values.iter().any(contains),
-        }
-    }
-}
-
-/// The title a tag value names, whether it arrived as a key or as a title.
-///
-/// A client resolves a genre's name to its key through the choice list and
-/// sends the key; a hand-written query sends the name. Both are the same
-/// question.
-fn tag_title(value: &str) -> String {
-    GENRES
-        .iter()
-        .find(|(key, _)| *key == value)
-        .map_or_else(|| value.to_owned(), |(_, title)| (*title).to_owned())
-}
-
-/// Every predicate one query carries.
-fn predicates(arguments: &Arguments) -> Vec<Predicate> {
-    let mut predicates: Vec<Predicate> = Vec::new();
-    for (key, value) in arguments.pairs() {
-        // The libtype prefix a real client sends back verbatim from the field
-        // list it discovered: `movie.genre`, not `genre`.
-        let bare = key.rsplit('.').next().unwrap_or(key);
-        let (field, operator) = Operator::split(bare);
-        if !FILTERED.contains(&field) {
-            continue;
-        }
-        let values: Vec<String> = if operator == Operator::All {
-            vec![value.clone()]
-        } else {
-            value.split(',').map(str::to_owned).collect()
-        };
-        // A repeated conjunctive key is one predicate over several values, not
-        // several predicates — `genre&=93&genre&=94` asks for both at once.
-        match predicates
-            .iter_mut()
-            .find(|existing| existing.field == field && existing.operator == operator)
-        {
-            Some(existing) if operator == Operator::All => existing.values.extend(values),
-            _ => predicates.push(Predicate {
-                field: field.to_owned(),
-                operator,
-                values,
-            }),
-        }
-    }
-    predicates
-}
+use crate::fake::request::Arguments;
+use crate::fake::search::predicate::predicates;
+pub(crate) use crate::fake::search::row::Row;
 
 /// The sort key and direction a query asked for.
 fn sort_of(arguments: &Arguments) -> Option<(String, bool)> {
@@ -202,12 +35,12 @@ fn sort_of(arguments: &Arguments) -> Option<(String, bool)> {
     Some((key.to_owned(), direction == "desc"))
 }
 
-/// The items one listing call asked for, filtered and ordered.
-pub(crate) fn select<'a>(items: &'a [FakeItem], arguments: &Arguments) -> Vec<&'a FakeItem> {
+/// The rows one listing call asked for, filtered and ordered.
+pub(crate) fn select<'a, T: Row>(rows: &'a [T], arguments: &Arguments) -> Vec<&'a T> {
     let predicates = predicates(arguments);
-    let mut selected: Vec<&FakeItem> = items
+    let mut selected: Vec<&T> = rows
         .iter()
-        .filter(|item| predicates.iter().all(|predicate| predicate.matches(item)))
+        .filter(|row| predicates.iter().all(|predicate| predicate.matches(*row)))
         .collect();
     if let Some((key, descending)) = sort_of(arguments) {
         // A key the fake does not sort by leaves the library's own order,
@@ -215,22 +48,22 @@ pub(crate) fn select<'a>(items: &'a [FakeItem], arguments: &Arguments) -> Vec<&'
         let ordered = match key.as_str() {
             "titleSort" | "title" => {
                 selected.sort_by(|left, right| {
-                    sort_title(left)
-                        .cmp(&sort_title(right))
-                        .then_with(|| left.rating_key.cmp(&right.rating_key))
+                    sort_title(*left)
+                        .cmp(&sort_title(*right))
+                        .then_with(|| left.rating_key().cmp(right.rating_key()))
                 });
                 true
             }
             "year" => {
                 selected.sort_by(|left, right| {
-                    left.year
-                        .cmp(&right.year)
-                        .then_with(|| left.rating_key.cmp(&right.rating_key))
+                    left.year()
+                        .cmp(&right.year())
+                        .then_with(|| left.rating_key().cmp(right.rating_key()))
                 });
                 true
             }
             "addedAt" => {
-                selected.sort_by(|left, right| left.rating_key.cmp(&right.rating_key));
+                selected.sort_by(|left, right| left.rating_key().cmp(right.rating_key()));
                 true
             }
             _ => false,
@@ -244,21 +77,20 @@ pub(crate) fn select<'a>(items: &'a [FakeItem], arguments: &Arguments) -> Vec<&'
     selected
 }
 
-/// What an item sorts under: its sort title, or its title when it has none.
+/// What a row sorts under: its sort title, or its title when it has none.
 ///
 /// The substitution a client makes for display, and the reason the *capture*
 /// reads presence off the raw attribute instead (§15.6).
-fn sort_title(item: &FakeItem) -> String {
-    item.sort_title
-        .clone()
-        .unwrap_or_else(|| item.title.clone())
+fn sort_title(row: &impl Row) -> String {
+    row.sort_title()
+        .unwrap_or_else(|| row.title())
         .to_lowercase()
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::fake::{library::World, scenario::Scenario};
+    use crate::fake::{library::World, scenario::Scenario, state::FakeItem};
 
     fn items() -> Vec<FakeItem> {
         World::build(&Scenario::behaving(1).holding(12, 0))
@@ -367,6 +199,46 @@ mod tests {
         assert_eq!(
             descending,
             ascending.iter().rev().cloned().collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn a_collection_answers_the_label_filter_its_own_libtype_declares() {
+        // The `collection` libtype declares `label` and nothing else, and the
+        // whole list came back whatever was asked — so an assertion that the
+        // wanted collection is in the answer passed however wrong the filter.
+        let mut collections = World::build(&Scenario::behaving(1))
+            .libraries
+            .swap_remove(0)
+            .collections;
+        // A second one, so the filter has something to exclude: a predicate
+        // checked against a list of one passes whatever it does.
+        let mut other = collections[0].clone();
+        other.rating_key = "15009".to_owned();
+        other.title = "Another Collection".to_owned();
+        collections.push(other);
+        collections[0].labels.push("afisharr".to_owned());
+        let wanted = collections[0].rating_key.clone();
+        let selected: Vec<String> = select(&collections, &Arguments::parse(Some("label=afisharr")))
+            .into_iter()
+            .map(|collection| collection.rating_key.clone())
+            .collect();
+        assert_eq!(selected, [wanted]);
+    }
+
+    #[test]
+    fn a_collection_carries_no_year_and_answers_no_year_filter() {
+        // Not a match, and not a failure either: a collection cannot answer the
+        // question (P1). The list it is not in is the honest answer.
+        let collections = World::build(&Scenario::behaving(1))
+            .libraries
+            .swap_remove(0)
+            .collections;
+        assert!(select(&collections, &Arguments::parse(Some("year>>=1990"))).is_empty());
+        assert_eq!(
+            select(&collections, &Arguments::parse(Some("sort=titleSort:desc"))).len(),
+            collections.len(),
+            "a sort excludes nothing"
         );
     }
 
