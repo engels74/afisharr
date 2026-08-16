@@ -158,30 +158,40 @@ def check_search_arguments(section, report: Report):
     )
     # The pivot is read off the library rather than written down: this runs
     # against a real server too, and a hard-coded year there is a filter that
-    # matches everything or nothing for a reason that is not the fake's.
+    # matches everything or nothing for a reason that is not the fake's. A
+    # library where nothing carries a year is a named failure rather than an
+    # IndexError, because a traceback says only that something went wrong.
     years = sorted(item.year for item in everything if item.year)
-    pivot = years[len(years) // 2]
-    modern = section.search(**{"year>>": pivot})
-    report.expect(
-        f"a range filter at {pivot} narrows the result",
-        0 < len(modern) <= len(everything),
-    )
-    sorted_titles = [item.titleSort for item in section.search(sort="titleSort:asc")]
+    if report.expect("some item carries a year to pivot a range filter on", bool(years)):
+        pivot = years[len(years) // 2]
+        modern = section.search(**{"year>>": pivot})
+        report.expect(
+            f"a range filter at {pivot} narrows the result",
+            0 < len(modern) <= len(everything),
+        )
+        # Applied by the reference client itself, over the answer: it needs the
+        # attribute to be on the row at all, which is a different claim about
+        # the fake from the one above.
+        recent = section.search(**{"year__gte": pivot})
+        report.expect(
+            f"a client-side comparison at {pivot} narrows the result",
+            0 < len(recent) <= len(everything),
+        )
+
+    # Case-folded, and with the title standing in where the server sent no
+    # sort title: Plex sorts case-insensitively and `sorted()` does not, so a
+    # real library holding `apple` beside `Banana` would fail this for a
+    # reason that is not the server's ordering. A `None` in the list would not
+    # even compare.
+    sorted_titles = [
+        item.titleSort or item.title or "" for item in section.search(sort="titleSort:asc")
+    ]
     report.expect(
         "search(sort=...) orders the result",
-        sorted_titles == sorted(sorted_titles),
+        sorted_titles == sorted(sorted_titles, key=str.lower),
     )
     windowed = section.search(container_start=1, container_size=2, maxresults=2)
     report.expect("a windowed search returns the window", len(windowed) == 2)
-
-    # Applied by the reference client itself, over the answer: it needs the
-    # attribute to be on the row at all, which is a different claim about the
-    # fake from the ones above.
-    recent = section.search(**{"year__gte": pivot})
-    report.expect(
-        f"a client-side comparison at {pivot} narrows the result",
-        0 < len(recent) <= len(everything),
-    )
 
     as_collections = section.search(libtype="collection")
     report.require("search(libtype='collection') answers collections", as_collections)

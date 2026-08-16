@@ -76,8 +76,11 @@ impl Predicate {
     /// Whether one item satisfies this predicate.
     fn matches(&self, item: &FakeItem) -> bool {
         match self.field.as_str() {
-            "genre" => self.tags(&item.genres),
-            "label" => self.tags(&item.labels),
+            // Only the genre choice list has numeric keys, so only a genre
+            // value is resolved through it. Resolving a label the same way
+            // would answer `label=93` with everything tagged `Comedy`.
+            "genre" => self.tags(&item.genres, true),
+            "label" => self.tags(&item.labels, false),
             "year" => self.number(item.year),
             "title" => self.text(&item.title),
             // Unreachable: nothing outside `FILTERED` builds a predicate.
@@ -86,8 +89,18 @@ impl Predicate {
     }
 
     /// A tag comparison, over the values a choice list resolves to.
-    fn tags(&self, carried: &[String]) -> bool {
-        let wanted: Vec<String> = self.values.iter().map(|value| tag_title(value)).collect();
+    fn tags(&self, carried: &[String], resolve: bool) -> bool {
+        let wanted: Vec<String> = self
+            .values
+            .iter()
+            .map(|value| {
+                if resolve {
+                    tag_title(value)
+                } else {
+                    value.clone()
+                }
+            })
+            .collect();
         let holds = |value: &String| carried.iter().any(|tag| tag.eq_ignore_ascii_case(value));
         match self.operator {
             Operator::All => wanted.iter().all(holds),
@@ -296,6 +309,21 @@ mod tests {
     #[test]
     fn a_negated_tag_filter_excludes_rather_than_including() {
         assert_eq!(keys("genre!=93").len(), 8);
+    }
+
+    #[test]
+    fn a_label_value_is_not_resolved_through_the_genre_choice_list() {
+        // `label=93` asks for the label spelled `93`. Resolved through the
+        // genre choices it asked for everything tagged `Comedy` instead, which
+        // is a different question answered confidently.
+        let mut items = items();
+        items[0].labels.push("93".to_owned());
+        let wanted = items[0].rating_key.clone();
+        let selected: Vec<String> = select(&items, &Arguments::parse(Some("label=93")))
+            .into_iter()
+            .map(|item| item.rating_key.clone())
+            .collect();
+        assert_eq!(selected, [wanted]);
     }
 
     #[test]

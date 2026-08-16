@@ -233,6 +233,7 @@ async fn the_write_shapes_agree_against_a_collection_this_test_removes_again() {
 /// the rest did, because this runs on somebody's real Plex (P2).
 async fn write_cycle(client: &PlexServerClient, surface: &Surface) -> Vec<(&'static str, Value)> {
     let mut answers = Vec::new();
+    let title = real::scratch("write cycle");
     let identity = client
         .identity()
         .await
@@ -243,14 +244,18 @@ async fn write_cycle(client: &PlexServerClient, surface: &Surface) -> Vec<(&'sta
         .create_collection(
             &surface.section,
             ItemKind::Movie,
-            real::SCRATCH,
+            &title,
             &server,
             std::slice::from_ref(&surface.item),
         )
         .await
         .expect("POST /library/collections must answer");
+    // The *read back* of what the create made, not the create's own answer:
+    // `raw` can only issue a `GET`, so the `POST` body itself is still
+    // uncompared. Named for what it is, because a capture filed under the
+    // wrong call is worse than no capture at all.
     answers.push((
-        "POST /library/collections",
+        "GET /library/collections/{key}/children",
         real::raw(
             client,
             &format!("library/collections/{}/children", created.rating_key),
@@ -270,7 +275,7 @@ async fn write_cycle(client: &PlexServerClient, surface: &Surface) -> Vec<(&'sta
         .await
         .expect("the collection list must answer");
     assert!(
-        !gone.iter().any(|row| row.title == real::SCRATCH),
+        !gone.iter().any(|row| row.title == title),
         "nothing this test created may be left behind"
     );
 
@@ -488,9 +493,16 @@ async fn probe_blockers(
             before.is_locked(),
         )
         .await;
-    if written.is_ok() && restored.is_err() {
+    // Reported whatever the write answered, not only when it answered well: a
+    // write the server performed and declined to describe comes back as
+    // `Incomplete`, and gating the report on `written.is_ok()` would leave the
+    // operator's own item carrying this test's sort title with nobody told
+    // (P3, `I-REV-3`). The restore request went out either way; what this
+    // catches is the restore that did not land.
+    if restored.is_err() {
         return Err(format!(
-            "the item's sort title was changed and could not be put back: {restored:?}"
+            "the item's sort title may have been changed and could not be put back: \
+             {restored:?} (the write answered {written:?})"
         ));
     }
 
@@ -514,7 +526,7 @@ async fn create_scratch(server: &PlexServerClient, surface: &Surface) -> RatingK
         .create_collection(
             &surface.section,
             ItemKind::Movie,
-            real::SCRATCH,
+            &real::scratch("ordering blockers"),
             &MachineIdentifier::new(identity.machine_identifier.as_str()),
             std::slice::from_ref(&surface.item),
         )

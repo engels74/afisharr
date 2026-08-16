@@ -26,11 +26,20 @@ pub const URL: &str = "AFISHARR_PLEX_CONTRACT_URL";
 /// The token the release lane supplies for it.
 pub const TOKEN: &str = "AFISHARR_PLEX_CONTRACT_TOKEN";
 
-/// The title the write exercise gives what it creates.
+/// The title one test gives the collection it creates and deletes again.
 ///
 /// Named so an operator who finds one on their own server knows what it is and
 /// that it should not be there. Nothing is meant to survive the test (P2).
-pub const SCRATCH: &str = "Afisharr contract test (safe to delete)";
+///
+/// Distinct per test, because the release lane runs the contract tests in
+/// parallel against one real server: two of them create a scratch collection,
+/// and one asserts that nothing it created is left behind. Sharing one title
+/// made that assertion read the *other* test's collection and fail for a
+/// reason that is not a drift.
+#[must_use]
+pub fn scratch(purpose: &str) -> String {
+    format!("Afisharr contract test — {purpose} (safe to delete)")
+}
 
 /// What a real Plex answers that this build deliberately does not model.
 ///
