@@ -38,7 +38,7 @@ pub(crate) async fn hubs(
     rendering: Rendering,
     arguments: Arguments,
 ) -> Result<Answer, Response> {
-    if let Some(refusal) = running.gate(FakeOperation::Hubs).await {
+    if let Some(refusal) = running.gate(FakeOperation::Hubs, rendering).await {
         return Err(refusal);
     }
     let wanted = arguments.first("metadataItemId").map(str::to_owned);
@@ -75,7 +75,7 @@ pub(crate) async fn promote(
     rendering: Rendering,
     arguments: Arguments,
 ) -> Result<Answer, Response> {
-    if let Some(refusal) = running.gate(FakeOperation::PromoteHub).await {
+    if let Some(refusal) = running.gate(FakeOperation::PromoteHub, rendering).await {
         return Err(refusal);
     }
     let Some(collection_key) = arguments.first("metadataItemId").map(str::to_owned) else {
@@ -94,11 +94,14 @@ pub(crate) async fn promote(
         return Err(rendering.refusal(StatusCode::NOT_FOUND, 1000, "Not Found"));
     };
 
-    if !library
+    // Promoting a collection that already has a row writes that row rather than
+    // adding a second: one collection is one row, and two would be a space no
+    // real server answers with.
+    let existing = library
         .hubs
         .iter()
-        .any(|hub| hub.rating_key.as_deref() == Some(collection_key.as_str()))
-    {
+        .position(|hub| hub.rating_key.as_deref() == Some(collection_key.as_str()));
+    let at = existing.unwrap_or_else(|| {
         library.hubs.push(FakeHub {
             identifier: hub_identifier(&library.key, &collection_key),
             title,
@@ -108,14 +111,9 @@ pub(crate) async fn promote(
             shared_home: false,
             recommended: false,
         });
-    }
-    let Some(row) = library
-        .hubs
-        .iter_mut()
-        .find(|hub| hub.rating_key.as_deref() == Some(collection_key.as_str()))
-    else {
-        return Err(rendering.refusal(StatusCode::NOT_FOUND, 1000, "Not Found"));
-    };
+        library.hubs.len() - 1
+    });
+    let row = &mut library.hubs[at];
     write_axes(row, &arguments);
     let body = shape::hub(row);
     Ok(rendering.answer(shape::container().number("size", 1_i64).child(body)))
@@ -132,7 +130,7 @@ pub(crate) async fn move_hub(
     rendering: Rendering,
     arguments: Arguments,
 ) -> Result<Answer, Response> {
-    if let Some(refusal) = running.gate(FakeOperation::MoveHub).await {
+    if let Some(refusal) = running.gate(FakeOperation::MoveHub, rendering).await {
         return Err(refusal);
     }
     let after = arguments.first("after").map(str::to_owned);
@@ -150,7 +148,10 @@ pub(crate) async fn set_visibility(
     rendering: Rendering,
     arguments: Arguments,
 ) -> Result<Answer, Response> {
-    if let Some(refusal) = running.gate(FakeOperation::SetHubVisibility).await {
+    if let Some(refusal) = running
+        .gate(FakeOperation::SetHubVisibility, rendering)
+        .await
+    {
         return Err(refusal);
     }
     let mut world = running.world();
@@ -177,7 +178,7 @@ pub(crate) async fn remove_hub(
     Path((key, hub)): Path<(String, String)>,
     rendering: Rendering,
 ) -> Result<Answer, Response> {
-    if let Some(refusal) = running.gate(FakeOperation::RemoveHub).await {
+    if let Some(refusal) = running.gate(FakeOperation::RemoveHub, rendering).await {
         return Err(refusal);
     }
     let mut world = running.world();
@@ -200,7 +201,7 @@ pub(crate) async fn remove_every_hub(
     Path(key): Path<String>,
     rendering: Rendering,
 ) -> Result<Answer, Response> {
-    if let Some(refusal) = running.gate(FakeOperation::RemoveHub).await {
+    if let Some(refusal) = running.gate(FakeOperation::RemoveHub, rendering).await {
         return Err(refusal);
     }
     let mut world = running.world();

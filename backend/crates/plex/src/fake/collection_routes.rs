@@ -39,7 +39,7 @@ pub(crate) async fn collections(
     } else {
         FakeOperation::Collections
     };
-    if let Some(refusal) = running.gate(operation).await {
+    if let Some(refusal) = running.gate(operation, rendering).await {
         return Err(refusal);
     }
     let mut world = running.world();
@@ -84,7 +84,10 @@ pub(crate) async fn create_collection(
     rendering: Rendering,
     arguments: Arguments,
 ) -> Result<Answer, Response> {
-    if let Some(refusal) = running.gate(FakeOperation::CreateCollection).await {
+    if let Some(refusal) = running
+        .gate(FakeOperation::CreateCollection, rendering)
+        .await
+    {
         return Err(refusal);
     }
     let title = arguments.first("title").unwrap_or_default().to_owned();
@@ -140,7 +143,10 @@ pub(crate) async fn delete_collection(
     Path(key): Path<String>,
     rendering: Rendering,
 ) -> Result<Answer, Response> {
-    if let Some(refusal) = running.gate(FakeOperation::DeleteCollection).await {
+    if let Some(refusal) = running
+        .gate(FakeOperation::DeleteCollection, rendering)
+        .await
+    {
         return Err(refusal);
     }
     let mut world = running.world();
@@ -165,7 +171,10 @@ pub(crate) async fn collection_items(
     arguments: Arguments,
     paging: Paging,
 ) -> Result<Answer, Response> {
-    if let Some(refusal) = running.gate(FakeOperation::CollectionItems).await {
+    if let Some(refusal) = running
+        .gate(FakeOperation::CollectionItems, rendering)
+        .await
+    {
         return Err(refusal);
     }
     let detail = running.detail(&arguments);
@@ -216,7 +225,10 @@ pub(crate) async fn add_items(
     rendering: Rendering,
     arguments: Arguments,
 ) -> Result<Answer, Response> {
-    if let Some(refusal) = running.gate(FakeOperation::AddCollectionItems).await {
+    if let Some(refusal) = running
+        .gate(FakeOperation::AddCollectionItems, rendering)
+        .await
+    {
         return Err(refusal);
     }
     let adding = rating_keys(arguments.first("uri"));
@@ -242,7 +254,10 @@ pub(crate) async fn remove_item(
     Path((key, item)): Path<(String, String)>,
     rendering: Rendering,
 ) -> Result<Answer, Response> {
-    if let Some(refusal) = running.gate(FakeOperation::RemoveCollectionItem).await {
+    if let Some(refusal) = running
+        .gate(FakeOperation::RemoveCollectionItem, rendering)
+        .await
+    {
         return Err(refusal);
     }
     let mut world = running.world();
@@ -266,7 +281,10 @@ pub(crate) async fn move_item(
     rendering: Rendering,
     arguments: Arguments,
 ) -> Result<Answer, Response> {
-    if let Some(refusal) = running.gate(FakeOperation::MoveCollectionItem).await {
+    if let Some(refusal) = running
+        .gate(FakeOperation::MoveCollectionItem, rendering)
+        .await
+    {
         return Err(refusal);
     }
     let after = arguments.first("after").map(str::to_owned);

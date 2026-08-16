@@ -33,7 +33,7 @@ pub(crate) fn media(item: &FakeItem, detail: Detail) -> Element {
 fn part(item: &FakeItem, detail: Detail) -> Element {
     let mut file = Element::named("Part")
         .number("id", 1_i64)
-        .text("key", format!("/library/parts/1/1700000000/file.{}", "mkv"))
+        .text("key", "/library/parts/1/1700000000/file.mkv")
         .text("file", format!("/data/{}.mkv", item.rating_key))
         .number("size", 4_000_000_000_i64)
         .text("container", "mkv");

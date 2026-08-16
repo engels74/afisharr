@@ -39,7 +39,7 @@ pub(crate) async fn items(
     } else {
         FakeOperation::Items
     };
-    if let Some(refusal) = running.gate(operation).await {
+    if let Some(refusal) = running.gate(operation, rendering).await {
         return Err(refusal);
     }
     if !describing {
@@ -55,7 +55,7 @@ pub(crate) async fn items(
     // Collections are items of type 18 on this endpoint, and answering movies
     // to a caller that asked for collections is a fake answering a different
     // question confidently (`plexapi/library.py:1666-1670`).
-    let wants_collections = arguments.first("type") == Some("18");
+    let wants_collections = edit::libtype(&arguments) == Some(plex_type("collection"));
     let mut container = shape::library_container(library).text("title1", library.title.clone());
     let rows: Vec<Element> = if wants_collections {
         library
@@ -101,7 +101,7 @@ pub(crate) async fn item(
     rendering: Rendering,
     arguments: Arguments,
 ) -> Result<Answer, Response> {
-    if let Some(refusal) = running.gate(FakeOperation::Item).await {
+    if let Some(refusal) = running.gate(FakeOperation::Item, rendering).await {
         return Err(refusal);
     }
     let detail = running.detail(&arguments);
@@ -159,7 +159,7 @@ pub(crate) async fn edit(
     } else {
         FakeOperation::EditCollection
     };
-    if let Some(refusal) = running.gate(operation).await {
+    if let Some(refusal) = running.gate(operation, rendering).await {
         return Err(refusal);
     }
 
@@ -195,7 +195,7 @@ pub(crate) async fn choices(
     Path((key, filter)): Path<(String, String)>,
     rendering: Rendering,
 ) -> Result<Answer, Response> {
-    if let Some(refusal) = running.gate(FakeOperation::FilterChoices).await {
+    if let Some(refusal) = running.gate(FakeOperation::FilterChoices, rendering).await {
         return Err(refusal);
     }
     let mut world = running.world();
@@ -222,7 +222,7 @@ pub(crate) async fn upload_poster(
     rendering: Rendering,
     body: axum::body::Bytes,
 ) -> Result<Answer, Response> {
-    if let Some(refusal) = running.gate(FakeOperation::UploadPoster).await {
+    if let Some(refusal) = running.gate(FakeOperation::UploadPoster, rendering).await {
         return Err(refusal);
     }
     let mut world = running.world();

@@ -7,7 +7,7 @@ use afisharr_sources::outbound::Method;
 use serde::Deserialize;
 
 use crate::{
-    hubs::{HubIdentifier, HubVisibility, ManagedHub, record::HubBody},
+    hubs::{HubIdentifier, HubKind, HubVisibility, ManagedHub, record::HubBody},
     libraries::{RatingKey, SectionKey},
     server::{PlexServerClient, ServerError},
 };
@@ -61,11 +61,18 @@ impl HubListing {
     /// `None` is what a never-promoted collection looks like: it is in the
     /// library and not in the ordering space, and those are two states rather
     /// than one (`plexapi/collection.py:207-215`).
+    ///
+    /// One of Plex's own rows is never a collection's row, whatever its
+    /// identifier happens to end in. [`ManagedHub::names_collection`] falls
+    /// back to the last dot-segment, and a native identifier routinely ends in
+    /// the section key — `home.continue.1` beside a collection keyed `1` would
+    /// otherwise answer a row that cannot be promoted at all, so the `PUT` that
+    /// followed would report success and promote nothing (§15.1).
     #[must_use]
     pub fn row_for(&self, collection: &RatingKey) -> Option<&ManagedHub> {
         self.hubs
             .iter()
-            .find(|hub| hub.names_collection(collection))
+            .find(|hub| hub.kind == HubKind::Collection && hub.names_collection(collection))
     }
 }
 
@@ -260,5 +267,22 @@ mod tests {
             Some(HubIdentifier::new("custom.collection.1.5001"))
         );
         assert!(listing.row_for(&RatingKey::new("6001")).is_none());
+    }
+
+    #[test]
+    fn one_of_plexs_own_rows_is_never_answered_as_a_collections_row() {
+        // A native identifier routinely ends in the section key, and the
+        // identifier's last segment is what matches a collection. Answered
+        // here, the caller writes a `PUT` to a row that cannot be promoted at
+        // all and the collection is never promoted (§15.1).
+        let listing = listing(
+            serde_json::from_str(
+                r#"{"Hub":[{"identifier":"home.continue.1","title":"Continue Watching",
+                    "deletable":"0"}]}"#,
+            )
+            .expect("parses"),
+        );
+        assert_eq!(listing.hubs[0].kind, HubKind::Native);
+        assert!(listing.row_for(&RatingKey::new("1")).is_none());
     }
 }

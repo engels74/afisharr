@@ -151,7 +151,7 @@ async fn require_token(State(running): State<Running>, request: Request, next: N
 /// server sends, because a fake that claimed more would put a shape in the
 /// contract test that no Plex produces.
 async fn root(State(running): State<Running>, rendering: Rendering) -> Result<Answer, Response> {
-    if let Some(refusal) = running.gate(FakeOperation::Root).await {
+    if let Some(refusal) = running.gate(FakeOperation::Root, rendering).await {
         return Err(refusal);
     }
     let world = running.world();
@@ -170,7 +170,7 @@ async fn identity(
     State(running): State<Running>,
     rendering: Rendering,
 ) -> Result<Answer, Response> {
-    if let Some(refusal) = running.gate(FakeOperation::Identity).await {
+    if let Some(refusal) = running.gate(FakeOperation::Identity, rendering).await {
         return Err(refusal);
     }
     let world = running.world();
@@ -190,7 +190,7 @@ async fn identity(
 /// (`plexapi/library.py:33`), and a fake that answered `404` here is a fake
 /// only one reader in the world can get past.
 async fn library(State(running): State<Running>, rendering: Rendering) -> Result<Answer, Response> {
-    if let Some(refusal) = running.gate(FakeOperation::Library).await {
+    if let Some(refusal) = running.gate(FakeOperation::Library, rendering).await {
         return Err(refusal);
     }
     let world = running.world();
@@ -216,7 +216,7 @@ async fn sections(
     State(running): State<Running>,
     rendering: Rendering,
 ) -> Result<Answer, Response> {
-    if let Some(refusal) = running.gate(FakeOperation::Sections).await {
+    if let Some(refusal) = running.gate(FakeOperation::Sections, rendering).await {
         return Err(refusal);
     }
     let world = running.world();

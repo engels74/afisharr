@@ -53,9 +53,12 @@ impl LibrarySpec {
 
     /// Makes this library's collection a smart one.
     ///
-    /// A smart collection refuses item edits and order changes
-    /// (`plexapi/collection.py:317-318`, `:346-347`), and those refusals were
-    /// unreachable while nothing could mark one.
+    /// The fake reports the flag and stops there; the refusals a smart
+    /// collection produces live in the client that reads it
+    /// (`plexapi/collection.py:317-318`, `:346-347`), and nothing could reach
+    /// them while the fake had no way to mark one. A test that expects the
+    /// *server* to refuse an item edit or an order change on one is expecting
+    /// something this fake does not do.
     #[must_use]
     pub const fn with_smart_collection(mut self) -> Self {
         self.smart_collection = true;

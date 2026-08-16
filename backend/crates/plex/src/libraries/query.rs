@@ -121,7 +121,9 @@ impl ItemQuery {
     /// would be two cache entries for one question.
     #[must_use]
     pub fn pairs(&self) -> Vec<(String, String)> {
-        let mut pairs = Vec::with_capacity(self.filters.len() + 5);
+        // Seven, not five: `type`, `sort`, `includeMeta`, `includeAdvanced`,
+        // `checkFiles`, and the two window arguments.
+        let mut pairs = Vec::with_capacity(self.filters.len() + 7);
         if let Some(libtype) = self.libtype {
             pairs.push(("type".to_owned(), libtype.as_plex_type().to_string()));
         }

@@ -8,13 +8,11 @@ use std::{
     time::Duration,
 };
 
-use axum::{
-    http::StatusCode,
-    response::{IntoResponse, Response},
-};
+use axum::{http::StatusCode, response::Response};
 
 use crate::fake::{
     library::World,
+    negotiation::Rendering,
     plan::{FakeOperation, Injection, Injections},
     request::Arguments,
     scenario::Scenario,
@@ -138,20 +136,27 @@ impl FakeInstance {
     /// checking would make a 5xx injection a failure that still wrote — which
     /// is not a failure any real server produces, and would let a test pass
     /// against a client that ignores the status.
-    pub(crate) async fn gate(&self, operation: FakeOperation) -> Option<Response> {
+    pub(crate) async fn gate(
+        &self,
+        operation: FakeOperation,
+        rendering: Rendering,
+    ) -> Option<Response> {
         let injection = self
             .injections
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .advance(operation)?;
         match injection {
-            Injection::Refuse { status } => Some(
-                (
-                    StatusCode::from_u16(status).unwrap_or(StatusCode::INTERNAL_SERVER_ERROR),
-                    "the fake was asked to refuse this call",
-                )
-                    .into_response(),
-            ),
+            // In the envelope, and in the rendering the request asked for: a
+            // real Plex refuses inside the same envelope as everything else,
+            // and a fake whose injected refusals answered bare text would make
+            // a client that parses a refusal body fail here for a reason no
+            // server produces (see [`Rendering::refusal`]).
+            Injection::Refuse { status } => Some(rendering.refusal(
+                StatusCode::from_u16(status).unwrap_or(StatusCode::INTERNAL_SERVER_ERROR),
+                status,
+                "the fake was asked to refuse this call",
+            )),
             Injection::Stall => {
                 tokio::time::sleep(STALL).await;
                 None
@@ -168,7 +173,12 @@ mod tests {
     #[tokio::test]
     async fn a_behaving_scenario_gates_nothing() {
         let running = FakeInstance::new(&Scenario::behaving(1));
-        assert!(running.gate(FakeOperation::Items).await.is_none());
+        assert!(
+            running
+                .gate(FakeOperation::Items, Rendering::Json)
+                .await
+                .is_none()
+        );
     }
 
     #[tokio::test]
@@ -179,7 +189,7 @@ mod tests {
             Injection::Refuse { status: 503 },
         ));
         let response = running
-            .gate(FakeOperation::Items)
+            .gate(FakeOperation::Items, Rendering::Json)
             .await
             .expect("the first call refuses");
         assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);

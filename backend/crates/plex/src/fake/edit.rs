@@ -45,13 +45,13 @@ pub(crate) fn libtype(arguments: &Arguments) -> Option<u8> {
 /// The tags one edit adds under `tag`.
 fn additions(arguments: &Arguments, tag: &str) -> Vec<String> {
     let prefix = format!("{tag}[");
+    // The removal key ends `tag-`, so it can never end `].tag.tag`: the suffix
+    // is the whole test, and a second one excluding removals would be dead.
     let suffix = "].tag.tag";
     arguments
         .pairs()
         .iter()
-        .filter(|(name, _)| {
-            name.starts_with(&prefix) && name.ends_with(suffix) && !name.ends_with("tag-")
-        })
+        .filter(|(name, _)| name.starts_with(&prefix) && name.ends_with(suffix))
         .map(|(_, value)| value.clone())
         .collect()
 }
