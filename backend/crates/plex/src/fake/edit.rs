@@ -88,6 +88,20 @@ fn writes_anything(arguments: &Arguments) -> bool {
     })
 }
 
+/// What a written `titleSort.value` leaves behind.
+///
+/// An empty value clears the attribute rather than setting it to the empty
+/// string. Plex has no other way to say "no sort title", and the absent state
+/// is the one most rows are in and the one a teardown has to be able to restore
+/// them to (§15.6).
+fn written_sort_title(value: &str) -> Option<String> {
+    if value.is_empty() {
+        None
+    } else {
+        Some(value.to_owned())
+    }
+}
+
 /// Applies one edit to one item. Returns whether anything was written.
 pub(crate) fn apply_to_item(item: &mut FakeItem, arguments: &Arguments) -> bool {
     if !writes_anything(arguments) {
@@ -100,15 +114,7 @@ pub(crate) fn apply_to_item(item: &mut FakeItem, arguments: &Arguments) -> bool 
     // sent — including to `0`. A fake that only ever set the lock would make a
     // restore that forgot to clear it look correct (`I-REV-3`, §15.6).
     if let Some(sort_title) = arguments.first("titleSort.value") {
-        // An empty value clears the attribute rather than setting it to the
-        // empty string. Plex has no other way to say "no sort title", and the
-        // absent state is the one most items are in and the one a teardown has
-        // to be able to restore them to (section 15.6).
-        item.sort_title = if sort_title.is_empty() {
-            None
-        } else {
-            Some(sort_title.to_owned())
-        };
+        item.sort_title = written_sort_title(sort_title);
     }
     if let Some(locked) = arguments.first("titleSort.locked") {
         item.sort_title_locked = locked != "0";
@@ -126,7 +132,11 @@ pub(crate) fn apply_to_collection(collection: &mut FakeCollection, arguments: &A
         title.clone_into(&mut collection.title);
     }
     if let Some(sort_title) = arguments.first("titleSort.value") {
-        collection.sort_title = Some(sort_title.to_owned());
+        // The same reading as an item's. It is one argument on one endpoint, so
+        // a collection that kept `""` where an item cleared the attribute would
+        // be the fake disagreeing with itself — and the collection half of the
+        // §15.6 round trip would be checked against a state no server holds.
+        collection.sort_title = written_sort_title(sort_title);
     }
     if let Some(locked) = arguments.first("titleSort.locked") {
         collection.sort_title_locked = locked != "0";
@@ -231,6 +241,26 @@ mod tests {
             &Arguments::parse(Some("titleSort.value=&titleSort.locked=0"))
         ));
         assert_eq!(item.sort_title, None);
+    }
+
+    #[test]
+    fn a_collection_clears_its_sort_title_the_same_way_an_item_does() {
+        // One argument on one endpoint. A collection that kept `""` where an
+        // item cleared the attribute would make the collection half of the
+        // §15.6 round trip read back present-and-empty, which is a state no
+        // server holds and the one a teardown is trying to leave.
+        let mut collection = collection();
+        assert!(apply_to_collection(
+            &mut collection,
+            &Arguments::parse(Some("titleSort.value=!001 Best&titleSort.locked=1"))
+        ));
+        assert_eq!(collection.sort_title.as_deref(), Some("!001 Best"));
+        assert!(apply_to_collection(
+            &mut collection,
+            &Arguments::parse(Some("titleSort.value=&titleSort.locked=0"))
+        ));
+        assert_eq!(collection.sort_title, None);
+        assert!(!collection.sort_title_locked);
     }
 
     #[test]

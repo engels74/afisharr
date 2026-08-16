@@ -17,7 +17,7 @@ use afisharr_plex::{
     hubs::{HubIdentifier, HubListing, HubMove, HubVisibility},
     labels::LabelEdit,
     libraries::{ItemKind, RatingKey, SectionKey},
-    server::MachineIdentifier,
+    server::{MachineIdentifier, ServerError},
 };
 use fixtures::FixtureServer;
 
@@ -63,6 +63,33 @@ async fn a_collection_is_created_against_the_named_server_and_its_items() {
     );
     assert_eq!(created.rating_key, RatingKey::new("5001"));
     assert_eq!(created.child_count, Some(2));
+}
+
+#[tokio::test]
+async fn an_edit_answered_with_no_body_is_incomplete_rather_than_a_transport_failure() {
+    // A write is the one place a real Plex is known to answer nothing at all:
+    // a reference client accepts `204` here and reads a blank body as "no
+    // answer" rather than as a parse error (`plexapi/server.py:759`,
+    // `plexapi/utils.py:836-839`). Reported as a transport failure it would
+    // tell an operator the server could not be reached, which is a different
+    // problem with a different fix (P6).
+    let fixture = FixtureServer::answering("").await;
+    let error = fixture
+        .client()
+        .edit_collection(
+            &section(),
+            &RatingKey::new("5001"),
+            &CollectionEdit {
+                title: Some("Best of 1979".to_owned()),
+                ..CollectionEdit::default()
+            },
+        )
+        .await
+        .expect_err("a server that said nothing said nothing about the write");
+    assert!(
+        matches!(error, ServerError::Incomplete { .. }),
+        "the server answered; it just did not say what it wrote: {error}"
+    );
 }
 
 #[tokio::test]

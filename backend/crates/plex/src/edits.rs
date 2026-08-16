@@ -59,7 +59,18 @@ impl PlexServerClient {
         query.extend(arguments);
         let url = self.endpoint(&format!("library/sections/{section}/all"), &query)?;
         let response = self.send(Method::PUT, &url, None, &[]).await?;
-        let body: WrittenBody = self.parse_container(&response)?;
+        // An answer with no body at all is the server declining to say, not the
+        // transport failing: a reference client tolerates exactly this shape on
+        // a write — it accepts `204` and reads a blank body as `None` rather
+        // than as a parse error (`plexapi/server.py:759`,
+        // `plexapi/utils.py:836-839`). Reported as [`ServerError::Incomplete`]
+        // so an operator reading it is told the server said nothing about the
+        // write, rather than that the server could not be reached.
+        let body: WrittenBody = if response.body.trim().is_empty() {
+            WrittenBody { size: None }
+        } else {
+            self.parse_container(&response)?
+        };
         // A server that did not report a size did not say what it wrote, and
         // "did not say" is not "wrote nothing" (P1). Refused rather than
         // defaulted, because the caller's next decision turns on the number.

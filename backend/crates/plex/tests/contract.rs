@@ -399,28 +399,77 @@ async fn the_four_shapes_the_ordering_space_depends_on_are_what_a_real_server_se
     );
 
     let created = create_scratch(&server, &surface).await;
+    // Nothing between here and the delete may panic, or the scratch collection
+    // stays on somebody's real Plex (P2) — so the probes report rather than
+    // assert, and the assertions run after the cleanup.
+    let probed = probe_blockers(&server, &surface, &created).await;
 
-    let unpromoted = real::raw(
-        &server,
+    server
+        .delete_collection(&created)
+        .await
+        .expect("the collection this test created must be removable");
+
+    let probed = probed.unwrap_or_else(|failure| panic!("{failure}"));
+    assert!(
+        probed.blocker_2,
+        "blocker 2: a never-promoted collection must have no manage row, and this server \
+         answered {}",
+        probed.answered
+    );
+    assert!(
+        probed.blocker_4,
+        "blocker 4: a new collection defaults to release order, and this server said {}",
+        probed.sort
+    );
+    assert!(
+        probed.blocker_3,
+        "blocker 3: the edit endpoint must write an item at the item libtype, and it \
+         answered {:?}",
+        probed.written
+    );
+}
+
+/// What the blocker probes read, so the assertions can run after the cleanup.
+struct Blockers {
+    answered: usize,
+    blocker_2: bool,
+    sort: Value,
+    blocker_4: bool,
+    written: Result<usize, afisharr_plex::server::ServerError>,
+    blocker_3: bool,
+}
+
+/// Reads the four blockers off the real server, reporting rather than panicking.
+async fn probe_blockers(
+    server: &PlexServerClient,
+    surface: &Surface,
+    created: &RatingKey,
+) -> Result<Blockers, String> {
+    let section = &surface.section;
+    let unpromoted = real::try_raw(
+        server,
         &format!("hubs/sections/{section}/manage"),
         &[("metadataItemId".to_owned(), created.to_string())],
     )
-    .await;
+    .await?;
     let answered = unpromoted["MediaContainer"]["Hub"]
         .as_array()
         .map(Vec::len)
         .unwrap_or_default();
-    let blocker_2 = answered == 0;
 
-    let sort = real::raw(
-        &server,
-        &format!("library/metadata/{created}"),
-        &[],
-    )
-    .await["MediaContainer"]["Metadata"][0]["collectionSort"]
-        .clone();
-    let blocker_4 = sort.is_null() || sort == 0 || sort == "0";
+    let sort =
+        real::try_raw(server, &format!("library/metadata/{created}"), &[]).await?["MediaContainer"]
+            ["Metadata"][0]["collectionSort"]
+            .clone();
 
+    // Read before it is written, and restored to exactly what was read: this is
+    // somebody's library, and a "restore" that cleared the field would delete a
+    // sort title the operator set and a lock they chose (P3, `I-REV-3`).
+    let before = server
+        .item(&surface.item)
+        .await
+        .map_err(|error| format!("the item under test must be readable first: {error}"))?
+        .sort_title;
     let written = server
         .edit_item_sort_title(
             section,
@@ -430,31 +479,29 @@ async fn the_four_shapes_the_ordering_space_depends_on_are_what_a_real_server_se
             false,
         )
         .await;
-    let blocker_3 = written.as_ref().is_ok_and(|written| *written > 0);
-    // Put it back whatever happened: this is somebody's library (P3).
-    let _ = server
-        .edit_item_sort_title(section, ItemKind::Movie, &surface.item, None, false)
+    let restored = server
+        .edit_item_sort_title(
+            section,
+            ItemKind::Movie,
+            &surface.item,
+            before.value(),
+            before.is_locked(),
+        )
         .await;
+    if written.is_ok() && restored.is_err() {
+        return Err(format!(
+            "the item's sort title was changed and could not be put back: {restored:?}"
+        ));
+    }
 
-    server
-        .delete_collection(&created)
-        .await
-        .expect("the collection this test created must be removable");
-
-    assert!(
-        blocker_2,
-        "blocker 2: a never-promoted collection must have no manage row, and this server \
-         answered {answered}"
-    );
-    assert!(
-        blocker_4,
-        "blocker 4: a new collection defaults to release order, and this server said {sort}"
-    );
-    assert!(
-        blocker_3,
-        "blocker 3: the edit endpoint must write an item at the item libtype, and it \
-         answered {written:?}"
-    );
+    Ok(Blockers {
+        answered,
+        blocker_2: answered == 0,
+        blocker_4: sort.is_null() || sort == 0 || sort == "0",
+        sort,
+        blocker_3: written.as_ref().is_ok_and(|written| *written > 0),
+        written,
+    })
 }
 
 /// Creates the scratch collection the blocker checks address.

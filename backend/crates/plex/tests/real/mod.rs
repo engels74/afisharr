@@ -208,16 +208,31 @@ pub fn fake_client(fake: &FakePlex) -> PlexServerClient {
 /// contract that cannot drift without a compile error. What drifts silently is
 /// everything else in the envelope.
 pub async fn raw(client: &PlexServerClient, path: &str, query: &[(String, String)]) -> Value {
+    try_raw(client, path, query)
+        .await
+        .unwrap_or_else(|failure| panic!("{failure}"))
+}
+
+/// The same read, reported rather than panicked.
+///
+/// For the callers that have something to clean up: a panic between creating a
+/// scratch collection on somebody's real Plex and deleting it again leaves the
+/// collection behind, which is the one thing these tests may not do (P2).
+pub async fn try_raw(
+    client: &PlexServerClient,
+    path: &str,
+    query: &[(String, String)],
+) -> Result<Value, String> {
     let url = client
         .address()
         .endpoint(path, query)
-        .expect("a valid endpoint");
+        .map_err(|error| format!("{path} is not an endpoint this build can compose: {error}"))?;
     let response: Response = client
         .raw_get(&url)
         .await
-        .unwrap_or_else(|error: ServerError| panic!("{path} did not answer: {error}"));
+        .map_err(|error: ServerError| format!("{path} did not answer: {error}"))?;
     serde_json::from_str(&response.body)
-        .unwrap_or_else(|error| panic!("{path} answered something that is not JSON: {error}"))
+        .map_err(|error| format!("{path} answered something that is not JSON: {error}"))
 }
 
 /// The keys one server's surface is addressed by.
