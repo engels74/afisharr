@@ -75,19 +75,6 @@ fn removals(arguments: &Arguments, tag: &str) -> Vec<String> {
         .collect()
 }
 
-/// Whether an edit names a field at all — `titleSort`, `title`, a tag.
-///
-/// A `PUT` naming nothing writes nothing, and a fake that reported it as a
-/// write would let a caller believe a request with no arguments saved something.
-fn writes_anything(arguments: &Arguments) -> bool {
-    arguments.pairs().iter().any(|(name, _)| {
-        matches!(name.rsplit('.').next(), Some("value" | "locked"))
-            || name.contains("].tag.tag")
-            || name == "collectionMode"
-            || name == "collectionSort"
-    })
-}
-
 /// What a written `titleSort.value` leaves behind.
 ///
 /// An empty value clears the attribute rather than setting it to the empty
@@ -103,24 +90,30 @@ fn written_sort_title(value: &str) -> Option<String> {
 }
 
 /// Applies one edit to one item. Returns whether anything was written.
+///
+/// Counted field by field, exactly as [`apply_to_collection`] is, and for the
+/// same reason: an item holds none of the fields a collection does, so an edit
+/// naming only `summary.value` or `collectionMode` writes nothing to an item.
+/// Answering `size: 1` for it would be the fake claiming a write it never made,
+/// which is the failure the count exists to expose.
 pub(crate) fn apply_to_item(item: &mut FakeItem, arguments: &Arguments) -> bool {
-    if !writes_anything(arguments) {
-        return false;
-    }
+    let mut wrote = apply_tags(&mut item.labels, &mut item.labels_locked, arguments);
     if let Some(title) = arguments.first("title.value") {
         title.clone_into(&mut item.title);
+        wrote = true;
     }
     // Value and lock are independent, and both are written whenever they are
     // sent — including to `0`. A fake that only ever set the lock would make a
     // restore that forgot to clear it look correct (`I-REV-3`, §15.6).
     if let Some(sort_title) = arguments.first("titleSort.value") {
         item.sort_title = written_sort_title(sort_title);
+        wrote = true;
     }
     if let Some(locked) = arguments.first("titleSort.locked") {
         item.sort_title_locked = locked != "0";
+        wrote = true;
     }
-    apply_tags(&mut item.labels, &mut item.labels_locked, arguments);
-    true
+    wrote
 }
 
 /// Applies one edit to one collection. Returns whether anything was written.
@@ -384,6 +377,24 @@ mod tests {
         assert!(!apply_to_collection(
             &mut collection,
             &Arguments::parse(Some("id=15001&type=18"))
+        ));
+    }
+
+    #[test]
+    fn an_item_edit_naming_only_a_collections_fields_writes_nothing() {
+        // An item holds no summary and no collection order. Answering `size: 1`
+        // for one is the fake claiming a write it never made, which is the
+        // failure the count exists to expose.
+        let mut item = item();
+        assert!(!apply_to_item(
+            &mut item,
+            &Arguments::parse(Some(
+                "id=10001&type=1&summary.value=A+few+films&collectionMode=1&collectionSort=2"
+            ))
+        ));
+        assert!(!apply_to_item(
+            &mut item,
+            &Arguments::parse(Some("id=10001&type=1"))
         ));
     }
 }
