@@ -428,3 +428,48 @@ async fn a_filters_choices_answer_only_at_the_endpoint_the_vocabulary_declared()
         404
     );
 }
+
+#[tokio::test]
+async fn a_filters_choices_answer_only_for_the_libtype_that_declared_the_filter() {
+    // The server composes the libtype into the key it hands out, so the two
+    // travel together. Answered without reading it, the fake gave a genre list
+    // to `type=18` — and the `collection` libtype declares `label` and nothing
+    // else, so a client that carried the wrong libtype through passed here and
+    // would have got nothing from a real server.
+    let fake = FakePlex::start(Scenario::behaving(1)).await;
+    // Read off the endpoint the `collection` libtype's vocabulary comes from,
+    // which is the collections call rather than `/all`
+    // (`plexapi/library.py:890-899`).
+    let declared = ask_as_a_reference_client(
+        &fake,
+        "library/sections/1/collections?includeMeta=1&includeAdvanced=1&X-Plex-Container-Size=0",
+    )
+    .await
+    .body;
+    assert!(
+        declared.contains(r#"key="/library/sections/1/label?type=18""#),
+        "{declared}"
+    );
+    assert_eq!(
+        ask_as_a_reference_client(&fake, "library/sections/1/label?type=18")
+            .await
+            .status,
+        200,
+        "the endpoint the collection libtype was sent to answers"
+    );
+
+    assert_eq!(
+        ask_as_a_reference_client(&fake, "library/sections/1/genre?type=18")
+            .await
+            .status,
+        404,
+        "the collection libtype declares no genre filter"
+    );
+    assert_eq!(
+        ask_as_a_reference_client(&fake, "library/sections/1/label?type=1")
+            .await
+            .status,
+        404,
+        "and the movie libtype declares no label filter"
+    );
+}

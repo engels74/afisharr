@@ -85,6 +85,23 @@ impl PlexServerClient {
         self.send(Method::GET, url, None, &[]).await
     }
 
+    /// Sends one write and hands back its answer uninterpreted.
+    ///
+    /// The one caller is the release-lane contract test, and the question it
+    /// asks is **Q-016**: what a real server answers to
+    /// `PUT /library/sections/{id}/all` — a size, an empty body, or `204`.
+    /// [`PlexServerClient::edit_at`] reduces that answer to a count and reports
+    /// anything else as [`ServerError::Incomplete`], so it cannot say which of
+    /// the three arrived. The status and the body are read here instead, and
+    /// the lane names what it found.
+    ///
+    /// # Errors
+    /// Returns [`ServerError::Transport`] when the server did not answer or
+    /// refused.
+    pub async fn raw_put(&self, url: &Url) -> Result<Response, ServerError> {
+        self.send(Method::PUT, url, None, &[]).await
+    }
+
     /// Builds an endpoint URL against this server's address.
     pub(crate) fn endpoint(
         &self,

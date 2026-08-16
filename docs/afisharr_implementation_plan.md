@@ -963,6 +963,9 @@ is Task 7.7. Row 4 is the precondition for every item move meaning anything, whi
      reports every landed edit as a failure. Left as it is until a server says, because reversing it
      swaps one unevidenced claim for another — the probe reads the item back rather than trusting the
      write's own answer, so it is correct either way (`tests/contract.rs::probe_blockers`).
+     *The asking half is built* (Task 2.1.9 subtask 6): the write cycle sends the edit raw, captures
+     the status and the body under `PUT /library/sections/{key}/all`, and fails the lane with the
+     shape it found and the change it implies. The box stays open because no server has answered it.
 - [ ] **Done when:** the contract test passes in the release lane against a real server; a field
   deleted from the fake's answer fails it by name; and a field added to the fake that the real server
   does not send fails it by name.
@@ -989,6 +992,69 @@ is Task 7.7. Row 4 is the precondition for every item move meaning anything, whi
 - [x] **Done when:** a scenario can declare three libraries including one music library, a section key
   can change mid-test and be detected, a collection's move budget runs out while another collection's
   does not, and two runs of every new scenario from one seed are byte-identical.
+
+### Task 2.1.9 The claims left resting on a default
+- **Build:** the guards for the places where the corrected fake and the corrected client still agree
+  with each other rather than with a server, and the lane lines that say so where only a server can.
+- **Where:** `backend/crates/plex/src/hubs/record.rs`, `hubs/manage.rs`, `fake/populate.rs`,
+  `fake/library.rs`, `fake/item_routes.rs`, `fake/vocabulary.rs`, `src/server/client.rs`;
+  `tests/contract.rs`, `tests/real/mod.rs`, `tests/surface.rs`.
+
+**Why this task exists after 2.1.1 through 2.1.8 were ticked.** A review pass over this phase's own
+diff found six places where a test passes on a value nobody sourced. They are not the sixteen the
+audit found — those were the fake claiming shapes a server does not send. These are one step subtler:
+the fake sends a value, the client reads it, and the agreement is real, but the value itself is a
+default this repository chose. `deletable` is the clearest case. It defaults to removable, which is
+the reference's own reading (`plexapi/library.py:3035`), and `HubKind` is read straight off it — so a
+server that omits the attribute has every one of Plex's own rows classified as a promoted collection,
+and the unit test that says otherwise passes only because the fake volunteers `deletable="0"`.
+
+**Why some answers here are guards rather than corrections.** Subtasks 1, 4, and 5 had something to
+correct against — the reference for the first two, the fake's own composition rule for the third — so
+they are code changes. Subtasks 2 and 3 had nothing: how a real server marks and names a manage row
+is **Q-017** in the specification's §23.2, and the change for those is a release-lane assertion that
+names the missing evidence rather than a default chosen in its place. Subtask 6 is Q-016, which is
+Task 2.1.7's and stays open; what is built here is the asking.
+
+- **Subtasks:**
+  - [x] 1. Anchor the collection match on the prefix a reference client composes.
+     `names_collection` read the last dot-segment of any identifier, and a native identifier routinely
+     ends in the section key — `home.continue.1` answered as the row of a collection keyed `1`, and
+     the promotion that followed addressed a row that cannot be promoted at all (§15.1). Match only
+     under `custom.collection.`, which is what the reference synthesises for an unpromoted collection
+     and then reloads the promoted row by (`plexapi/collection.py:212`,
+     `plexapi/library.py:3049-3052`). `HubListing::row_for`'s kind check does not close this on its
+     own, and the comment there said it did.
+  - [x] 2. Fail the release lane on a manage row that carries no `deletable`. The assertion accepted
+     any one row carrying it, which is satisfied by a server that sends it on collections and omits it
+     on its own rows — the exact shape that makes the classification a default. Every row now, named.
+  - [x] 3. Promote with an axis set. The write cycle promoted with all three visibility axes off and
+     then asserted a manage row exists, which is a claim about a request the reference never makes:
+     it promotes by turning an axis on (`plexapi/library.py:3122-3129`). Assert the row after the
+     promotion Afisharr actually performs, and assert the row's identifier is
+     `custom.collection.{section}.{ratingKey}` — the reading subtask 1 rests on, checked against the
+     server that composed it.
+  - [x] 4. Answer a filter's choices only for the libtype that declared the filter. The vocabulary
+     composes the libtype into the key it hands out (`/library/sections/1/genre?type=1`) and the
+     choices route ignored it, so `?type=18` got a genre list — and the `collection` libtype declares
+     `label` and nothing else. A `type` naming a libtype that declares no such filter is now a `404`.
+     An absent `type` is not refused: a real server presumably falls back to the section's own
+     libtype and no capture says which, so the fake refuses what it can show is wrong and no more.
+  - [x] 5. Move the ordering space with the section key. `rekey_section` changed `library.key` and
+     left every hub identifier naming the old section, so a test that re-keyed and then read the
+     manage space back read rows for a world that is gone. Rating keys stay: a section changing key is
+     not an item changing identity, and re-keying items here would fold `churn_one`'s misbehaviour
+     into a call that is not it.
+  - [x] 6. Ask Q-016 from the write cycle and report the answer by name. `edit_at` reduces the answer
+     to a count and reports every other shape as `Incomplete`, so the lane could only ever say "the
+     edit failed" for the one question that would explain why. `raw_put` sends the edit uninterpreted,
+     the status and body are captured under `PUT /library/sections/{key}/all`, and a sizeless answer
+     fails the lane with the shape it found and the change it implies.
+- [x] **Done when:** one of Plex's own rows is never answered as a collection's row even when it
+  carries no `deletable`; the release lane names a manage row that omits `deletable`, a promoted row
+  whose identifier this build cannot match, and the shape a real server answers an edit with; a
+  choices request carrying the wrong libtype is refused; and a re-keyed section's ordering space names
+  the key it now has.
 
 ---
 
@@ -2932,6 +2998,8 @@ Stated because a plan nobody doubts is a plan nobody corrects.
 | Editor disclosure and dashboard content (Q-002, Q-003) | Shape Phase 3's and Phase 13's pages. Neither blocks a phase |
 | Retention windows (Q-005) | Promoted to "before Phase 9 ships" |
 | A further prior-art pass (Q-012) | Recommended immediately before Phase 8, when the renderer is next |
+| What a server answers to an edit (Q-016) | Blocks nothing and changes every edit path. The release lane asks it by name and fails on the answer this build cannot read (Task 2.1.7 subtask 6, Task 2.1.9 subtask 6) |
+| How a server names and marks a manage row (Q-017) | Blocks nothing and decides whether Phase 7 can position anything. The release lane asks both halves by name (Task 2.1.9) |
 | The two amendments the data model owes | Asset-store sizing before Phase 8; the retention cap before Phase 9 |
 
 ---

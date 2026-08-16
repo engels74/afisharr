@@ -123,6 +123,19 @@ impl World {
             return false;
         };
         to.clone_into(&mut library.key);
+        // The ordering space moves with the key, because on a real server it
+        // does: Plex composes a hub identifier out of the section
+        // (`custom.collection.{section}.{ratingKey}`,
+        // `plexapi/collection.py:212`). Left alone, the manage answer would name
+        // a section this server no longer has, and a test that re-keyed and then
+        // read the space back would be reading rows for a world that is gone.
+        //
+        // Rating keys do not move. A section key changing is not an item
+        // changing identity, and re-keying items here would fold the churn
+        // misbehaviour into a call that is not it (`World::churn_one`).
+        for hub in &mut library.hubs {
+            hub.identifier = populate::rekey_identifier(&hub.identifier, from, to);
+        }
         true
     }
 }
@@ -200,6 +213,25 @@ mod tests {
         assert_eq!(world.libraries[0].key, "42");
         assert_eq!(world.libraries[0].uuid, uuid);
         assert!(!world.rekey_section("1", "43"), "the old key is gone");
+    }
+
+    #[test]
+    fn the_ordering_space_moves_with_the_section_key_and_the_rating_keys_do_not() {
+        let mut world = World::build(&Scenario::behaving(1));
+        let collection = world.libraries[0].collections[0].rating_key.clone();
+        assert!(world.rekey_section("1", "42"));
+        let hubs = &world.libraries[0].hubs;
+        assert_eq!(hubs[0].identifier, "home.continue.42");
+        assert_eq!(
+            hubs[1].identifier,
+            format!("custom.collection.42.{collection}")
+        );
+        assert_eq!(
+            hubs[1].rating_key.as_deref(),
+            Some(collection.as_str()),
+            "a section changing key is not an item changing identity"
+        );
+        assert_eq!(world.libraries[0].collections[0].rating_key, collection);
     }
 
     #[test]

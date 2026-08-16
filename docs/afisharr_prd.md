@@ -8300,9 +8300,9 @@ decision in §22.2 or §22.3, not an entry here.
 
 ### 23.2 Questions only a real server can answer
 
-Three questions cannot be settled by discussion. The first two belong in the implementation plan as
+Four questions cannot be settled by discussion. The first two belong in the implementation plan as
 explicit spikes rather than folded into implementation tasks, where they would be answered by
-assumption. The third is answered by a capture the release lane already takes.
+assumption. The last two are answered by captures the release lane already takes.
 
 **Q-014 — What is the real precision budget before exhaustion?** `gapBudget` defaults to 8, which is
 a guess. Too high and moves start failing silently; too low and rebalances run constantly, burning
@@ -8323,8 +8323,28 @@ write as success (`plexapi/server.py:759`, `plexapi/utils.py:836-839`). If a rea
 empty, this build reports every landed edit — a collection edit, a label edit, a sort-title write —
 as a failure. Not a spike: the release lane's contract test already writes and captures, so it
 answers this by name (implementation plan, Task 2.1.7). Until it does, the current reading stands,
-because reversing it swaps one unevidenced claim for another.
+because reversing it swaps one unevidenced claim for another. The asking half is built: the write
+cycle sends one edit uninterpreted, captures the status and the body, and fails the lane with the
+shape it found and the change that shape implies (implementation plan, Task 2.1.9 subtask 6).
 *Design: §15.6, and the reversibility invariant `I-REV-3`.*
+
+**Q-017 — How does a real server name and mark a row in the ordering space?** Two facts, one
+question, because a wrong answer to either has the same effect and neither is visible when it is
+wrong. First, does every manage row carry `deletable`? It defaults to removable
+(`plexapi/library.py:3035`), and `HubKind` is read straight off it — so a server that omits it on its
+own rows has each of them classified as a promoted collection, and the placement algorithm tries to
+reposition an anchor that cannot move (§15.1). Second, is a promoted collection's row identifier
+`custom.collection.{sectionKey}.{ratingKey}`? That is what the reference client synthesises for an
+unpromoted collection and then reloads the promoted row by (`plexapi/collection.py:212`), and it is
+what this build matches a row to a collection by. A server that composes it differently finds no row
+for any collection, and finds it silently.
+
+Not a spike, and not left to a default either: the release lane fails by name on a row that carries
+no `deletable` and on a promoted row whose identifier this build cannot match, so the first real run
+answers both (implementation plan, Task 2.1.9). What guards the second answer in the meantime is the
+prefix — a row that does not carry it is not matched at all, so one of Plex's own rows is never
+answered as a collection's row whatever its last segment reads as.
+*Design: §15.1, and the ordering space in §15.5.*
 
 ### 23.3 Superseded artifacts
 

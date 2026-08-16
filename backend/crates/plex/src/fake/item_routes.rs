@@ -197,9 +197,26 @@ pub(crate) async fn choices(
     State(running): State<Running>,
     Path((key, filter)): Path<(String, String)>,
     rendering: Rendering,
+    arguments: Arguments,
 ) -> Result<Answer, Response> {
     if let Some(refusal) = running.gate(FakeOperation::FilterChoices, rendering).await {
         return Err(refusal);
+    }
+    // The libtype the endpoint was declared under, which the server composes
+    // into the key and a client sends back unchanged. A `type` naming a libtype
+    // that declares no such filter is a question about a vocabulary this
+    // section does not have — `collection` declares `label` and nothing else,
+    // and answering it a genre list would pass a client that a real server
+    // refuses.
+    //
+    // Absent is not refused. A real server presumably falls back to the
+    // section's own libtype and this build has no capture that says which, so
+    // the fake refuses what it can show is wrong and no more (Q-016's rule, one
+    // endpoint over).
+    if let Some(plex) = edit::libtype(&arguments)
+        && !vocabulary::declares(plex, &filter)
+    {
+        return Err(rendering.refusal(StatusCode::NOT_FOUND, 1000, "Not Found"));
     }
     let mut world = running.world();
     let Some(library) = world.library(&key) else {

@@ -123,22 +123,41 @@ pub struct ManagedHub {
     pub visibility: HubVisibility,
 }
 
+/// The prefix Plex composes a collection's ordering-space identifier under.
+///
+/// A reference client synthesises `custom.collection.{sectionKey}.{ratingKey}`
+/// for a collection that has not been promoted yet
+/// (`plexapi/collection.py:212`), and then finds the promoted row in the manage
+/// answer by that same identifier (`plexapi/library.py:3049-3052`). So the
+/// prefix is not a guess about one server: the reference would fail to reload
+/// any promoted collection on a server that used a different one.
+const COLLECTION_PREFIX: &str = "custom.collection.";
+
 impl ManagedHub {
     /// Whether this row is the ordering-space row of `collection`.
     ///
-    /// The last dot-segment of the identifier is the collection's rating key —
-    /// the same reading a reference client makes when it promotes one
-    /// (`plexapi/library.py:3115`) — and the answer's own `ratingKey` is used
-    /// when a server sends it. Neither is invented: a row that names no
-    /// collection either way is not that collection's row.
+    /// Two readings, and both are the server's own words. The answer's
+    /// `ratingKey` settles it when a server sends one. Otherwise the last
+    /// dot-segment of the identifier is the collection's rating key — the
+    /// reading a reference client makes when it promotes one
+    /// (`plexapi/library.py:3115`) — but **only under the collection prefix**.
+    ///
+    /// The prefix is what keeps this from matching one of Plex's own rows. A
+    /// native identifier routinely ends in the section key, so `home.continue.1`
+    /// beside a collection keyed `1` matched on the bare last segment. That row
+    /// cannot be promoted at all, and the `PUT` that followed answered 200 and
+    /// promoted nothing (§15.1). [`HubKind`] alone did not close it: `deletable`
+    /// defaults to removable, so a server that omits the attribute on its own
+    /// rows classifies them as collections and the kind check passes.
     #[must_use]
     pub fn names_collection(&self, collection: &RatingKey) -> bool {
         if self.rating_key.as_ref() == Some(collection) {
             return true;
         }
-        self.identifier
-            .as_str()
-            .rsplit('.')
+        let Some(tail) = self.identifier.as_str().strip_prefix(COLLECTION_PREFIX) else {
+            return false;
+        };
+        tail.rsplit('.')
             .next()
             .is_some_and(|segment| segment == collection.as_str())
     }
@@ -264,8 +283,40 @@ mod tests {
         // The reading a reference client makes (`plexapi/library.py:3035`).
         // Defaulting the other way would take every collection row on a server
         // that omits the attribute out of the plan.
+        //
+        // Which way a real server sends it is Task 2.1.7's assertion, not a
+        // fact this build holds: the release lane fails by name on a manage row
+        // that carries no `deletable`, because this classification is read off
+        // a default until one does.
         let hub = hub(r#"{"identifier":"custom.collection.1.5001"}"#).expect("a hub");
         assert_eq!(hub.kind, HubKind::Collection);
+    }
+
+    #[test]
+    fn one_of_plexs_own_rows_does_not_name_a_collection_its_identifier_ends_in() {
+        // The case the collection prefix exists for, and the case the kind
+        // check cannot catch: this row says nothing about removal, so it reads
+        // as a collection. Matched on the bare last segment it would answer as
+        // the row of collection `1`, and the promotion that followed would
+        // address a row that cannot be promoted (§15.1).
+        let native =
+            hub(r#"{"identifier":"home.continue.1","title":"Continue Watching"}"#).expect("a hub");
+        assert_eq!(native.kind, HubKind::Collection, "read off the default");
+        assert!(!native.names_collection(&RatingKey::new("1")));
+    }
+
+    #[test]
+    fn only_the_prefix_a_reference_client_composes_names_a_collection() {
+        // `custom.collection.{section}.{ratingKey}` is what a reference client
+        // synthesises and then reloads by (`plexapi/collection.py:212`), so a
+        // row under any other prefix is not a collection's row however its last
+        // segment reads.
+        let composed =
+            hub(r#"{"identifier":"custom.collection.2.5001","deletable":"1"}"#).expect("a hub");
+        assert!(composed.names_collection(&RatingKey::new("5001")));
+        let elsewhere =
+            hub(r#"{"identifier":"library.collection.2.5001","deletable":"1"}"#).expect("a hub");
+        assert!(!elsewhere.names_collection(&RatingKey::new("5001")));
     }
 
     #[test]

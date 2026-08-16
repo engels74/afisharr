@@ -244,6 +244,74 @@ pub async fn try_raw(
         .map_err(|error| format!("{path} answered something that is not JSON: {error}"))
 }
 
+/// What a server answered to one write, before anything interpreted it.
+///
+/// The three shapes **Q-016** is a question between: a `MediaContainer` with a
+/// size, an empty body, and `204`. Kept apart because the build reads them
+/// apart — a size is a count, and the other two are
+/// [`ServerError::Incomplete`], which every caller treats as a failed edit.
+pub struct WriteAnswer {
+    pub status: u16,
+    pub body: String,
+}
+
+impl WriteAnswer {
+    /// The count the answer carried, when it carried one.
+    #[must_use]
+    pub fn size(&self) -> Option<i64> {
+        serde_json::from_str::<Value>(&self.body)
+            .ok()?
+            .get("MediaContainer")?
+            .get("size")?
+            .as_i64()
+    }
+
+    /// Which of Q-016's three shapes this is, in words a failure can carry.
+    #[must_use]
+    pub fn shape(&self) -> String {
+        match (self.status, self.size()) {
+            (204, _) => "204 with no content".to_owned(),
+            (status, Some(size)) => format!("{status} with a size of {size}"),
+            (status, None) if self.body.trim().is_empty() => {
+                format!("{status} with an empty body")
+            }
+            (status, None) => format!("{status} with a body carrying no size: {}", self.body),
+        }
+    }
+
+    /// How this build reads it: a count, or a refusal to say.
+    #[must_use]
+    pub fn is_a_count(&self) -> bool {
+        self.size().is_some()
+    }
+
+    /// The capture, so the shape is on disk rather than only in a failure.
+    #[must_use]
+    pub fn captured(&self) -> Value {
+        serde_json::json!({ "status": self.status, "body": self.body })
+    }
+}
+
+/// Sends one write and reads its answer whole, reporting rather than panicking.
+pub async fn try_raw_write(
+    client: &PlexServerClient,
+    path: &str,
+    query: &[(String, String)],
+) -> Result<WriteAnswer, String> {
+    let url = client
+        .address()
+        .endpoint(path, query)
+        .map_err(|error| format!("{path} is not an endpoint this build can compose: {error}"))?;
+    let response: Response = client
+        .raw_put(&url)
+        .await
+        .map_err(|error: ServerError| format!("PUT {path} did not answer: {error}"))?;
+    Ok(WriteAnswer {
+        status: response.status,
+        body: response.body,
+    })
+}
+
 /// The keys one server's surface is addressed by.
 ///
 /// Discovered from that server rather than written down. A rating key that

@@ -63,10 +63,13 @@ impl HubListing {
     /// than one (`plexapi/collection.py:207-215`).
     ///
     /// One of Plex's own rows is never a collection's row, whatever its
-    /// identifier happens to end in. [`ManagedHub::names_collection`] falls
-    /// back to the last dot-segment, and a native identifier routinely ends in
-    /// the section key — `home.continue.1` beside a collection keyed `1` would
-    /// otherwise answer a row that cannot be promoted at all, so the `PUT` that
+    /// identifier happens to end in. Two things say so, and the second is the
+    /// one that holds: the kind, and the collection prefix
+    /// [`ManagedHub::names_collection`] requires. The kind alone is not enough
+    /// — it is read from `deletable`, which defaults to removable, so a server
+    /// that omits the attribute on its own rows has them classified as
+    /// collections here. `home.continue.1` beside a collection keyed `1` would
+    /// then answer a row that cannot be promoted at all, and the `PUT` that
     /// followed would report success and promote nothing (§15.1).
     #[must_use]
     pub fn row_for(&self, collection: &RatingKey) -> Option<&ManagedHub> {
@@ -283,6 +286,23 @@ mod tests {
             .expect("parses"),
         );
         assert_eq!(listing.hubs[0].kind, HubKind::Native);
+        assert!(listing.row_for(&RatingKey::new("1")).is_none());
+    }
+
+    #[test]
+    fn a_native_row_that_says_nothing_about_removal_is_still_not_a_collections_row() {
+        // The same row without the `deletable` the fake sends. `deletable`
+        // defaults to removable, so this classifies as a collection — and the
+        // test above proves only what the fake chose to emit, not what a real
+        // server does. What holds here is the collection prefix
+        // (`plexapi/collection.py:212`), which this row does not carry.
+        let listing = listing(
+            serde_json::from_str(
+                r#"{"Hub":[{"identifier":"home.continue.1","title":"Continue Watching"}]}"#,
+            )
+            .expect("parses"),
+        );
+        assert_eq!(listing.hubs[0].kind, HubKind::Collection);
         assert!(listing.row_for(&RatingKey::new("1")).is_none());
     }
 }

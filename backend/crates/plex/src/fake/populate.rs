@@ -17,7 +17,42 @@ use crate::fake::{
 /// of what a promoted one is called: the last dot-segment is the rating key,
 /// and it is what the promotion call sends as `metadataItemId`.
 pub(crate) fn hub_identifier(section: &str, collection: &str) -> String {
-    format!("custom.collection.{section}.{collection}")
+    format!("{COLLECTION_PREFIX}{section}.{collection}")
+}
+
+/// The prefix every collection row's identifier carries.
+pub(crate) const COLLECTION_PREFIX: &str = "custom.collection.";
+
+/// The identifier of the native row this fake gives every library.
+///
+/// Ends in the section key so two libraries do not share a row identifier — and
+/// deliberately so: an identifier whose last segment is a bare number is what
+/// catches a reader that matches a collection on the last segment alone
+/// (`hubs/record.rs::names_collection`).
+pub(crate) fn native_identifier(section: &str) -> String {
+    format!("home.continue.{section}")
+}
+
+/// Recomposes one hub identifier for a library whose section key changed.
+///
+/// Both shapes carry the section key, so both move with it. A re-key that left
+/// them alone would answer an ordering space naming a section this server no
+/// longer has, and a test reading it back would be reading rows for a world
+/// that is gone.
+pub(crate) fn rekey_identifier(identifier: &str, from: &str, to: &str) -> String {
+    if let Some(tail) = identifier.strip_prefix(COLLECTION_PREFIX) {
+        return match tail
+            .strip_prefix(from)
+            .and_then(|rest| rest.strip_prefix('.'))
+        {
+            Some(collection) => hub_identifier(to, collection),
+            None => identifier.to_owned(),
+        };
+    }
+    match identifier.strip_suffix(from) {
+        Some(head) if head.ends_with('.') => format!("{head}{to}"),
+        _ => identifier.to_owned(),
+    }
 }
 
 /// Builds one library from its declaration and the shared seed stream.
@@ -55,7 +90,7 @@ pub(crate) fn library(scenario: &Scenario, seed: &mut Seed, spec: &LibrarySpec) 
         // A native row first: it cannot be removed or unpromoted, so every plan
         // the ordering tests write has an anchor to work around (§15.1).
         FakeHub {
-            identifier: format!("home.continue.{}", spec.key),
+            identifier: native_identifier(&spec.key),
             title: "Continue Watching".to_owned(),
             rating_key: None,
             deletable: false,

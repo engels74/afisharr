@@ -81,6 +81,42 @@ pub(crate) const fn plex_type(libtype: &str) -> u8 {
     }
 }
 
+/// The libtype one numeric `type` names, or nothing for a number this fake
+/// declares no libtype for.
+///
+/// The inverse of [`plex_type`], and not a total one: `plex_type` answers `1`
+/// for anything it does not know, so reversing it that way would read every
+/// unknown number as a movie and answer a movie's filters to a caller asking
+/// about something else.
+pub(crate) const fn libtype_named(plex: u8) -> Option<&'static str> {
+    Some(match plex {
+        1 => "movie",
+        2 => "show",
+        3 => "season",
+        4 => "episode",
+        8 => "artist",
+        9 => "album",
+        10 => "track",
+        12 => "photoalbum",
+        13 => "photo",
+        18 => "collection",
+        _ => return None,
+    })
+}
+
+/// Whether the libtype `plex` names declares `filter` at all.
+///
+/// The vocabulary composes each choice endpoint with the libtype the filter
+/// belongs to — `/library/sections/1/genre?type=1` — and a client resolves a
+/// value through the endpoint it was handed (`plexapi/library.py:1178`).
+/// Answering a genre list to `?type=18` would let a client that carried the
+/// wrong libtype through pass here and get nothing from a real server: the
+/// `collection` libtype declares `label` and nothing else.
+pub(crate) fn declares(plex: u8, filter: &str) -> bool {
+    libtype_named(plex)
+        .is_some_and(|libtype| filters(libtype).iter().any(|spec| spec.name == filter))
+}
+
 /// Every libtype a section of this kind filters.
 ///
 /// A show library filters shows, seasons, and episodes; a music library

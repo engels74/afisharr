@@ -30,10 +30,10 @@
 
 mod real;
 mod shape;
+mod writes;
 
 use afisharr_plex::{
     fake::{FakePlex, Scenario},
-    hubs::{HubIdentifier, HubVisibility},
     libraries::{ItemKind, ItemQuery, RatingKey, SectionKey, Window},
     server::{MachineIdentifier, PlexServerClient},
 };
@@ -214,8 +214,8 @@ async fn the_write_shapes_agree_against_a_collection_this_test_removes_again() {
     let real_surface = real::surface(&server).await;
     let fake_surface = real::surface(&fake_client).await;
 
-    let real_answers = write_cycle(&server, &real_surface).await;
-    let fake_answers = write_cycle(&fake_client, &fake_surface).await;
+    let real_answers = writes::cycle(&server, &real_surface).await;
+    let fake_answers = writes::cycle(&fake_client, &fake_surface).await;
 
     for (name, real_body) in &real_answers {
         let Some((_, fake_body)) = fake_answers.iter().find(|(other, _)| other == name) else {
@@ -225,149 +225,6 @@ async fn the_write_shapes_agree_against_a_collection_this_test_removes_again() {
         shape::assert_supported(name, fake_body, real_body);
         shape::assert_covered(name, fake_body, real_body, real::ALLOWED);
     }
-}
-
-/// Creates a collection, exercises every write against it, and deletes it.
-///
-/// Every answer is kept, named as the lane reports it. The delete runs whatever
-/// the rest did, because this runs on somebody's real Plex (P2).
-async fn write_cycle(client: &PlexServerClient, surface: &Surface) -> Vec<(&'static str, Value)> {
-    let mut answers = Vec::new();
-    let title = real::scratch("write cycle");
-    let identity = client
-        .identity()
-        .await
-        .expect("the server must name itself before anything is written to it");
-    let server = MachineIdentifier::new(identity.machine_identifier.as_str());
-
-    let created = client
-        .create_collection(
-            &surface.section,
-            ItemKind::Movie,
-            &title,
-            &server,
-            std::slice::from_ref(&surface.item),
-        )
-        .await
-        .expect("POST /library/collections must answer");
-
-    let outcome = exercise(client, surface, &created.rating_key, &server, &mut answers).await;
-
-    client
-        .delete_collection(&created.rating_key)
-        .await
-        .expect("the collection this test created must be removable");
-    let gone = client
-        .collections(&surface.section)
-        .await
-        .expect("the collection list must answer");
-    assert!(
-        !gone.iter().any(|row| row.title == title),
-        "nothing this test created may be left behind"
-    );
-
-    if let Err(failure) = outcome {
-        panic!("{failure}");
-    }
-    answers
-}
-
-/// The writes themselves, so a failure in one still reaches the delete.
-async fn exercise(
-    client: &PlexServerClient,
-    surface: &Surface,
-    collection: &RatingKey,
-    server: &MachineIdentifier,
-    answers: &mut Vec<(&'static str, Value)>,
-) -> Result<(), String> {
-    let section = &surface.section;
-
-    // The *read back* of what the create made, not the create's own answer:
-    // `try_raw` can only issue a `GET`, so the `POST` body itself is still
-    // uncompared. Named for what it is, because a capture filed under the
-    // wrong call is worse than no capture at all. Reported rather than
-    // panicked, like every other step here: a panic between the create and the
-    // delete leaves the scratch collection on somebody's real Plex (P2).
-    answers.push((
-        "GET /library/collections/{key}/children",
-        real::try_raw(
-            client,
-            &format!("library/collections/{collection}/children"),
-            &ItemQuery::new(Window::first(20)).pairs(),
-        )
-        .await?,
-    ));
-
-    let edit = afisharr_plex::collections::CollectionEdit {
-        sort: Some(afisharr_plex::collections::CollectionSort::Custom),
-        summary: Some("Written by the Afisharr contract test.".to_owned()),
-        ..afisharr_plex::collections::CollectionEdit::default()
-    };
-    client
-        .edit_collection(section, collection, &edit)
-        .await
-        .map_err(|error| format!("the collection edit must answer: {error}"))?;
-
-    client
-        .add_collection_items(collection, server, std::slice::from_ref(&surface.item))
-        .await
-        .map_err(|error| format!("adding an item must answer: {error}"))?;
-
-    let members = client
-        .collection_items(collection, &ItemQuery::new(Window::first(20)))
-        .await
-        .map_err(|error| format!("the collection's children must answer: {error}"))?;
-    if let Some(first) = members.items.first() {
-        client
-            .move_collection_item(
-                collection,
-                &first.rating_key,
-                &afisharr_plex::collections::MoveTarget::ToFront,
-            )
-            .await
-            .map_err(|error| format!("a move must answer: {error}"))?;
-    }
-
-    // Promotion, which is the call a `PUT` cannot stand in for: the collection
-    // has no manage row until this runs.
-    let before = client
-        .hubs(section)
-        .await
-        .map_err(|error| format!("the manage endpoint must answer: {error}"))?;
-    client
-        .set_collection_visibility(section, &before, collection, HubVisibility::default())
-        .await
-        .map_err(|error| format!("promotion must answer: {error}"))?;
-    answers.push((
-        "GET /hubs/sections/{key}/manage?metadataItemId",
-        real::try_raw(
-            client,
-            &format!("hubs/sections/{section}/manage"),
-            &[("metadataItemId".to_owned(), collection.to_string())],
-        )
-        .await?,
-    ));
-
-    let after = client
-        .hubs(section)
-        .await
-        .map_err(|error| format!("the manage endpoint must answer: {error}"))?;
-    let row = after
-        .row_for(collection)
-        .ok_or_else(|| "a promoted collection must have a manage row".to_owned())?;
-    let identifier: HubIdentifier = row.identifier.clone();
-    client
-        .move_hub(section, &identifier, &afisharr_plex::hubs::HubMove::ToFront)
-        .await
-        .map_err(|error| format!("a hub move must answer: {error}"))?;
-
-    for item in members.items.iter().take(1) {
-        client
-            .remove_collection_item(collection, &item.rating_key)
-            .await
-            .map_err(|error| format!("removing an item must answer: {error}"))?;
-    }
-    Ok(())
 }
 
 #[tokio::test]
@@ -400,11 +257,20 @@ async fn the_four_shapes_the_ordering_space_depends_on_are_what_a_real_server_se
              endpoint, and this build stopped emitting it here: {row}"
         );
     }
-    assert!(
-        rows.iter().any(|row| row.get("deletable").is_some()),
-        "blocker 1: `deletable` is how a real server says a row cannot be removed, and \
-         `HubKind` is read from it"
-    );
+    // Every row, not merely one. `deletable` defaults to removable when a
+    // server omits it (`plexapi/library.py:3035`), so a row that does not carry
+    // it is classified as a collection off a default rather than off the
+    // server's own word — and one of Plex's own rows read as a collection is a
+    // row the plan tries to reposition and cannot (§15.1). Checked here because
+    // this is the only place a real server can say.
+    for row in &rows {
+        assert!(
+            row.get("deletable").is_some(),
+            "blocker 1: `deletable` is how a real server says a row cannot be removed and \
+             `HubKind` is read from it, and this row carries none, so its kind is a default: \
+             {row}"
+        );
+    }
 
     let created = create_scratch(&server, &surface).await;
     // Nothing between here and the delete may panic, or the scratch collection
@@ -581,7 +447,7 @@ async fn the_fake_survives_the_whole_write_cycle_the_release_lane_runs() {
     let fake = FakePlex::start(Scenario::behaving(1)).await;
     let client = real::fake_client(&fake);
     let surface = real::surface(&client).await;
-    let answers = write_cycle(&client, &surface).await;
+    let answers = writes::cycle(&client, &surface).await;
     assert!(!answers.is_empty(), "every write answers something");
     assert_eq!(
         fake.snapshot().section_keys().first().map(String::as_str),
