@@ -7,8 +7,8 @@ use afisharr_sources::outbound::Method;
 use serde::Deserialize;
 
 use crate::{
-    hubs::{HubIdentifier, HubVisibility, ManagedHub, record::HubBody},
-    libraries::SectionKey,
+    hubs::{HubIdentifier, HubKind, HubVisibility, ManagedHub, record::HubBody},
+    libraries::{RatingKey, SectionKey},
     server::{PlexServerClient, ServerError},
 };
 
@@ -55,6 +55,30 @@ pub struct HubListing {
     pub unidentifiable: usize,
 }
 
+impl HubListing {
+    /// The row for one collection, when the space already holds one.
+    ///
+    /// `None` is what a never-promoted collection looks like: it is in the
+    /// library and not in the ordering space, and those are two states rather
+    /// than one (`plexapi/collection.py:207-215`).
+    ///
+    /// One of Plex's own rows is never a collection's row, whatever its
+    /// identifier happens to end in. Two things say so, and the second is the
+    /// one that holds: the kind, and the collection prefix
+    /// [`ManagedHub::names_collection`] requires. The kind alone is not enough
+    /// — it is read from `deletable`, which defaults to removable, so a server
+    /// that omits the attribute on its own rows has them classified as
+    /// collections here. `home.continue.1` beside a collection keyed `1` would
+    /// then answer a row that cannot be promoted at all, and the `PUT` that
+    /// followed would report success and promote nothing (§15.1).
+    #[must_use]
+    pub fn row_for(&self, collection: &RatingKey) -> Option<&ManagedHub> {
+        self.hubs
+            .iter()
+            .find(|hub| hub.kind == HubKind::Collection && hub.names_collection(collection))
+    }
+}
+
 impl PlexServerClient {
     /// Reads the manageable ordering space of one library.
     ///
@@ -90,11 +114,16 @@ impl PlexServerClient {
         Ok(())
     }
 
-    /// Writes the three visibility axes of one hub.
+    /// Writes the three visibility axes of one hub already in the space.
     ///
     /// Applied before ordering within a pass: an item has to be in the ordering
     /// space before its position can be set, and one being hidden should not
     /// spend a move (§15.5).
+    ///
+    /// This addresses an existing row. A collection nothing has promoted has no
+    /// row to address, and that is what [`PlexServerClient::promote_hub`] is
+    /// for — see [`PlexServerClient::set_collection_visibility`] for the choice
+    /// between them.
     ///
     /// # Errors
     /// Returns [`ServerError::Transport`] when the server did not answer.
@@ -111,6 +140,57 @@ impl PlexServerClient {
         )?;
         self.send(Method::PUT, &url, None, &[]).await?;
         Ok(())
+    }
+
+    /// Puts a collection into the ordering space, at the visibility given.
+    ///
+    /// The call a `PUT` cannot stand in for: until something promotes it, a
+    /// collection has no row under `/manage/{identifier}` at all, and writing
+    /// to one changes nothing (`plexapi/library.py:3114-3117`). The collection
+    /// is named by `metadataItemId`, which is the rating key rather than a hub
+    /// identifier — the space does not yet have one to give it.
+    ///
+    /// # Errors
+    /// Returns [`ServerError::Transport`] when the server did not answer.
+    #[tracing::instrument(skip(self))]
+    pub async fn promote_hub(
+        &self,
+        section: &SectionKey,
+        collection: &RatingKey,
+        visibility: HubVisibility,
+    ) -> Result<(), ServerError> {
+        let mut query = vec![("metadataItemId".to_owned(), collection.to_string())];
+        query.extend(visibility.pairs());
+        let url = self.endpoint(&format!("hubs/sections/{section}/manage"), &query)?;
+        self.send(Method::POST, &url, None, &[]).await?;
+        Ok(())
+    }
+
+    /// Writes one collection's visibility, whichever state its row is in.
+    ///
+    /// The choice is made from the manage answer the caller already read, not
+    /// guessed: a row that is there is written with a `PUT`, and one that is
+    /// not is promoted with a `POST`. One implementation of the rule, so a
+    /// caller cannot pick the wrong half (P7).
+    ///
+    /// # Errors
+    /// Returns [`ServerError::Transport`] when the server did not answer.
+    #[tracing::instrument(skip(self, listing))]
+    pub async fn set_collection_visibility(
+        &self,
+        section: &SectionKey,
+        listing: &HubListing,
+        collection: &RatingKey,
+        visibility: HubVisibility,
+    ) -> Result<(), ServerError> {
+        match listing.row_for(collection) {
+            Some(row) => {
+                let identifier = row.identifier.clone();
+                self.set_hub_visibility(section, &identifier, visibility)
+                    .await
+            }
+            None => self.promote_hub(section, collection, visibility).await,
+        }
     }
 }
 
@@ -134,8 +214,9 @@ mod tests {
 
     const FIXTURE: &str = r#"{
       "Hub": [
-        {"hubIdentifier":"home.continue","title":"Continue Watching","promotedToOwnHome":"1"},
-        {"hubIdentifier":"collection.5001","title":"Best of 1979","ratingKey":"5001",
+        {"identifier":"home.continue","title":"Continue Watching","deletable":"0",
+         "promotedToOwnHome":"1"},
+        {"identifier":"custom.collection.1.5001","title":"Best of 1979","deletable":"1",
          "promotedToOwnHome":"1","promotedToSharedHome":"1"},
         {"title":"A row this build cannot address"}
       ]
@@ -174,5 +255,54 @@ mod tests {
         let listing = listing(serde_json::from_str(r#"{"size":0}"#).expect("parses"));
         assert!(listing.hubs.is_empty());
         assert_eq!(listing.unidentifiable, 0);
+    }
+
+    #[test]
+    fn a_collection_with_a_row_is_found_and_one_without_is_absent() {
+        // Absent is what a never-promoted collection looks like, and it is the
+        // difference between a `PUT` that writes and a `PUT` that answers 200
+        // to a row the server does not have.
+        let listing = parsed();
+        assert_eq!(
+            listing
+                .row_for(&RatingKey::new("5001"))
+                .map(|row| row.identifier.clone()),
+            Some(HubIdentifier::new("custom.collection.1.5001"))
+        );
+        assert!(listing.row_for(&RatingKey::new("6001")).is_none());
+    }
+
+    #[test]
+    fn one_of_plexs_own_rows_is_never_answered_as_a_collections_row() {
+        // A native identifier routinely ends in the section key, and the
+        // identifier's last segment is what matches a collection. Answered
+        // here, the caller writes a `PUT` to a row that cannot be promoted at
+        // all and the collection is never promoted (§15.1).
+        let listing = listing(
+            serde_json::from_str(
+                r#"{"Hub":[{"identifier":"home.continue.1","title":"Continue Watching",
+                    "deletable":"0"}]}"#,
+            )
+            .expect("parses"),
+        );
+        assert_eq!(listing.hubs[0].kind, HubKind::Native);
+        assert!(listing.row_for(&RatingKey::new("1")).is_none());
+    }
+
+    #[test]
+    fn a_native_row_that_says_nothing_about_removal_is_still_not_a_collections_row() {
+        // The same row without the `deletable` the fake sends. `deletable`
+        // defaults to removable, so this classifies as a collection — and the
+        // test above proves only what the fake chose to emit, not what a real
+        // server does. What holds here is the collection prefix
+        // (`plexapi/collection.py:212`), which this row does not carry.
+        let listing = listing(
+            serde_json::from_str(
+                r#"{"Hub":[{"identifier":"home.continue.1","title":"Continue Watching"}]}"#,
+            )
+            .expect("parses"),
+        );
+        assert_eq!(listing.hubs[0].kind, HubKind::Collection);
+        assert!(listing.row_for(&RatingKey::new("1")).is_none());
     }
 }

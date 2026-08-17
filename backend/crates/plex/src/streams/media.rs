@@ -5,6 +5,8 @@
 
 use serde::Deserialize;
 
+use crate::wire::{Flag, optional_flag};
+
 /// One media version of an item — a file, with its container-level facts.
 #[derive(Debug, Clone, PartialEq, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -73,11 +75,13 @@ pub struct MediaPart {
     ///
     /// `None` is "Plex did not say", which is not "the file is fine". The
     /// distinction is what makes a broken-media overlay honest rather than a
-    /// badge that appears whenever an answer was short (PRD §13.2.5).
-    #[serde(default)]
+    /// badge that appears whenever an answer was short (PRD §13.2.5). A real
+    /// server sends it only when the request asked for a file check, so `None`
+    /// is the ordinary case rather than the exceptional one.
+    #[serde(default, deserialize_with = "optional_flag")]
     pub accessible: Option<bool>,
     /// Plex's own report that the file is still there.
-    #[serde(default)]
+    #[serde(default, deserialize_with = "optional_flag")]
     pub exists: Option<bool>,
     /// The streams inside it.
     #[serde(default, rename = "Stream")]
@@ -205,23 +209,23 @@ struct StreamBody {
     #[serde(default)]
     color_space: Option<String>,
     #[serde(default)]
-    forced: bool,
+    forced: Flag,
     #[serde(default)]
-    hearing_impaired: bool,
+    hearing_impaired: Flag,
     #[serde(default)]
-    visual_impaired: bool,
+    visual_impaired: Flag,
     #[serde(default, rename = "DOVIPresent")]
-    dovi_present: bool,
+    dovi_present: Flag,
     #[serde(default, rename = "DOVIProfile")]
     dovi_profile: Option<i32>,
     #[serde(default, rename = "DOVILevel")]
     dovi_level: Option<i32>,
     #[serde(default, rename = "DOVIBLPresent")]
-    dovi_bl_present: bool,
+    dovi_bl_present: Flag,
     #[serde(default, rename = "DOVIELPresent")]
-    dovi_el_present: bool,
+    dovi_el_present: Flag,
     #[serde(default, rename = "DOVIRPUPresent")]
-    dovi_rpu_present: bool,
+    dovi_rpu_present: Flag,
     #[serde(default, rename = "DOVIBLCompatID")]
     dovi_bl_compat_id: Option<i32>,
 }
@@ -239,16 +243,16 @@ impl<'de> Deserialize<'de> for MediaStream {
             audio_channel_layout: body.audio_channel_layout,
             bit_depth: body.bit_depth,
             color_space: body.color_space,
-            forced: body.forced,
-            hearing_impaired: body.hearing_impaired,
-            visual_impaired: body.visual_impaired,
+            forced: body.forced.is_set(),
+            hearing_impaired: body.hearing_impaired.is_set(),
+            visual_impaired: body.visual_impaired.is_set(),
             dolby_vision: DolbyVision {
-                present: body.dovi_present,
+                present: body.dovi_present.is_set(),
                 profile: body.dovi_profile,
                 level: body.dovi_level,
-                base_layer: body.dovi_bl_present,
-                enhancement_layer: body.dovi_el_present,
-                rpu: body.dovi_rpu_present,
+                base_layer: body.dovi_bl_present.is_set(),
+                enhancement_layer: body.dovi_el_present.is_set(),
+                rpu: body.dovi_rpu_present.is_set(),
                 compatibility_id: body.dovi_bl_compat_id,
             },
         })
@@ -327,5 +331,22 @@ mod tests {
     #[test]
     fn a_stream_type_this_build_has_not_seen_keeps_its_number() {
         assert_eq!(StreamKind::from_plex(9), StreamKind::Other(9));
+    }
+
+    #[test]
+    fn every_flag_reads_the_same_in_every_spelling_a_server_uses() {
+        // All of these are XML attributes underneath, and a strict `bool` did
+        // not read the wrong value — it failed the whole item parse.
+        let media: MediaEntry = serde_json::from_str(
+            r#"{"Part":[{"accessible":"1","exists":0,
+                "Stream":[{"streamType":3,"forced":"1","hearingImpaired":1,
+                           "DOVIPresent":"true"}]}]}"#,
+        )
+        .expect("parses");
+        assert_eq!(media.parts[0].accessible, Some(true));
+        assert_eq!(media.parts[0].exists, Some(false));
+        assert!(media.parts[0].streams[0].forced);
+        assert!(media.parts[0].streams[0].hearing_impaired);
+        assert!(media.parts[0].streams[0].dolby_vision.present);
     }
 }

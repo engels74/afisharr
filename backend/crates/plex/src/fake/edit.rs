@@ -1,0 +1,400 @@
+// SPDX-FileCopyrightText: 2026 Afisharr contributors
+// SPDX-License-Identifier: AGPL-3.0-or-later
+
+//! Applying one edit to one thing, whatever kind of thing it is.
+//!
+//! Plex has a single edit endpoint over every libtype:
+//! `PUT /library/sections/{key}/all` writes whatever `id` names, at the libtype
+//! `type` names (`plexapi/library.py:1743-1755`). The fake used to decide what
+//! it was editing by looking for a `label` argument and routing everything else
+//! to a collection, so an item's sort title could not be written at all — and
+//! the sort-title round trip §15.6 requires had nothing to round-trip against.
+//!
+//! **Removals arrive comma-joined under one key.** `python-plexapi` sends
+//! `label[].tag.tag-` once, holding every removed tag percent-quoted and joined
+//! with commas (`plexapi/mixins/edit.py:331-333`). Read as one repeated key per
+//! removal, a two-label removal removed one label and answered success.
+
+use crate::fake::{
+    request::Arguments,
+    state::{FakeCollection, FakeItem},
+};
+
+/// The ids one edit names.
+///
+/// Comma-joined, because a real client joins every target into one argument
+/// (`plexapi/library.py:1749`). Matching the whole string against one key made
+/// a two-item edit write nothing and answer `{"size":1}`.
+pub(crate) fn targets(arguments: &Arguments) -> Vec<String> {
+    arguments
+        .first("id")
+        .map(|ids| {
+            ids.split(',')
+                .filter(|id| !id.is_empty())
+                .map(str::to_owned)
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// The libtype an edit names, or `None` when it named none.
+pub(crate) fn libtype(arguments: &Arguments) -> Option<u8> {
+    arguments.first("type").and_then(|value| value.parse().ok())
+}
+
+/// The tags one edit adds under `tag`.
+fn additions(arguments: &Arguments, tag: &str) -> Vec<String> {
+    let prefix = format!("{tag}[");
+    // The removal key ends `tag-`, so it can never end `].tag.tag`: the suffix
+    // is the whole test, and a second one excluding removals would be dead.
+    let suffix = "].tag.tag";
+    arguments
+        .pairs()
+        .iter()
+        .filter(|(name, _)| name.starts_with(&prefix) && name.ends_with(suffix))
+        .map(|(_, value)| value.clone())
+        .collect()
+}
+
+/// The tags one edit removes under `tag`.
+fn removals(arguments: &Arguments, tag: &str) -> Vec<String> {
+    let key = format!("{tag}[].tag.tag-");
+    arguments
+        .all(&key)
+        .into_iter()
+        .flat_map(|joined| joined.split(',').map(str::to_owned).collect::<Vec<_>>())
+        .filter(|value| !value.is_empty())
+        // Quoted once by the client before the query string quoted it again, so
+        // a tag holding a comma survives the join it would otherwise be split
+        // by (`plexapi/mixins/edit.py:333`).
+        .map(|value| {
+            percent_encoding::percent_decode_str(&value)
+                .decode_utf8_lossy()
+                .into_owned()
+        })
+        .collect()
+}
+
+/// What a written `titleSort.value` leaves behind.
+///
+/// An empty value clears the attribute rather than setting it to the empty
+/// string. Plex has no other way to say "no sort title", and the absent state
+/// is the one most rows are in and the one a teardown has to be able to restore
+/// them to (§15.6).
+fn written_sort_title(value: &str) -> Option<String> {
+    if value.is_empty() {
+        None
+    } else {
+        Some(value.to_owned())
+    }
+}
+
+/// Applies one edit to one item. Returns whether anything was written.
+///
+/// Counted field by field, exactly as [`apply_to_collection`] is, and for the
+/// same reason: an item holds none of the fields a collection does, so an edit
+/// naming only `summary.value` or `collectionMode` writes nothing to an item.
+/// Answering `size: 1` for it would be the fake claiming a write it never made,
+/// which is the failure the count exists to expose.
+pub(crate) fn apply_to_item(item: &mut FakeItem, arguments: &Arguments) -> bool {
+    let mut wrote = apply_tags(&mut item.labels, &mut item.labels_locked, arguments);
+    if let Some(title) = arguments.first("title.value") {
+        title.clone_into(&mut item.title);
+        wrote = true;
+    }
+    // Value and lock are independent, and both are written whenever they are
+    // sent — including to `0`. A fake that only ever set the lock would make a
+    // restore that forgot to clear it look correct (`I-REV-3`, §15.6).
+    if let Some(sort_title) = arguments.first("titleSort.value") {
+        item.sort_title = written_sort_title(sort_title);
+        wrote = true;
+    }
+    if let Some(locked) = arguments.first("titleSort.locked") {
+        item.sort_title_locked = locked != "0";
+        wrote = true;
+    }
+    wrote
+}
+
+/// Applies one edit to one collection. Returns whether anything was written.
+///
+/// Counted field by field rather than from [`writes_anything`], because a
+/// collection holds fewer fields than an item does: an edit naming only a field
+/// this fake does not keep on a collection writes nothing, and answering
+/// `size: 1` for it is the fake claiming a write it never made, which is the
+/// failure the count exists to expose.
+pub(crate) fn apply_to_collection(collection: &mut FakeCollection, arguments: &Arguments) -> bool {
+    let mut wrote = apply_tags(
+        &mut collection.labels,
+        &mut collection.labels_locked,
+        arguments,
+    );
+    if let Some(title) = arguments.first("title.value") {
+        title.clone_into(&mut collection.title);
+        wrote = true;
+    }
+    if let Some(sort_title) = arguments.first("titleSort.value") {
+        // The same reading as an item's. It is one argument on one endpoint, so
+        // a collection that kept `""` where an item cleared the attribute would
+        // be the fake disagreeing with itself — and the collection half of the
+        // §15.6 round trip would be checked against a state no server holds.
+        collection.sort_title = written_sort_title(sort_title);
+        wrote = true;
+    }
+    if let Some(locked) = arguments.first("titleSort.locked") {
+        collection.sort_title_locked = locked != "0";
+        wrote = true;
+    }
+    if let Some(summary) = arguments.first("summary.value") {
+        collection.summary = Some(summary.to_owned());
+        wrote = true;
+    }
+    // Dropped on the floor before, so a collection switched to custom order
+    // reported the order it had always reported and every item move under it
+    // meant nothing.
+    if let Some(mode) = arguments
+        .first("collectionMode")
+        .and_then(|v| v.parse().ok())
+    {
+        collection.mode = mode;
+        wrote = true;
+    }
+    if let Some(sort) = arguments
+        .first("collectionSort")
+        .and_then(|v| v.parse().ok())
+    {
+        collection.sort = sort;
+        wrote = true;
+    }
+    wrote
+}
+
+/// Adds, removes, and locks one tag field. Returns whether the edit named it.
+///
+/// Named rather than changed: removing a tag the row does not carry is still a
+/// write a real server performs and counts, and a fake that answered `0` for it
+/// would report a successful teardown as a failed one.
+fn apply_tags(tags: &mut Vec<String>, locked: &mut bool, arguments: &Arguments) -> bool {
+    let removed = removals(arguments, "label");
+    let added = additions(arguments, "label");
+    for tag in &removed {
+        tags.retain(|held| held != tag);
+    }
+    for tag in added.iter().cloned() {
+        if !tags.contains(&tag) {
+            tags.push(tag);
+        }
+    }
+    // The lock accompanies every tag edit a real client sends
+    // (`plexapi/mixins/edit.py:328-330`), and it defaults to *locked* there. A
+    // field left locked is the `I-REV-3` failure on the one field the operator
+    // touches daily, so the fake has to be able to show it.
+    let mut named = !removed.is_empty() || !added.is_empty();
+    if let Some(value) = arguments.first("label.locked") {
+        *locked = value != "0";
+        named = true;
+    }
+    named
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::fake::{library::World, scenario::Scenario};
+
+    fn item() -> FakeItem {
+        World::build(&Scenario::behaving(1))
+            .libraries
+            .swap_remove(0)
+            .items
+            .swap_remove(0)
+    }
+
+    fn collection() -> FakeCollection {
+        World::build(&Scenario::behaving(1))
+            .libraries
+            .swap_remove(0)
+            .collections
+            .swap_remove(0)
+    }
+
+    #[test]
+    fn an_edit_names_every_id_it_carries() {
+        assert_eq!(
+            targets(&Arguments::parse(Some("id=1001,1002,1003&type=1"))),
+            ["1001", "1002", "1003"]
+        );
+        assert!(targets(&Arguments::parse(Some("type=1"))).is_empty());
+        assert_eq!(libtype(&Arguments::parse(Some("type=18"))), Some(18));
+    }
+
+    #[test]
+    fn an_items_sort_title_round_trips_in_all_three_of_its_properties() {
+        // Nothing could write either field before: every non-label edit went to
+        // a collection, so an item's sort title was unreachable.
+        let mut item = item();
+        assert!(apply_to_item(
+            &mut item,
+            &Arguments::parse(Some("titleSort.value=!001 Alien&titleSort.locked=1"))
+        ));
+        assert_eq!(item.sort_title.as_deref(), Some("!001 Alien"));
+        assert!(item.sort_title_locked);
+
+        assert!(apply_to_item(
+            &mut item,
+            &Arguments::parse(Some("titleSort.value=Alien&titleSort.locked=0"))
+        ));
+        assert!(!item.sort_title_locked, "unlocking is a write too");
+    }
+
+    #[test]
+    fn clearing_a_sort_title_leaves_the_attribute_absent_rather_than_empty() {
+        // Absent and empty are two different facts, and a teardown restoring
+        // an item to "no sort title" can only say so with an empty value.
+        let mut item = item();
+        assert!(apply_to_item(
+            &mut item,
+            &Arguments::parse(Some("titleSort.value=&titleSort.locked=0"))
+        ));
+        assert_eq!(item.sort_title, None);
+    }
+
+    #[test]
+    fn a_collection_clears_its_sort_title_the_same_way_an_item_does() {
+        // One argument on one endpoint. A collection that kept `""` where an
+        // item cleared the attribute would make the collection half of the
+        // §15.6 round trip read back present-and-empty, which is a state no
+        // server holds and the one a teardown is trying to leave.
+        let mut collection = collection();
+        assert!(apply_to_collection(
+            &mut collection,
+            &Arguments::parse(Some("titleSort.value=!001 Best&titleSort.locked=1"))
+        ));
+        assert_eq!(collection.sort_title.as_deref(), Some("!001 Best"));
+        assert!(apply_to_collection(
+            &mut collection,
+            &Arguments::parse(Some("titleSort.value=&titleSort.locked=0"))
+        ));
+        assert_eq!(collection.sort_title, None);
+        assert!(!collection.sort_title_locked);
+    }
+
+    #[test]
+    fn a_two_label_removal_removes_two_labels() {
+        // One comma-joined value under one key, which is how a real client
+        // sends it. Read as a repeated key, this removed one and reported
+        // success.
+        let mut item = item();
+        item.labels = vec!["old".to_owned(), "older".to_owned(), "kept".to_owned()];
+        apply_to_item(
+            &mut item,
+            &Arguments::parse(Some("label[].tag.tag-=old,older&label.locked=0")),
+        );
+        assert_eq!(item.labels, ["kept"]);
+    }
+
+    #[test]
+    fn a_label_holding_a_comma_survives_the_join_it_would_be_split_by() {
+        // Quoted twice on the way out: once by the client into the joined list
+        // and once by the query string. One decode happens before this reads
+        // it, so the comma is still `%2C` here and the split is unambiguous.
+        let mut item = item();
+        item.labels = vec!["a,b".to_owned(), "c".to_owned()];
+        apply_to_item(
+            &mut item,
+            &Arguments::parse(Some("label[].tag.tag-=a%252Cb&label.locked=0")),
+        );
+        assert_eq!(item.labels, ["c"]);
+    }
+
+    #[test]
+    fn a_tag_edit_writes_the_lock_that_accompanies_it() {
+        // A real client locks the field by default. A fake that ignored the
+        // argument could not show the `I-REV-3` failure on the one field the
+        // operator edits daily.
+        let mut item = item();
+        apply_to_item(
+            &mut item,
+            &Arguments::parse(Some("label[0].tag.tag=afisharr&label.locked=1")),
+        );
+        assert_eq!(item.labels, ["afisharr"]);
+        assert!(item.labels_locked);
+
+        apply_to_item(
+            &mut item,
+            &Arguments::parse(Some("label[0].tag.tag=afisharr&label.locked=0")),
+        );
+        assert!(!item.labels_locked);
+    }
+
+    #[test]
+    fn a_collection_edit_applies_the_three_fields_that_used_to_be_dropped() {
+        let mut collection = collection();
+        assert!(apply_to_collection(
+            &mut collection,
+            &Arguments::parse(Some(
+                "summary.value=A+few+films&collectionMode=1&collectionSort=2"
+            ))
+        ));
+        assert_eq!(collection.summary.as_deref(), Some("A few films"));
+        assert_eq!(collection.mode, 1);
+        assert_eq!(collection.sort, 2);
+    }
+
+    #[test]
+    fn a_collections_labels_round_trip_the_way_an_items_do() {
+        // One tag, one endpoint, one libtype argument apart. A collection that
+        // held no labels could not answer the `label` filter its own libtype
+        // declares, and answered a label edit with a write it never made.
+        let mut collection = collection();
+        assert!(apply_to_collection(
+            &mut collection,
+            &Arguments::parse(Some("label[0].tag.tag=afisharr&label.locked=0"))
+        ));
+        assert_eq!(collection.labels, ["afisharr"]);
+        assert!(!collection.labels_locked);
+        assert!(apply_to_collection(
+            &mut collection,
+            &Arguments::parse(Some("label%5B%5D.tag.tag-=afisharr"))
+        ));
+        assert!(collection.labels.is_empty());
+    }
+
+    #[test]
+    fn a_removal_of_a_label_a_collection_does_not_carry_is_still_a_write() {
+        // A real server writes the row and counts it. Answering `0` would
+        // report a teardown that landed as one that failed (`I-REV-3`).
+        let mut collection = collection();
+        assert!(apply_to_collection(
+            &mut collection,
+            &Arguments::parse(Some("label%5B%5D.tag.tag-=never-applied"))
+        ));
+    }
+
+    #[test]
+    fn an_edit_that_names_no_field_writes_nothing() {
+        let mut collection = collection();
+        assert!(!apply_to_collection(
+            &mut collection,
+            &Arguments::parse(Some("id=15001&type=18"))
+        ));
+    }
+
+    #[test]
+    fn an_item_edit_naming_only_a_collections_fields_writes_nothing() {
+        // An item holds no summary and no collection order. Answering `size: 1`
+        // for one is the fake claiming a write it never made, which is the
+        // failure the count exists to expose.
+        let mut item = item();
+        assert!(!apply_to_item(
+            &mut item,
+            &Arguments::parse(Some(
+                "id=10001&type=1&summary.value=A+few+films&collectionMode=1&collectionSort=2"
+            ))
+        ));
+        assert!(!apply_to_item(
+            &mut item,
+            &Arguments::parse(Some("id=10001&type=1"))
+        ));
+    }
+}

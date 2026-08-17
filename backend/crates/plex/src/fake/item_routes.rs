@@ -4,216 +4,256 @@
 //! The calls that read or write one library's items.
 
 use axum::{
-    Json,
-    extract::{Path, Query, RawQuery, State},
+    extract::{Path, State},
+    http::StatusCode,
     response::Response,
 };
-use serde_json::{Value, json};
 
 use crate::fake::{
-    json as shape,
+    choices, edit,
+    element::Element,
+    negotiation::{Answer, Rendering},
     plan::FakeOperation,
-    routes::{Params, Running, first, pairs, window},
-    vocabulary,
+    request::{Arguments, Paging},
+    routes::Running,
+    search, shape,
+    vocabulary::{self, plex_type},
 };
 
 /// `GET /library/sections/{key}/all`.
 ///
-/// One endpoint for two questions, exactly as Plex serves it: with
-/// `includeMeta=1` it describes its own filter vocabulary, and without it it
-/// lists items. Splitting them here would be a fake with an endpoint the real
-/// server does not have.
+/// One endpoint for three questions, exactly as Plex serves it: with
+/// `includeMeta=1` it describes its own filter vocabulary, with `type=18` it
+/// lists collections, and otherwise it lists items. Splitting them here would
+/// be a fake with endpoints the real server does not have.
 pub(crate) async fn items(
     State(running): State<Running>,
     Path(key): Path<String>,
-    Query(params): Query<Params>,
-) -> Result<Json<Value>, Response> {
-    if params.get("includeMeta").is_some_and(|value| value == "1") {
-        if let Some(refusal) = running.gate(FakeOperation::Vocabulary).await {
-            return Err(refusal);
-        }
-        // Described for the type that was asked about, not always for movies:
-        // a vocabulary answered under one libtype and read as another is a
-        // discovery test asserting against a library it never queried.
-        return Ok(Json(vocabulary::describe(
-            &key,
-            params.get("type").map(String::as_str),
-        )));
-    }
-
-    if let Some(refusal) = running.gate(FakeOperation::Items).await {
+    rendering: Rendering,
+    arguments: Arguments,
+    paging: Paging,
+) -> Result<Answer, Response> {
+    let describing = arguments.flag("includeMeta");
+    let operation = if describing {
+        FakeOperation::Vocabulary
+    } else {
+        FakeOperation::Items
+    };
+    if let Some(refusal) = running.gate(operation, rendering).await {
         return Err(refusal);
     }
-    running.note_fetch();
+    if !describing {
+        running.note_fetch();
+    }
 
+    let detail = running.detail(&arguments);
     let mut world = running.world();
     let Some(library) = world.library(&key) else {
-        return Ok(Json(shape::container(&json!({ "size": 0 }))));
+        return Err(rendering.refusal(StatusCode::NOT_FOUND, 1000, "Not Found"));
     };
-    let (start, size) = window(&params);
-    let total = library.items.len();
-    let page: Vec<Value> = library
-        .items
-        .iter()
-        .skip(start)
-        .take(size)
-        .map(shape::item)
+
+    // Collections are items of type 18 on this endpoint, and answering movies
+    // to a caller that asked for collections is a fake answering a different
+    // question confidently (`plexapi/library.py:1666-1670`).
+    let wants_collections = edit::libtype(&arguments) == Some(plex_type("collection"));
+    let mut container = shape::library_container(library).text("title1", library.title.clone());
+    let rows: Vec<Element> = if wants_collections {
+        // Filtered and ordered like any other row. Handing back the whole
+        // collection list to a caller that asked for one label is the failure
+        // `search` exists to remove, one libtype short — and `label` is the
+        // only filter the `collection` libtype declares.
+        search::select(&library.collections, &arguments)
+            .into_iter()
+            .map(|collection| shape::collection(collection, library))
+            .collect()
+    } else {
+        search::select(&library.items, &arguments)
+            .into_iter()
+            .map(|item| shape::item(item, library, detail))
+            .collect()
+    };
+
+    let total = rows.len();
+    let page: Vec<Element> = rows
+        .into_iter()
+        .skip(paging.start)
+        .take(paging.size)
         .collect();
-    Ok(Json(shape::container(&json!({
-        "size": page.len(),
-        "totalSize": total,
-        "offset": start,
-        "Metadata": page,
-    }))))
+    container = container
+        .number("size", i64::try_from(page.len()).unwrap_or(i64::MAX))
+        .number("totalSize", i64::try_from(total).unwrap_or(i64::MAX))
+        .number("offset", i64::try_from(paging.start).unwrap_or(i64::MAX));
+    if describing {
+        container = container.child(vocabulary::describe(
+            &key,
+            vocabulary::libtypes_of(&library.kind),
+            arguments.flag("includeAdvanced"),
+        ));
+    }
+    Ok(rendering.answer(container.children(page)))
 }
 
-/// `GET /library/metadata/{key}`.
+/// `GET /library/metadata/{key}` — one item, or one collection.
+///
+/// Both, because a real server serves both here: a collection's own `key` is
+/// `/library/metadata/{ratingKey}/children` with the suffix stripped, which is
+/// how every client reloads one.
 pub(crate) async fn item(
     State(running): State<Running>,
     Path(key): Path<String>,
-) -> Result<Json<Value>, Response> {
-    if let Some(refusal) = running.gate(FakeOperation::Item).await {
+    rendering: Rendering,
+    arguments: Arguments,
+) -> Result<Answer, Response> {
+    if let Some(refusal) = running.gate(FakeOperation::Item, rendering).await {
         return Err(refusal);
     }
-    let world = running.world();
-    let found = world
-        .libraries
-        .iter()
-        .flat_map(|library| library.items.iter())
-        .find(|item| item.rating_key == key)
-        .map(shape::item);
-    // An answer with no item, not a 404: a rebound rating key is the case
-    // `I-ID-1` is about, and a server that 404s and one that answers an empty
-    // container are both shapes a client must survive.
-    let body = match found {
-        None => json!({ "size": 0 }),
-        Some(item) => json!({ "size": 1, "Metadata": [item] }),
-    };
-    Ok(Json(shape::container(&body)))
+    let detail = running.detail(&arguments);
+    let mut world = running.world();
+
+    if let Some(library) = world.library_of_item(&key) {
+        let container = shape::library_container(library).number("size", 1_i64);
+        let row = library
+            .items
+            .iter()
+            .find(|candidate| candidate.rating_key == key)
+            .map(|found| shape::item(found, library, detail));
+        return Ok(rendering.answer(container.children(row)));
+    }
+    if let Some(library) = world.library_of_collection(&key) {
+        let container = shape::library_container(library).number("size", 1_i64);
+        let row = library
+            .collections
+            .iter()
+            .find(|candidate| candidate.rating_key == key)
+            .map(|found| shape::collection(found, library));
+        return Ok(rendering.answer(container.children(row)));
+    }
+
+    // A real server refuses a key it does not hold, and a rebound rating key is
+    // exactly that case (`I-ID-1`). The empty container is the other shape a
+    // client must survive, and a scenario chooses it — asserting one of the two
+    // is what left half the clients in the world untested.
+    if running.missing_item_answers_empty() {
+        return Ok(rendering.answer(shape::container()));
+    }
+    Err(rendering.refusal(StatusCode::NOT_FOUND, 1000, "Not Found"))
 }
 
-/// `PUT /library/sections/{key}/all` — a collection edit, or a label edit.
+/// `PUT /library/sections/{key}/all` — the one edit endpoint, over every
+/// libtype.
 ///
-/// One endpoint for both, as Plex serves it. Which one it is is decided by the
-/// arguments, and the fake reports the same operation the client meant so an
-/// injection aimed at labels does not land on a title edit.
+/// What is edited is whatever `id` names, at the libtype `type` names
+/// (`plexapi/library.py:1743-1755`). Deciding from the presence of a `label`
+/// argument, as this used to, made an item's sort title unwritable.
 pub(crate) async fn edit(
     State(running): State<Running>,
     Path(key): Path<String>,
-    RawQuery(query): RawQuery,
-) -> Result<Json<Value>, Response> {
-    // Read as pairs rather than as a map: a removal is sent once per label
-    // under one repeated key, and a map would honour the last of them.
-    let params = pairs(query.as_deref());
-    let labels = params.iter().any(|(name, _)| name.starts_with("label"));
-    let operation = if labels {
+    rendering: Rendering,
+    arguments: Arguments,
+) -> Result<Answer, Response> {
+    let touches_labels = arguments
+        .pairs()
+        .iter()
+        .any(|(name, _)| name.starts_with("label"));
+    // The operation an injection is aimed at follows what the caller meant, so
+    // a scenario failing label edits does not land on a title edit.
+    let operation = if touches_labels {
         FakeOperation::EditLabels
     } else {
         FakeOperation::EditCollection
     };
-    if let Some(refusal) = running.gate(operation).await {
+    if let Some(refusal) = running.gate(operation, rendering).await {
         return Err(refusal);
     }
 
-    let Some(id) = first(&params, "id").map(str::to_owned) else {
-        return Ok(Json(shape::container(&json!({ "size": 0 }))));
-    };
+    let ids = edit::targets(&arguments);
+    let collections = edit::libtype(&arguments) == Some(plex_type("collection"));
     let mut world = running.world();
     let Some(library) = world.library(&key) else {
-        return Ok(Json(shape::container(&json!({ "size": 0 }))));
+        return Err(rendering.refusal(StatusCode::NOT_FOUND, 1000, "Not Found"));
     };
 
-    if labels {
-        apply_labels(library, &id, &params);
-    } else {
-        apply_collection_edit(library, &id, &params);
+    // Counted, not assumed: an edit naming an id this server does not hold
+    // wrote nothing, and answering `size: 1` regardless is how a caller comes
+    // to believe a write it never got.
+    let mut written = 0_i64;
+    for id in ids {
+        let applied = if collections {
+            library
+                .collection(&id)
+                .is_some_and(|target| edit::apply_to_collection(target, &arguments))
+        } else {
+            library
+                .item(&id)
+                .is_some_and(|target| edit::apply_to_item(target, &arguments))
+        };
+        written += i64::from(applied);
     }
-    Ok(Json(shape::container(&json!({ "size": 1 }))))
-}
-
-/// Applies a label edit to one item.
-fn apply_labels(
-    library: &mut crate::fake::state::FakeLibrary,
-    id: &str,
-    params: &[(String, String)],
-) {
-    let Some(item) = library
-        .items
-        .iter_mut()
-        .find(|candidate| candidate.rating_key == id)
-    else {
-        return;
-    };
-    for (name, value) in params {
-        if name == "label[].tag.tag-" {
-            item.labels.retain(|label| label != value);
-        } else if name.starts_with("label[")
-            && name.ends_with("].tag.tag")
-            && !item.labels.iter().any(|label| label == value)
-        {
-            item.labels.push(value.clone());
-        }
-    }
-}
-
-/// Applies a title or sort-title edit to one collection.
-fn apply_collection_edit(
-    library: &mut crate::fake::state::FakeLibrary,
-    id: &str,
-    params: &[(String, String)],
-) {
-    let Some(collection) = library
-        .collections
-        .iter_mut()
-        .find(|candidate| candidate.rating_key == id)
-    else {
-        return;
-    };
-    if let Some(title) = first(params, "title.value") {
-        title.clone_into(&mut collection.title);
-    }
-    if let Some(sort_title) = first(params, "titleSort.value") {
-        collection.sort_title = Some(sort_title.to_owned());
-    }
-    // Written whenever it is sent, including to `0`. A fake that only ever set
-    // the lock would make a restore that forgot to clear it look correct
-    // (`I-REV-3`).
-    if let Some(locked) = first(params, "titleSort.locked") {
-        collection.sort_title_locked = locked != "0";
-    }
+    Ok(rendering.answer(shape::container().number("size", written)))
 }
 
 /// `GET /library/sections/{key}/{filter}` — a filter's enumerated choices.
 pub(crate) async fn choices(
     State(running): State<Running>,
     Path((key, filter)): Path<(String, String)>,
-) -> Result<Json<Value>, Response> {
-    if let Some(refusal) = running.gate(FakeOperation::FilterChoices).await {
+    rendering: Rendering,
+    arguments: Arguments,
+) -> Result<Answer, Response> {
+    if let Some(refusal) = running.gate(FakeOperation::FilterChoices, rendering).await {
         return Err(refusal);
     }
-    Ok(Json(vocabulary::choices(&key, &filter)))
+    // The libtype the endpoint was declared under, which the server composes
+    // into the key and a client sends back unchanged. A `type` naming a libtype
+    // that declares no such filter is a question about a vocabulary this
+    // section does not have — `collection` declares `label` and nothing else,
+    // and answering it a genre list would pass a client that a real server
+    // refuses.
+    //
+    // Absent is not refused. A real server presumably falls back to the
+    // section's own libtype and this build has no capture that says which, so
+    // the fake refuses what it can show is wrong and no more (Q-016's rule, one
+    // endpoint over).
+    if let Some(plex) = edit::libtype(&arguments)
+        && !vocabulary::declares(plex, &filter)
+    {
+        return Err(rendering.refusal(StatusCode::NOT_FOUND, 1000, "Not Found"));
+    }
+    let mut world = running.world();
+    let Some(library) = world.library(&key) else {
+        return Err(rendering.refusal(StatusCode::NOT_FOUND, 1000, "Not Found"));
+    };
+    // Only the filter that declared a choice endpoint has choices. Answering a
+    // list for one that did not would let a client that ignores the declaration
+    // pass here and fail against a real server.
+    let Some(listed) = choices::choices(library, &filter) else {
+        return Err(rendering.refusal(StatusCode::NOT_FOUND, 1000, "Not Found"));
+    };
+    Ok(rendering.answer(
+        shape::library_container(library)
+            .number("size", i64::try_from(listed.len()).unwrap_or(i64::MAX))
+            .children(listed),
+    ))
 }
 
 /// `POST /library/metadata/{key}/posters`.
 pub(crate) async fn upload_poster(
     State(running): State<Running>,
     Path(key): Path<String>,
+    rendering: Rendering,
     body: axum::body::Bytes,
-) -> Result<Json<Value>, Response> {
-    if let Some(refusal) = running.gate(FakeOperation::UploadPoster).await {
+) -> Result<Answer, Response> {
+    if let Some(refusal) = running.gate(FakeOperation::UploadPoster, rendering).await {
         return Err(refusal);
     }
     let mut world = running.world();
+    let mut uploaded = 0_i64;
     for library in &mut world.libraries {
-        if let Some(item) = library
-            .items
-            .iter_mut()
-            .find(|candidate| candidate.rating_key == key)
-        {
+        if let Some(item) = library.item(&key) {
             // Keyed on the size so a test can tell one upload from another
             // without the fake storing megabytes of image it will never serve.
             item.thumb = format!("/library/metadata/{key}/thumb/upload-{}", body.len());
+            uploaded += 1;
         }
     }
-    Ok(Json(shape::container(&json!({ "size": 1 }))))
+    Ok(rendering.answer(shape::container().number("size", uploaded)))
 }

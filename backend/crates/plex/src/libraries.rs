@@ -15,13 +15,19 @@
 
 mod filter;
 mod item;
+mod key;
 // `pub(crate)` for its response body alone: `crate::streams` reads one item
 // through the same `Metadata` envelope this module parses a window with, and a
 // second copy of that shape would be a second thing to keep in step (P7).
 pub(crate) mod listing;
+mod query;
 mod section;
+mod sort_title;
 
-pub use filter::{FilterArgument, FilterOperator, ItemQuery, Window};
-pub use item::{ItemKind, LibraryItem, RatingKey, ScanState, SortTitle};
+pub use filter::{FilterArgument, FilterOperator};
+pub use item::{LibraryItem, ScanState};
+pub use key::{ItemKind, RatingKey};
 pub use listing::ItemPage;
+pub use query::{ItemQuery, Window};
 pub use section::{LibraryKind, LibrarySection, SectionKey};
+pub use sort_title::SortTitle;

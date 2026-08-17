@@ -3,12 +3,28 @@
 
 //! Adding and removing labels on one item.
 
-use afisharr_sources::outbound::Method;
+use percent_encoding::{AsciiSet, CONTROLS};
 
 use crate::{
     libraries::{ItemKind, RatingKey, SectionKey},
     server::{PlexServerClient, ServerError},
 };
+
+/// What a tag value is quoted against inside the comma-joined removal list.
+///
+/// Python's `quote` leaves `/` and the unreserved set alone and escapes
+/// everything else, and the comma is the byte that matters: it is the
+/// separator, so a label containing one has to arrive escaped or the server
+/// reads it as two labels and removes neither.
+const QUOTED: &AsciiSet = &CONTROLS
+    .add(b' ')
+    .add(b',')
+    .add(b'&')
+    .add(b'=')
+    .add(b'?')
+    .add(b'#')
+    .add(b'%')
+    .add(b'+');
 
 /// Labels to add to an item, and labels to take off it.
 ///
@@ -50,19 +66,30 @@ impl LabelEdit {
 
     /// The query pairs this edit contributes.
     ///
-    /// Additions are indexed because Plex reads them as an array; removals use
-    /// the empty-index subtraction form, which is a set difference rather than
-    /// a positional write. The lock is written to `0` explicitly: Plex locks a
-    /// tag field it is told to write unless told otherwise, and a locked label
-    /// field stops the operator editing labels in Plex ever again.
+    /// Additions are indexed because Plex reads them as an array. Removals are
+    /// one argument, not one per label: `label[].tag.tag-` carries every
+    /// removed tag joined with commas, each percent-quoted on its own so a
+    /// label holding a comma survives the join
+    /// (`plexapi/mixins/edit.py:331-333`). Sent as a repeated key, a two-label
+    /// removal removed one label on a real server and reported success.
+    ///
+    /// The lock is written to `0` explicitly: Plex locks a tag field it is told
+    /// to write unless told otherwise, and a locked label field stops the
+    /// operator editing labels in Plex ever again.
     #[must_use]
     pub fn pairs(&self) -> Vec<(String, String)> {
-        let mut pairs = Vec::with_capacity(self.add.len() + self.remove.len() + 1);
+        let mut pairs = Vec::with_capacity(self.add.len() + 2);
         for (index, label) in self.add.iter().enumerate() {
             pairs.push((format!("label[{index}].tag.tag"), label.clone()));
         }
-        for label in &self.remove {
-            pairs.push(("label[].tag.tag-".to_owned(), label.clone()));
+        if !self.remove.is_empty() {
+            let joined = self
+                .remove
+                .iter()
+                .map(|label| percent_encoding::utf8_percent_encode(label, QUOTED).to_string())
+                .collect::<Vec<String>>()
+                .join(",");
+            pairs.push(("label[].tag.tag-".to_owned(), joined));
         }
         if !pairs.is_empty() {
             pairs.push(("label.locked".to_owned(), "0".to_owned()));
@@ -73,6 +100,10 @@ impl LabelEdit {
 
 impl PlexServerClient {
     /// Applies a label edit to one item.
+    ///
+    /// Answers how many rows the server says it wrote, for the reason every
+    /// edit does: an item re-keyed under the caller is an edit that wrote
+    /// nothing, and only the count says so.
     ///
     /// # Errors
     /// Returns [`ServerError::Transport`] when the server did not answer, and
@@ -85,21 +116,15 @@ impl PlexServerClient {
         libtype: ItemKind,
         item: &RatingKey,
         edit: &LabelEdit,
-    ) -> Result<(), ServerError> {
+    ) -> Result<usize, ServerError> {
         if edit.is_empty() {
             return Err(ServerError::Incomplete {
                 call: "PUT /library/sections/{id}/all",
                 missing: "any label to add or remove",
             });
         }
-        let mut query = vec![
-            ("type".to_owned(), libtype.as_plex_type().to_string()),
-            ("id".to_owned(), item.to_string()),
-        ];
-        query.extend(edit.pairs());
-        let url = self.endpoint(&format!("library/sections/{section}/all"), &query)?;
-        self.send(Method::PUT, &url, None, &[]).await?;
-        Ok(())
+        self.edit_at(section, libtype, std::slice::from_ref(item), edit.pairs())
+            .await
     }
 }
 
@@ -128,6 +153,35 @@ mod tests {
                 ("label[].tag.tag-".to_owned(), "afisharr".to_owned()),
                 ("label.locked".to_owned(), "0".to_owned()),
             ]
+        );
+    }
+
+    #[test]
+    fn two_removals_travel_as_one_comma_joined_argument() {
+        // One argument, not one per label. Sent as a repeated key this removed
+        // the last label and answered success for both.
+        let edit = LabelEdit {
+            add: Vec::new(),
+            remove: vec!["old".to_owned(), "older".to_owned()],
+        };
+        assert_eq!(
+            edit.pairs()[0],
+            ("label[].tag.tag-".to_owned(), "old,older".to_owned())
+        );
+        assert_eq!(edit.pairs().len(), 2, "the removal and the lock");
+    }
+
+    #[test]
+    fn a_label_holding_a_comma_is_quoted_so_the_join_stays_unambiguous() {
+        // The comma is the separator. Unescaped, a label called "a,b" reads as
+        // two labels and neither of them exists.
+        let edit = LabelEdit {
+            add: Vec::new(),
+            remove: vec!["a,b".to_owned(), "c".to_owned()],
+        };
+        assert_eq!(
+            edit.pairs()[0],
+            ("label[].tag.tag-".to_owned(), "a%2Cb,c".to_owned())
         );
     }
 

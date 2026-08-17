@@ -23,6 +23,8 @@ pub enum FakeOperation {
     Root,
     /// `GET /identity`.
     Identity,
+    /// `GET /library`: the index a client resolves the library from.
+    Library,
     /// `GET /library/sections`.
     Sections,
     /// `GET /library/sections/{key}/all`.
@@ -51,6 +53,11 @@ pub enum FakeOperation {
     MoveHub,
     /// `PUT /hubs/sections/{key}/manage/{hub}`.
     SetHubVisibility,
+    /// `POST /hubs/sections/{key}/manage` — the promotion a never-promoted
+    /// collection needs before any of the calls above can address it.
+    PromoteHub,
+    /// `DELETE /hubs/sections/{key}/manage[/{hub}]`.
+    RemoveHub,
     /// `PUT /library/sections/{key}/all` for labels.
     EditLabels,
     /// `POST /library/metadata/{key}/posters`.

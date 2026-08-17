@@ -29,6 +29,7 @@ pub mod account;
 pub mod artwork;
 pub mod collections;
 pub mod discovery;
+pub mod edits;
 #[cfg(feature = "fake")]
 pub mod fake;
 pub mod hubs;
@@ -38,3 +39,4 @@ pub mod libraries;
 pub mod pin;
 pub mod server;
 pub mod streams;
+mod wire;

@@ -735,26 +735,26 @@ is Task 7.7. Row 4 is the precondition for every item move meaning anything, whi
 - **Why first:** it is the oracle. Every task below is a claim about what a server sends, and without a
   reader that was not written here each one is checked by the same judgement that got it wrong.
 - **Subtasks:**
-  - [ ] 1. Answer XML by default and JSON only for `Accept: application/json`. `python-plexapi` sends no
+  - [x] 1. Answer XML by default and JSON only for `Accept: application/json`. `python-plexapi` sends no
      `Accept` header at all (`plexapi/config.py:53-68`) and parses every answer as XML
      (`plexapi/server.py:759`, `plexapi/utils.py:836-844`); a real Plex answers it in XML, and the fake
      has never produced any.
-  - [ ] 2. Derive both renderings from one description of each answer, so a field added to the JSON and
+  - [x] 2. Derive both renderings from one description of each answer, so a field added to the JSON and
      forgotten in the XML is a compile error rather than a divergence between two hand-written shapes.
      Attributes render as XML attributes and as JSON keys of the same name; child collections render as
      child elements and as JSON arrays under the element's own tag name.
-  - [ ] 3. Add the cross-check: a test that starts the fake, points `python-plexapi` at it, and exercises
+  - [x] 3. Add the cross-check: a test that starts the fake, points `python-plexapi` at it, and exercises
      `sections()`, `search()`, `collections()`, `collection.items()`, `managedHubs()`,
      `collection.visibility()`, `listFilters()`, `listFilterChoices()`, `editTags()`, and
      `uploadPoster()`. Assert each returns the objects it should, with the attributes populated — a
      `None` where a value belongs is the failure this lane exists to see.
-  - [ ] 4. Pin the reference version and record it. `python-plexapi` is read as evidence about a server
+  - [x] 4. Pin the reference version and record it. `python-plexapi` is read as evidence about a server
      nobody here controls, and an unpinned reference makes a lane that goes red for a reason unrelated
      to this repository.
-  - [ ] 5. Report the lane's absence rather than skipping it. A cross-check that quietly does not run
+  - [x] 5. Report the lane's absence rather than skipping it. A cross-check that quietly does not run
      reads green on the lane that was supposed to catch the drift — the same rule Task 2.3 already
      states for a missing contract server.
-- [ ] **Done when:** the fake answers XML to a request that asks for none, JSON to one that asks for it,
+- [x] **Done when:** the fake answers XML to a request that asks for none, JSON to one that asks for it,
   and every call in subtask 3 returns a populated object under `python-plexapi` with no attribute that
   should carry a value coming back `None`.
 
@@ -764,32 +764,32 @@ is Task 7.7. Row 4 is the precondition for every item move meaning anything, whi
 - **Where:** `backend/crates/plex/src/fake/json.rs`, `fake/hub_routes.rs`, `fake/collection_routes.rs`,
   `fake/routes.rs`; the reading side in `backend/crates/plex/src/hubs/`.
 - **Subtasks:**
-  - [ ] 1. Rename the hub's identifier attribute to `identifier` (`plexapi/library.py:3037`). Keep
+  - [x] 1. Rename the hub's identifier attribute to `identifier` (`plexapi/library.py:3037`). Keep
      `hubIdentifier` out of this endpoint's answer entirely — it belongs to `/hubs/sections/{key}`,
      which is a different call (`plexapi/library.py:725`, `:2226`), and emitting both is the fake
      covering for a client that reads either.
-  - [ ] 2. Emit `deletable`, `homeVisibility`, and `recommendationsVisibility`
+  - [x] 2. Emit `deletable`, `homeVisibility`, and `recommendationsVisibility`
      (`plexapi/library.py:3035`, `:3036`, `:3041`). `deletable` is how a real server says a row cannot
      be removed, and it is the fact §15.1's anchor rests on.
-  - [ ] 3. Reclassify `HubKind` on `deletable` rather than on the presence of `ratingKey`.
+  - [x] 3. Reclassify `HubKind` on `deletable` rather than on the presence of `ratingKey`.
      `python-plexapi`'s `ManagedHub` never reads a rating key (`plexapi/library.py:3033-3046`), which
      means this build has no evidence a real server sends one here — and a collection row read as
      native is a collection whose position is never fixed (`hubs/record.rs:164-179`).
-  - [ ] 4. Stop listing a never-promoted collection. A created collection is in the library and not in
+  - [x] 4. Stop listing a never-promoted collection. A created collection is in the library and not in
      the manage answer until something promotes it (`plexapi/collection.py:207-215`). Remove the row
      `create_collection` pushes (`fake/collection_routes.rs:86-93`) and the reasoning in its comment,
      which records the fake being bent to make the client pass.
-  - [ ] 5. Serve `GET /hubs/sections/{key}/manage?metadataItemId={ratingKey}`, answering the one row for
+  - [x] 5. Serve `GET /hubs/sections/{key}/manage?metadataItemId={ratingKey}`, answering the one row for
      that collection or none (`plexapi/collection.py:208`).
-  - [ ] 6. Serve `POST /hubs/sections/{key}/manage` with `metadataItemId`, which is how a never-promoted
+  - [x] 6. Serve `POST /hubs/sections/{key}/manage` with `metadataItemId`, which is how a never-promoted
      collection enters the ordering space (`plexapi/library.py:3114-3117`). Serve
      `DELETE /hubs/sections/{key}/manage/{identifier}` (`plexapi/library.py:3082`) and
      `DELETE /hubs/sections/{key}/manage` (`plexapi/library.py:707-711`).
-  - [ ] 7. Give the client the promotion path it does not have: `set_hub_visibility` only ever `PUT`s
+  - [x] 7. Give the client the promotion path it does not have: `set_hub_visibility` only ever `PUT`s
      `/manage/{identifier}` (`hubs/manage.rs:102-114`), which a real server has no row for until the
      collection is promoted. Add the `POST` form and choose between them on whether the manage answer
      already carries the row.
-- [ ] **Done when:** `python-plexapi`'s `managedHubs()` returns every row with `identifier`,
+- [x] **Done when:** `python-plexapi`'s `managedHubs()` returns every row with `identifier`,
   `deletable`, and all three `promotedTo*` populated; `collection.visibility()` on a fresh collection
   returns a hub with `_promoted` false; promoting it through Afisharr's own client puts it in the
   manage list; and demoting one of Plex's own rows still changes nothing.
@@ -800,27 +800,27 @@ is Task 7.7. Row 4 is the precondition for every item move meaning anything, whi
 - **Where:** `backend/crates/plex/src/fake/item_routes.rs`; the writing side in
   `backend/crates/plex/src/labels/edit.rs` and `collections/crud.rs`.
 - **Subtasks:**
-  - [ ] 1. Resolve the edit target by `id` **and** `type`, over items and collections alike, rather than
+  - [x] 1. Resolve the edit target by `id` **and** `type`, over items and collections alike, rather than
      by guessing from whether a `label` argument is present (`plexapi/library.py:1743-1755`). An item's
      `titleSort.value` and `titleSort.locked` must round-trip — `FakeItem` already carries both fields
      and nothing can write either (`fake/state.rs:19-21`).
-  - [ ] 2. Accept a comma-joined `id` list. `_edit` joins every target into one argument
+  - [x] 2. Accept a comma-joined `id` list. `_edit` joins every target into one argument
      (`plexapi/library.py:1749`); the fake matches one key exactly and answers `{"size":1}` having
      written nothing (`fake/item_routes.rs:118`, `:141-145`).
-  - [ ] 3. Read a label removal as one comma-joined, percent-quoted value under a single
+  - [x] 3. Read a label removal as one comma-joined, percent-quoted value under a single
      `label[].tag.tag-` key (`plexapi/mixins/edit.py:331-333`), not as one repeated key per label.
      Correct `LabelEdit::pairs()` to send it that way (`labels/edit.rs:64-66`) and correct the comment
      in `fake/routes.rs:91-97`, which states the repeated-key reading as fact.
-  - [ ] 4. Honour `{tag}.locked`, which accompanies every tag edit (`plexapi/mixins/edit.py:328-330`)
+  - [x] 4. Honour `{tag}.locked`, which accompanies every tag edit (`plexapi/mixins/edit.py:328-330`)
      and which the fake ignores. A label field left locked is the `I-REV-3` failure on a field the
      operator uses daily.
-  - [ ] 5. Apply `collectionMode`, `collectionSort`, and `summary.value`, which
+  - [x] 5. Apply `collectionMode`, `collectionSort`, and `summary.value`, which
      `apply_collection_edit` currently drops (`fake/item_routes.rs:171-184`), and report each back on
      the next read.
-  - [ ] 6. Default `collectionSort` to `0` on a new collection and stop hard-coding `2`
+  - [x] 6. Default `collectionSort` to `0` on a new collection and stop hard-coding `2`
      (`fake/json.rs:111`; `plexapi/collection.py:73`). Custom order is a thing Afisharr must switch on,
      and a fake that starts there tests nothing.
-- [ ] **Done when:** an item's sort title written through the client reads back with its value,
+- [x] **Done when:** an item's sort title written through the client reads back with its value,
   presence, and lock independently; a two-label removal removes two labels; a collection created
   through the client reports `collectionSort` `0` until an edit sets it; and an edit naming an id the
   fake does not hold reports that it wrote nothing.
@@ -830,31 +830,31 @@ is Task 7.7. Row 4 is the precondition for every item move meaning anything, whi
   surface by.
 - **Where:** `backend/crates/plex/src/fake/json.rs`, `fake/item_routes.rs`, `fake/collection_routes.rs`.
 - **Subtasks:**
-  - [ ] 1. Carry `librarySectionID`, `librarySectionTitle`, and `librarySectionUUID` on every container
+  - [x] 1. Carry `librarySectionID`, `librarySectionTitle`, and `librarySectionUUID` on every container
      that answers a library's content (`plexapi/base.py:359-362`, `:1243-1245`). Without the first of
      them a collection does not know its own section, and `collection.visibility()` requests
      `/hubs/sections/None/manage`.
-  - [ ] 2. Carry `key`, `librarySectionID`, and `subtype` on a collection (`plexapi/collection.py:78`,
+  - [x] 2. Carry `key`, `librarySectionID`, and `subtype` on a collection (`plexapi/collection.py:78`,
      `:79`, `:93`). `key` is `/library/metadata/{ratingKey}/children`, which a client fixes up to
      `/library/metadata/{ratingKey}` and builds every item call from.
-  - [ ] 3. Serve the collection item calls under `/library/metadata/{ratingKey}/…` as well as under
+  - [x] 3. Serve the collection item calls under `/library/metadata/{ratingKey}/…` as well as under
      `/library/collections/{ratingKey}/…`. `python-plexapi` uses only the first family — `children`
      (`plexapi/collection.py:198`), `items` (`:332`), `items/{key}` (`:353`), `items/{key}/move`
      (`:372`), and `DELETE` on the collection itself (`plexapi/base.py:814`) — and the fake serves only
      the second (`fake/routes.rs:59-74`). Which family a real server serves is settled by Task 2.3, not
      here; serving both is what stops the fake asserting an answer either way.
-  - [ ] 4. Emit collections under the element name a real server uses. `python-plexapi`'s `Collection`
+  - [x] 4. Emit collections under the element name a real server uses. `python-plexapi`'s `Collection`
      is tagged `Directory` (`plexapi/collection.py:59`), and the client's dual-key reader attributes
      `Metadata`-versus-`Directory` to server version (`collections/crud.rs:28-32`) on no evidence in
      this repository. Record which it is from Task 2.3's capture, keep the reader tolerant, and drop
      the unverified claim from the comment.
-  - [ ] 5. Add the item attributes the client parses and the fake never sends: `parentRatingKey`,
+  - [x] 5. Add the item attributes the client parses and the fake never sends: `parentRatingKey`,
      `index`, `originallyAvailableAt`, and `Guid` children (`libraries/item.rs:229-237`;
      `plexapi/media.py:937-948`). A parser exercised only against a fixture this repository wrote is a
      parser checked against nothing.
-  - [ ] 6. Let a scenario mark a collection smart, so the refusals a smart collection produces
+  - [x] 6. Let a scenario mark a collection smart, so the refusals a smart collection produces
      (`plexapi/collection.py:317-318`, `:346-347`) are reachable.
-- [ ] **Done when:** `python-plexapi` resolves a collection's section, items, and visibility from a
+- [x] **Done when:** `python-plexapi` resolves a collection's section, items, and visibility from a
   single library read with no attribute defaulted, and both collection item path families answer
   identically.
 
@@ -863,37 +863,45 @@ is Task 7.7. Row 4 is the precondition for every item move meaning anything, whi
 - **Where:** `backend/crates/plex/src/fake/routes.rs`, `fake/item_routes.rs`,
   `fake/collection_routes.rs`, `fake/vocabulary.rs`.
 - **Subtasks:**
-  - [ ] 1. Read `X-Plex-Container-Start` and `X-Plex-Container-Size` from the request **headers** as well
+  - [x] 1. Read `X-Plex-Container-Start` and `X-Plex-Container-Size` from the request **headers** as well
      as from the query string. `python-plexapi` sets both as headers on every paging loop
      (`plexapi/base.py:346-350`) and as query arguments elsewhere (`plexapi/library.py:519-520`,
      `:890-891`), so a real server honours both and the fake honours one (`fake/routes.rs:160-172`).
-  - [ ] 2. Honour `type` on `/library/sections/{key}/all`. `type=18` asks for collections
+  - [x] 2. Honour `type` on `/library/sections/{key}/all`. `type=18` asks for collections
      (`plexapi/library.py:1666-1670`, `plexapi/library.py:1281`) and the fake answers movies.
-  - [ ] 3. Apply the filter arguments. The operator suffixes are built and correct
+  - [x] 3. Apply the filter arguments. The operator suffixes are built and correct
      (`libraries/filter.rs:41-50`, matching `plexapi/library.py:1098-1103`) and the fake filters on
      none of them, so Task 2.1 subtask 2 is exercised only as a URL. Support at least `genre`, `year`,
      and `title` across `=`, `!=`, `==`, `>>=`, `<<=`, and the conjunctive `&=` — and make the
      conjunction observably different from the disjunction, which is the whole reason the two are
      spelled apart.
-  - [ ] 4. Apply `sort`, at least for the keys the vocabulary declares.
-  - [ ] 5. Answer `includeMeta=1` on `/library/sections/{key}/collections` as well as on `/all`.
+  - [x] 4. Apply `sort`, at least for the keys the vocabulary declares.
+  - [x] 5. Answer `includeMeta=1` on `/library/sections/{key}/collections` as well as on `/all`.
      A client loads its filter vocabulary from both (`plexapi/library.py:890-899`), and the collections
      call is where the `collection` libtype's filters come from.
-  - [ ] 6. Answer `Meta.Type` as the list of every libtype the section filters, not as one entry chosen
+  - [x] 6. Answer `Meta.Type` as the list of every libtype the section filters, not as one entry chosen
      by the `type` argument (`fake/vocabulary.rs:34-42`). A client picks its libtype out of that list
      (`plexapi/library.py:2674+`, `getFilterType`), and a list of one is a list that only ever answers
      the caller that guessed right.
-  - [ ] 7. Send `includeAdvanced=1` from the client's own discovery call
+  - [x] 7. Send `includeAdvanced=1` from the client's own discovery call
      (`discovery/vocabulary.rs:282-285`). `python-plexapi` sends it on every vocabulary read
      (`plexapi/library.py:890`); a fake that answers a full `Meta` without it hides a client that will
      get a short one from a real server.
-  - [ ] 8. Answer a filter's choices only at the endpoint the vocabulary declared, and make the declared
+  - [x] 8. Answer a filter's choices only at the endpoint the vocabulary declared, and make the declared
      `key` and the served route agree for every filter — including the dotted field keys a real server
      uses (`plexapi/library.py:1082`, `:1004`), which the fake spells bare (`fake/vocabulary.rs:58-64`).
-- [ ] **Done when:** `python-plexapi`'s `search(libtype='collection')`, `search(genre=…)`,
+  - [x] 9. Filter and order the **collection** listings too, at both endpoints that answer them —
+     `/all?type=18` and `/collections`. Subtasks 3 and 4 covered items only, and the collection branch
+     built its rows straight from `library.collections`, so a filter was ignored for the one libtype
+     whose vocabulary declares exactly one filter and nothing else. This needs `FakeCollection` to carry
+     `labels` at all: without the field, `label` was a filter the fake advertised and could not apply,
+     and a label edit aimed at a collection wrote nothing while a real server writes it
+     (`plexapi/library.py:890-899`).
+- [x] **Done when:** `python-plexapi`'s `search(libtype='collection')`, `search(genre=…)`,
   `search(year__gte=…)`, `listFilters('collection')`, and `listFilterChoices('genre')` each return the
-  right set against the fake, and a windowed read paged by headers returns the same items as one paged
-  by query arguments.
+  right set against the fake; `search(libtype='collection', label=…)` answers only the labelled
+  collections at both endpoints; and a windowed read paged by headers returns the same items as one
+  paged by query arguments.
 
 ### Task 2.1.6 Wire types, the token gate, and the facts a server withholds
 - **Build:** the spellings and the refusals a real server uses, and the absent-fact cases the fake
@@ -901,31 +909,31 @@ is Task 7.7. Row 4 is the precondition for every item move meaning anything, whi
 - **Where:** `backend/crates/plex/src/fake/json.rs`, the new `fake/xml.rs`, `fake/routes.rs`,
   `fake/scenario.rs`; the reading side in `backend/crates/plex/src/libraries/item.rs`.
 - **Subtasks:**
-  - [ ] 1. Spell every boolean one way. The fake sends `refreshing` and `Field.locked` as JSON booleans
+  - [x] 1. Spell every boolean one way. The fake sends `refreshing` and `Field.locked` as JSON booleans
      (`fake/json.rs:63`, `:45`) and `smart`, `childCount`, `collectionSort`, and every `promotedTo*` as
      strings (`:109-111`, `:131-133`). All of them are XML attributes on the wire, and a reference
      client reads all of them through one cast that accepts `1`, `"1"`, and `"true"`
      (`plexapi/utils.py:173-178`).
-  - [ ] 2. Make the client's readers agree. `ItemBody::refreshing` and `FieldBody::locked` are strict
+  - [x] 2. Make the client's readers agree. `ItemBody::refreshing` and `FieldBody::locked` are strict
      `bool` (`libraries/item.rs:239`, `:263`) while every neighbouring field goes through
      `StringOrNumber` — a server that sends `1` there fails the whole item parse.
-  - [ ] 3. Check `X-Plex-Token` and answer `401` without a usable one, with a scenario switch that says
+  - [x] 3. Check `X-Plex-Token` and answer `401` without a usable one, with a scenario switch that says
      which token is accepted. A real server refuses (`plexapi/server.py:747-757`); the fake checks
      nothing (`fake/routes.rs:112-130`), so `verify_credential` and the revoked-credential state it
      exists for are proved only by an injected refusal, never by the condition itself.
-  - [ ] 4. Answer `404` where a real server does, and keep the empty-container answer as a scenario a
+  - [x] 4. Answer `404` where a real server does, and keep the empty-container answer as a scenario a
      test can choose. Both shapes exist; the fake asserts one (`fake/item_routes.rs:86-92`).
-  - [ ] 5. Omit `Part.accessible` and `Part.exists` unless the request asked for them. Both require a
+  - [x] 5. Omit `Part.accessible` and `Part.exists` unless the request asked for them. Both require a
      file check (`plexapi/media.py:110-112`, `:118-120`), and the fake sends them always
      (`fake/json.rs:85-86`) — so the `None` case the client's own documentation is written against
      (`streams/media.rs:71-79`) never happens, and a broken-media overlay cannot be shown to be honest.
-  - [ ] 6. Add the media attributes a real server sends and the fake omits — `aspectRatio`,
+  - [x] 6. Add the media attributes a real server sends and the fake omits — `aspectRatio`,
      `videoProfile`, `videoFrameRate` on the media, and `index`, `default`, `selected`, `id`,
      `displayTitle` on a stream (`plexapi/media.py:52-71`, `:258-275`) — under a scenario that can also
      withhold them.
-  - [ ] 7. Add the section attributes a real server sends: `Location` children, `scanner`, `createdAt`,
+  - [x] 7. Add the section attributes a real server sends: `Location` children, `scanner`, `createdAt`,
      `updatedAt` (`plexapi/library.py:440-458`).
-- [ ] **Done when:** every boolean in the fake's answer is the same spelling, the client parses it, a
+- [x] **Done when:** every boolean in the fake's answer is the same spelling, the client parses it, a
   request with the wrong token is refused with `401`, and a scenario exists in which
   `Part.accessible` is absent and the client reports it as unknown rather than as false.
 
@@ -933,20 +941,31 @@ is Task 7.7. Row 4 is the precondition for every item move meaning anything, whi
 - **Build:** a release-lane test that fails on a field the real server sends and the fake does not.
 - **Where:** `backend/crates/plex/tests/contract.rs`, `tests/shape/mod.rs`.
 - **Subtasks:**
-  - [ ] 1. Compare shapes both ways. The test asserts the fake claims nothing the real server does not
+  - [x] 1. Compare shapes both ways. The test asserts the fake claims nothing the real server does not
      (`tests/contract.rs:268`), which passes every omission this audit found. Add the reverse
      assertion, with an explicit, named allow-list for fields the fake deliberately does not model —
      so an omission is a line somebody wrote rather than a silence.
-  - [ ] 2. Cover the write calls' answers. The read surface is compared and every write is left out
+  - [x] 2. Cover the write calls' answers. The read surface is compared and every write is left out
      (`tests/contract.rs:190-196`). Run the writes against a library the release lane creates and
      deletes, so the answer shape of create, edit, add, remove, move, and promote is compared too, and
      nothing is left behind on somebody's server (P2).
-  - [ ] 3. Capture the real answers as fixtures on every green run and check them in. A capture is what
+  - [x] 3. Capture the real answers as fixtures on every green run and check them in. A capture is what
      lets the fake be corrected without a server in hand, and what makes a later drift a diff.
-  - [ ] 4. Fail by name on the four blockers above, so a regression on any of them is reported as
+  - [x] 4. Fail by name on the four blockers above, so a regression on any of them is reported as
      itself rather than as a shape set that differs somewhere.
-  - [ ] 5. Run the Task 2.1.1 cross-check against the real server too, not only against the fake. A
+  - [x] 5. Run the Task 2.1.1 cross-check against the real server too, not only against the fake. A
      reference client that reads the fake and not the server has proved the fake self-consistent.
+  - [ ] 6. Capture what a real server answers to `PUT /library/sections/{id}/all` — a size, an empty
+     body, or `204` — and report it by name. This is **Q-016**, and every edit this build makes turns on
+     it: `edit_at` reads an empty answer as `ServerError::Incomplete` while the reference it cites in
+     the same comment reads a blank body on a write as success (`edits.rs:69-83`,
+     `plexapi/server.py:759`, `plexapi/utils.py:836-839`). If a real server answers empty, this build
+     reports every landed edit as a failure. Left as it is until a server says, because reversing it
+     swaps one unevidenced claim for another — the probe reads the item back rather than trusting the
+     write's own answer, so it is correct either way (`tests/contract.rs::probe_blockers`).
+     *The asking half is built* (Task 2.1.9 subtask 6): the write cycle sends the edit raw, captures
+     the status and the body under `PUT /library/sections/{key}/all`, and fails the lane with the
+     shape it found and the change it implies. The box stays open because no server has answered it.
 - [ ] **Done when:** the contract test passes in the release lane against a real server; a field
   deleted from the fake's answer fails it by name; and a field added to the fake that the real server
   does not send fails it by name.
@@ -955,24 +974,87 @@ is Task 7.7. Row 4 is the precondition for every item move meaning anything, whi
 - **Build:** a fake whose world can be shaped by a scenario rather than fixed at two libraries.
 - **Where:** `backend/crates/plex/src/fake/library.rs`, `fake/scenario.rs`, `fake/state.rs`.
 - **Subtasks:**
-  - [ ] 1. Let a scenario declare its libraries — how many, of what kinds, under which section keys.
+  - [x] 1. Let a scenario declare its libraries — how many, of what kinds, under which section keys.
      The world is fixed at two, keyed `1` and `2` (`fake/library.rs:31-38`), so a section-key change,
      a second movie library, and a music or photo library are all unreachable — and PRD §19.7's
      `uuid`-first matching has nothing to match against.
-  - [ ] 2. Make a section key changeable on demand, the way the machine identifier already is
+  - [x] 2. Make a section key changeable on demand, the way the machine identifier already is
      (`fake/server.rs:66-68`). It is the same class of failure one level down.
-  - [ ] 3. Split the precision budget per sequence. One `moves_left` covers the hub space and every
+  - [x] 3. Split the precision budget per sequence. One `moves_left` covers the hub space and every
      collection in the library at once (`fake/state.rs:92`, and the test at `:308-317` fixes the
      behaviour), which makes a per-collection budget untestable and an escalation-ladder test
      ambiguous about which sequence ran out.
-  - [ ] 4. Add partial rating-key churn: one item re-keyed and the rest stable. Churn re-keys every item
+  - [x] 4. Add partial rating-key churn: one item re-keyed and the rest stable. Churn re-keys every item
      (`fake/library.rs:62-78`), which a caller can detect wholesale; the case that breaks a cache is
      the one item that moved.
-  - [ ] 5. Keep every addition seeded and replayable. The determinism assertion is the property the
+  - [x] 5. Keep every addition seeded and replayable. The determinism assertion is the property the
      whole fake rests on, and a wider world is more draws from the same stream, in a fixed order.
-- [ ] **Done when:** a scenario can declare three libraries including one music library, a section key
+- [x] **Done when:** a scenario can declare three libraries including one music library, a section key
   can change mid-test and be detected, a collection's move budget runs out while another collection's
   does not, and two runs of every new scenario from one seed are byte-identical.
+
+### Task 2.1.9 The claims left resting on a default
+- **Build:** the guards for the places where the corrected fake and the corrected client still agree
+  with each other rather than with a server, and the lane lines that say so where only a server can.
+- **Where:** `backend/crates/plex/src/hubs/record.rs`, `hubs/manage.rs`, `fake/populate.rs`,
+  `fake/library.rs`, `fake/item_routes.rs`, `fake/vocabulary.rs`, `src/server/client.rs`;
+  `tests/contract.rs`, `tests/real/mod.rs`, `tests/surface.rs`.
+
+**Why this task exists after 2.1.1 through 2.1.8 were ticked.** A review pass over this phase's own
+diff found six places where a test passes on a value nobody sourced. They are not the sixteen the
+audit found — those were the fake claiming shapes a server does not send. These are one step subtler:
+the fake sends a value, the client reads it, and the agreement is real, but the value itself is a
+default this repository chose. `deletable` is the clearest case. It defaults to removable, which is
+the reference's own reading (`plexapi/library.py:3035`), and `HubKind` is read straight off it — so a
+server that omits the attribute has every one of Plex's own rows classified as a promoted collection,
+and the unit test that says otherwise passes only because the fake volunteers `deletable="0"`.
+
+**Why some answers here are guards rather than corrections.** Subtasks 1, 4, and 5 had something to
+correct against — the reference for the first two, the fake's own composition rule for the third — so
+they are code changes. Subtasks 2 and 3 had nothing: how a real server marks and names a manage row
+is **Q-017** in the specification's §23.2, and the change for those is a release-lane assertion that
+names the missing evidence rather than a default chosen in its place. Subtask 6 is Q-016, which is
+Task 2.1.7's and stays open; what is built here is the asking.
+
+- **Subtasks:**
+  - [x] 1. Anchor the collection match on the prefix a reference client composes.
+     `names_collection` read the last dot-segment of any identifier, and a native identifier routinely
+     ends in the section key — `home.continue.1` answered as the row of a collection keyed `1`, and
+     the promotion that followed addressed a row that cannot be promoted at all (§15.1). Match only
+     under `custom.collection.`, which is what the reference synthesises for an unpromoted collection
+     and then reloads the promoted row by (`plexapi/collection.py:212`,
+     `plexapi/library.py:3049-3052`). `HubListing::row_for`'s kind check does not close this on its
+     own, and the comment there said it did.
+  - [x] 2. Fail the release lane on a manage row that carries no `deletable`. The assertion accepted
+     any one row carrying it, which is satisfied by a server that sends it on collections and omits it
+     on its own rows — the exact shape that makes the classification a default. Every row now, named.
+  - [x] 3. Promote with an axis set. The write cycle promoted with all three visibility axes off and
+     then asserted a manage row exists, which is a claim about a request the reference never makes:
+     it promotes by turning an axis on (`plexapi/library.py:3122-3129`). Assert the row after the
+     promotion Afisharr actually performs, and assert the row's identifier is
+     `custom.collection.{section}.{ratingKey}` — the reading subtask 1 rests on, checked against the
+     server that composed it.
+  - [x] 4. Answer a filter's choices only for the libtype that declared the filter. The vocabulary
+     composes the libtype into the key it hands out (`/library/sections/1/genre?type=1`) and the
+     choices route ignored it, so `?type=18` got a genre list — and the `collection` libtype declares
+     `label` and nothing else. A `type` naming a libtype that declares no such filter is now a `404`.
+     An absent `type` is not refused: a real server presumably falls back to the section's own
+     libtype and no capture says which, so the fake refuses what it can show is wrong and no more.
+  - [x] 5. Move the ordering space with the section key. `rekey_section` changed `library.key` and
+     left every hub identifier naming the old section, so a test that re-keyed and then read the
+     manage space back read rows for a world that is gone. Rating keys stay: a section changing key is
+     not an item changing identity, and re-keying items here would fold `churn_one`'s misbehaviour
+     into a call that is not it.
+  - [x] 6. Ask Q-016 from the write cycle and report the answer by name. `edit_at` reduces the answer
+     to a count and reports every other shape as `Incomplete`, so the lane could only ever say "the
+     edit failed" for the one question that would explain why. `raw_put` sends the edit uninterpreted,
+     the status and body are captured under `PUT /library/sections/{key}/all`, and a sizeless answer
+     fails the lane with the shape it found and the change it implies.
+- [x] **Done when:** one of Plex's own rows is never answered as a collection's row even when it
+  carries no `deletable`; the release lane names a manage row that omits `deletable`, a promoted row
+  whose identifier this build cannot match, and the shape a real server answers an edit with; a
+  choices request carrying the wrong libtype is refused; and a re-keyed section's ordering space names
+  the key it now has.
 
 ---
 
@@ -2916,6 +2998,8 @@ Stated because a plan nobody doubts is a plan nobody corrects.
 | Editor disclosure and dashboard content (Q-002, Q-003) | Shape Phase 3's and Phase 13's pages. Neither blocks a phase |
 | Retention windows (Q-005) | Promoted to "before Phase 9 ships" |
 | A further prior-art pass (Q-012) | Recommended immediately before Phase 8, when the renderer is next |
+| What a server answers to an edit (Q-016) | Blocks nothing and changes every edit path. The release lane asks it by name and fails on the answer this build cannot read (Task 2.1.7 subtask 6, Task 2.1.9 subtask 6) |
+| How a server names and marks a manage row (Q-017) | Blocks nothing and decides whether Phase 7 can position anything. The release lane asks both halves by name (Task 2.1.9) |
 | The two amendments the data model owes | Asset-store sizing before Phase 8; the retention cap before Phase 9 |
 
 ---

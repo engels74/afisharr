@@ -5,7 +5,10 @@
 
 use serde::Deserialize;
 
-use crate::libraries::{RatingKey, SortTitle};
+use crate::{
+    libraries::{RatingKey, SortTitle},
+    wire::{Flag, StringOrNumber},
+};
 
 /// How Plex displays a collection in its library.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -110,59 +113,41 @@ pub(crate) struct CollectionBody {
     #[serde(default)]
     child_count: Option<StringOrNumber>,
     #[serde(default)]
-    smart: Option<StringOrNumber>,
+    smart: Flag,
     #[serde(default)]
     collection_mode: Option<StringOrNumber>,
     #[serde(default)]
     collection_sort: Option<StringOrNumber>,
-}
-
-/// A value Plex spells as a number in one version and a string in another.
-///
-/// Not defensive typing for its own sake: `childCount` arrives as `"12"` from
-/// some builds and `12` from others, and a client that accepts only one of them
-/// breaks on a server upgrade nobody here controls.
-#[derive(Debug, Deserialize)]
-#[serde(untagged)]
-pub(crate) enum StringOrNumber {
-    /// Spelled as a JSON number.
-    Number(i64),
-    /// Spelled as a JSON string.
-    Text(String),
-}
-
-impl StringOrNumber {
-    /// The value as an integer, or `None` when it is neither spelling.
-    pub(crate) fn as_i64(&self) -> Option<i64> {
-        match self {
-            Self::Number(value) => Some(*value),
-            Self::Text(text) => text.trim().parse().ok(),
-        }
-    }
-
-    /// The value as the text it was sent as.
+    /// The fields Plex reports a metadata lock on.
     ///
-    /// For the values that are *identifiers* rather than counts. A rating key
-    /// read through [`Self::as_i64`] and re-rendered would be normalised —
-    /// somebody else's opaque identifier rewritten by this build — and any
-    /// spelling that did not parse would come back as "absent", which for a hub
-    /// is the difference between a collection row and one of Plex's own (P4).
-    pub(crate) fn into_text(self) -> String {
-        match self {
-            Self::Number(value) => value.to_string(),
-            Self::Text(text) => text,
-        }
-    }
+    /// A collection row carries them exactly as an item row does — it is the
+    /// same `Field` child on the same envelope. Read here because §15.6 wants
+    /// all three properties of a sort title, and a lock dropped on the way in
+    /// reads as *unlocked*: a teardown checking this would leave the
+    /// operator's collection permanently locked and report that it had not
+    /// (`I-REV-3`, P1).
+    #[serde(default, rename = "Field")]
+    field: Vec<FieldBody>,
+}
+
+/// One field's lock state, as Plex nests it.
+#[derive(Debug, Deserialize)]
+struct FieldBody {
+    #[serde(default)]
+    name: Option<String>,
+    #[serde(default)]
+    locked: Flag,
 }
 
 impl From<CollectionBody> for Collection {
     fn from(body: CollectionBody) -> Self {
+        let locked = body
+            .field
+            .iter()
+            .any(|field| field.name.as_deref() == Some("titleSort") && field.locked.is_set());
         let sort_title = match body.title_sort {
-            // Lock state is not carried on a collection list answer, and `false`
-            // here is "not reported", which is why nothing writes a sort title
-            // from a list read — the capture reads the item itself (§15.6).
-            Some(value) => SortTitle::present(value, false),
-            None => SortTitle::absent(false),
+            Some(value) => SortTitle::present(value, locked),
+            None => SortTitle::absent(locked),
         };
         Self {
             rating_key: RatingKey::new(body.rating_key),
@@ -172,10 +157,7 @@ impl From<CollectionBody> for Collection {
                 .child_count
                 .and_then(|value| value.as_i64())
                 .and_then(|value| u32::try_from(value).ok()),
-            smart: body
-                .smart
-                .and_then(|value| value.as_i64())
-                .is_some_and(|value| value != 0),
+            smart: body.smart.is_set(),
             mode: body
                 .collection_mode
                 .and_then(|value| value.as_i64())
@@ -225,6 +207,40 @@ mod tests {
         // Zero is a claim that the collection is empty, which is the fact
         // `I-SRC-1` refuses to synthesise from an answer that did not carry it.
         assert_eq!(collection(r#"{"ratingKey":"1"}"#).child_count, None);
+    }
+
+    #[test]
+    fn a_locked_sort_title_is_read_off_the_collection_row_it_arrived_on() {
+        // Dropped on the way in, a locked field read as unlocked — and a
+        // teardown that checked this would leave the operator's collection
+        // permanently locked and report that it had not (`I-REV-3`, P1). The
+        // same `Field` child an item row carries, because it is the same
+        // envelope.
+        let record = collection(
+            r#"{"ratingKey":"1","titleSort":"!001 Best",
+                "Field":[{"name":"titleSort","locked":1}]}"#,
+        );
+        assert!(record.sort_title.is_locked());
+        assert!(
+            !collection(r#"{"ratingKey":"1","titleSort":"!001 Best"}"#)
+                .sort_title
+                .is_locked()
+        );
+    }
+
+    #[test]
+    fn a_sort_title_can_be_absent_and_locked_on_a_collection_too() {
+        // The state a restore gets wrong, and the reason §15.6 names three
+        // properties rather than one.
+        let record = collection(r#"{"ratingKey":"1","Field":[{"name":"titleSort","locked":"1"}]}"#);
+        assert!(!record.sort_title.is_present());
+        assert!(record.sort_title.is_locked());
+    }
+
+    #[test]
+    fn a_lock_on_another_field_is_not_a_lock_on_the_sort_title() {
+        let record = collection(r#"{"ratingKey":"1","Field":[{"name":"label","locked":1}]}"#);
+        assert!(!record.sort_title.is_locked());
     }
 
     #[test]

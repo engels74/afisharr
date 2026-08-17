@@ -1,250 +1,142 @@
 // SPDX-FileCopyrightText: 2026 Afisharr contributors
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-//! The JSON shapes the fake answers in.
+//! Rendering one described answer as the JSON a Plex server translates to.
 //!
-//! Written out by hand rather than serialised from the client's own types, and
-//! deliberately: a fake that answered by re-serialising the structs the client
-//! parses would agree with the client by construction and prove nothing. These
-//! are the shapes a real server sends, and the contract test in `tests/` is
-//! what keeps that claim honest.
+//! Plex speaks XML and answers JSON when a client asks for it, so this is a
+//! rendering of [`crate::fake::element::Element`] rather than a shape of its
+//! own — the same description [`crate::fake::xml`] renders. Two hand-written
+//! shapes would agree only as long as whoever edited one remembered the other.
+//!
+//! Two rules, and both come from what a real server's translation does:
+//!
+//! - Repeated children become an array under the tag's JSON name. `Metadata`,
+//!   `Directory`, `Hub`, `Media`, `Part`, `Stream` are all arrays even when
+//!   they hold one entry.
+//! - A [`Element::singular`] child is one object rather than an array. `Meta`
+//!   is the case, and a client reads it as `MediaContainer.Meta.Type`.
 
-use serde_json::{Value, json};
+use serde_json::{Map, Value};
 
-use crate::fake::state::{FakeCollection, FakeHub, FakeItem, FakeLibrary};
+use crate::fake::element::{Attribute, Element};
 
-/// Wraps a body in the envelope every Plex answer arrives in.
-pub(crate) fn container(body: &Value) -> Value {
-    json!({ "MediaContainer": body })
+/// The whole document: the element under its own JSON key.
+pub(crate) fn document(element: &Element) -> Value {
+    let mut root = Map::new();
+    root.insert(element.tag().json().to_owned(), body(element));
+    Value::Object(root)
 }
 
-/// One item, in the shape `Metadata` entries take.
-pub(crate) fn item(item: &FakeItem) -> Value {
-    let mut body = json!({
-        "ratingKey": item.rating_key,
-        "guid": item.guid,
-        "type": item.kind,
-        "title": item.title,
-        "addedAt": 1_700_000_000,
-        "updatedAt": 1_700_000_100,
-        "thumb": item.thumb,
-    });
-    let object = body.as_object_mut().expect("the body is an object");
-
-    // Presence, not emptiness: an absent sort title is a missing attribute, and
-    // an empty string is a value. §15.6 turns on the difference.
-    if let Some(sort_title) = &item.sort_title {
-        object.insert("titleSort".to_owned(), json!(sort_title));
+/// One element's attributes and children, as a JSON object.
+fn body(element: &Element) -> Value {
+    let mut fields = Map::new();
+    for (name, value) in element.attributes() {
+        fields.insert((*name).to_owned(), attribute(value));
     }
-    if let Some(year) = item.year {
-        object.insert("year".to_owned(), json!(year));
-    }
-    if item.sort_title_locked {
-        object.insert(
-            "Field".to_owned(),
-            json!([{ "name": "titleSort", "locked": true }]),
-        );
-    }
-    if !item.labels.is_empty() {
-        let labels: Vec<Value> = item
-            .labels
-            .iter()
-            .map(|tag| json!({ "tag": tag }))
-            .collect();
-        object.insert("Label".to_owned(), json!(labels));
-    }
-    if item.indexed {
-        if item.has_media {
-            object.insert("Media".to_owned(), media(item));
+    for child in element.child_elements() {
+        let key = child.tag().json().to_owned();
+        if child.is_singular() {
+            fields.insert(key, body(child));
+            continue;
         }
-    } else {
-        // Still indexing: no media, and the flag that says why. Without the
-        // flag this is a film with no file, which is a different fact (P1).
-        object.insert("refreshing".to_owned(), json!(true));
+        match fields
+            .entry(key)
+            .or_insert_with(|| Value::Array(Vec::new()))
+        {
+            Value::Array(rows) => rows.push(body(child)),
+            // Unreachable while every tag is either singular everywhere or
+            // repeated everywhere, which the shape modules are what enforce.
+            // Overwriting silently would drop a row; this keeps the answer
+            // wrong in a way a test can see.
+            other => *other = body(child),
+        }
     }
-    body
+    Value::Object(fields)
 }
 
-/// One item's media, parts, and streams.
-fn media(item: &FakeItem) -> Value {
-    json!([{
-        "id": 1,
-        "container": "mkv",
-        "videoResolution": "1080",
-        "videoCodec": "h264",
-        "audioCodec": "eac3",
-        "audioChannels": 6,
-        "bitrate": 8000,
-        "width": 1920,
-        "height": 1080,
-        "duration": 7_200_000,
-        "Part": [{
-            "id": 1,
-            "file": format!("/data/{}.mkv", item.rating_key),
-            "size": 4_000_000_000_u64,
-            "container": "mkv",
-            "accessible": true,
-            "exists": true,
-            "Stream": [
-                { "streamType": 1, "codec": "h264", "bitDepth": 8, "colorSpace": "bt709" },
-                {
-                    "streamType": 2, "codec": "eac3", "channels": 6,
-                    "audioChannelLayout": "5.1", "language": "English", "languageCode": "eng"
-                },
-                {
-                    "streamType": 3, "codec": "subrip", "language": "English",
-                    "languageCode": "eng", "forced": false
-                }
-            ]
-        }]
-    }])
-}
-
-/// One collection, in the shape a collection list takes.
-pub(crate) fn collection(collection: &FakeCollection) -> Value {
-    let mut body = json!({
-        "ratingKey": collection.rating_key,
-        "type": "collection",
-        "title": collection.title,
-        "childCount": collection.items.len().to_string(),
-        "smart": "0",
-        "collectionSort": "2",
-    });
-    let object = body.as_object_mut().expect("the body is an object");
-    if let Some(sort_title) = &collection.sort_title {
-        object.insert("titleSort".to_owned(), json!(sort_title));
+/// One attribute, in the JSON type it arrives as.
+fn attribute(value: &Attribute) -> Value {
+    match value {
+        Attribute::Text(text) => Value::String(text.clone()),
+        Attribute::Number(number) => Value::from(*number),
+        Attribute::Decimal(number) => Value::from(*number),
+        // `1` and `0`, never `true` and `false`. Every one of these is an XML
+        // attribute on the wire, and one spelling everywhere is what stops a
+        // client being written against whichever half of the answer it saw
+        // first (`plexapi/utils.py:173-178`).
+        Attribute::Flag(flag) => Value::from(i32::from(*flag)),
     }
-    if collection.sort_title_locked {
-        object.insert(
-            "Field".to_owned(),
-            json!([{ "name": "titleSort", "locked": true }]),
-        );
-    }
-    body
-}
-
-/// One hub, in the shape the manage endpoint answers with.
-pub(crate) fn hub(hub: &FakeHub) -> Value {
-    let mut body = json!({
-        "hubIdentifier": hub.identifier,
-        "title": hub.title,
-        "promotedToOwnHome": i32::from(hub.own_home).to_string(),
-        "promotedToSharedHome": i32::from(hub.shared_home).to_string(),
-        "promotedToRecommended": i32::from(hub.recommended).to_string(),
-    });
-    if let Some(rating_key) = &hub.rating_key {
-        body.as_object_mut()
-            .expect("the body is an object")
-            .insert("ratingKey".to_owned(), json!(rating_key));
-    }
-    body
-}
-
-/// One library, in the shape the section list answers with.
-pub(crate) fn section(library: &FakeLibrary) -> Value {
-    // The agent follows the library's kind. One agent for every section would
-    // have a TV library declaring the movie agent, which is a fact no real
-    // server states and exactly the drift the contract test exists to catch.
-    let agent = match library.kind.as_str() {
-        "show" => "tv.plex.agents.series",
-        "artist" => "tv.plex.agents.music",
-        "photo" => "tv.plex.agents.photo",
-        _ => "tv.plex.agents.movie",
-    };
-    json!({
-        "key": library.key,
-        "uuid": library.uuid,
-        "type": library.kind,
-        "title": library.title,
-        "agent": agent,
-        "language": "en-US",
-        "scannedAt": 1_700_000_000,
-    })
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    fn base() -> FakeItem {
-        FakeItem {
-            rating_key: "1001".to_owned(),
-            guid: "plex://movie/1001".to_owned(),
-            kind: "movie".to_owned(),
-            title: "Film 1".to_owned(),
-            sort_title: Some("Film 1".to_owned()),
-            sort_title_locked: false,
-            year: Some(1979),
-            thumb: "/library/metadata/1001/thumb/17".to_owned(),
-            indexed: true,
-            has_media: true,
-            labels: vec!["afisharr".to_owned()],
-        }
+    #[test]
+    fn the_document_is_the_element_under_its_own_key() {
+        let rendered = document(&Element::named("MediaContainer").number("size", 2_i64));
+        assert_eq!(rendered["MediaContainer"]["size"], 2);
     }
 
     #[test]
-    fn an_indexed_item_carries_its_media_and_no_refresh_flag() {
-        let body = item(&base());
-        assert!(body.get("Media").is_some());
-        assert!(body.get("refreshing").is_none());
-        assert_eq!(body["Label"][0]["tag"], "afisharr");
+    fn repeated_children_become_an_array_under_the_json_name() {
+        // And the JSON name, not the XML one: a row Plex sends as `<Video>`
+        // arrives in JSON as an entry of `Metadata`.
+        let rendered = document(
+            &Element::named("MediaContainer")
+                .child(Element::content("Video").text("ratingKey", "1"))
+                .child(Element::content("Video").text("ratingKey", "2")),
+        );
+        let rows = rendered["MediaContainer"]["Metadata"]
+            .as_array()
+            .expect("an array");
+        assert_eq!(rows.len(), 2);
+        assert_eq!(rows[1]["ratingKey"], "2");
+        assert!(rendered["MediaContainer"].get("Video").is_none());
     }
 
     #[test]
-    fn an_item_still_indexing_carries_the_flag_and_no_media_at_all() {
-        let body = item(&FakeItem {
-            indexed: false,
-            has_media: false,
-            ..base()
-        });
-        assert_eq!(body["refreshing"], true);
-        assert!(body.get("Media").is_none());
+    fn a_single_child_is_still_an_array() {
+        // A client that read one row as an object and two as an array would be
+        // a client that works on a library with two films in it.
+        let rendered = document(&Element::named("MediaContainer").child(Element::named("Hub")));
+        assert!(rendered["MediaContainer"]["Hub"].is_array());
     }
 
     #[test]
-    fn an_absent_sort_title_is_a_missing_attribute_and_not_an_empty_one() {
-        let body = item(&FakeItem {
-            sort_title: None,
-            ..base()
-        });
-        assert!(body.get("titleSort").is_none());
+    fn a_singular_child_is_an_object_rather_than_an_array() {
+        let rendered = document(
+            &Element::named("MediaContainer").child(
+                Element::named("Meta")
+                    .singular()
+                    .child(Element::named("Type").text("type", "movie")),
+            ),
+        );
+        assert_eq!(
+            rendered["MediaContainer"]["Meta"]["Type"][0]["type"],
+            "movie"
+        );
     }
 
     #[test]
-    fn a_locked_sort_title_is_reported_in_the_field_list() {
-        let body = item(&FakeItem {
-            sort_title_locked: true,
-            ..base()
-        });
-        assert_eq!(body["Field"][0]["name"], "titleSort");
-        assert_eq!(body["Field"][0]["locked"], true);
+    fn a_flag_is_one_and_zero_rather_than_true_and_false() {
+        // The spelling a reference client's cast accepts in every position
+        // (`plexapi/utils.py:173-178`), and the one this fake sends everywhere.
+        let rendered = document(
+            &Element::named("MediaContainer")
+                .flag("allowSync", true)
+                .flag("refreshing", false),
+        );
+        assert_eq!(rendered["MediaContainer"]["allowSync"], 1);
+        assert_eq!(rendered["MediaContainer"]["refreshing"], 0);
     }
 
     #[test]
-    fn a_sort_title_can_be_absent_and_locked_at_the_same_time() {
-        // The state a restore gets wrong, and the reason §15.6 names three
-        // properties rather than one.
-        let body = item(&FakeItem {
-            sort_title: None,
-            sort_title_locked: true,
-            ..base()
-        });
-        assert!(body.get("titleSort").is_none());
-        assert_eq!(body["Field"][0]["locked"], true);
-    }
-
-    #[test]
-    fn a_hub_with_no_collection_behind_it_carries_no_rating_key() {
-        let native = hub(&FakeHub {
-            identifier: "home.continue".to_owned(),
-            title: "Continue Watching".to_owned(),
-            rating_key: None,
-            own_home: true,
-            shared_home: false,
-            recommended: false,
-        });
-        assert!(native.get("ratingKey").is_none());
-        assert_eq!(native["promotedToOwnHome"], "1");
-        assert_eq!(native["promotedToSharedHome"], "0");
+    fn a_decimal_keeps_its_fraction() {
+        let rendered = document(&Element::named("Media").decimal("aspectRatio", 1.78));
+        assert!(
+            (rendered["Media"]["aspectRatio"].as_f64().expect("a number") - 1.78).abs()
+                < f64::EPSILON
+        );
     }
 }

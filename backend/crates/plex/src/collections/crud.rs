@@ -26,10 +26,13 @@ struct CollectionsBody {
 impl CollectionsBody {
     /// The rows, from whichever key this server's version used.
     ///
-    /// Plex answers the collection list under `Metadata` on current builds and
-    /// under `Directory` on older ones. Reading only one is a client that finds
-    /// no collections at all on the other, and reports the library as having
-    /// none — the empty-versus-unobserved conflation `I-SRC-1` forbids.
+    /// A collection is a `Directory` element in XML and a `Metadata` entry in
+    /// the JSON translation of the same answer. Which key a given server and a
+    /// given endpoint use is a fact this repository has no evidence for, and
+    /// the release-lane capture is what settles it; the earlier claim that the
+    /// two spellings were a server-version difference was not evidence, it was
+    /// a guess. Reading only one and finding nothing reports the library as
+    /// having no collections at all — the empty-versus-unobserved conflation `I-SRC-1` forbids.
     fn rows(self) -> Vec<CollectionBody> {
         if self.metadata.is_empty() {
             self.directory
@@ -159,6 +162,11 @@ impl PlexServerClient {
 
     /// Applies an edit to one collection.
     ///
+    /// Answers how many rows the server says it wrote. An edit naming a key the
+    /// server does not hold writes nothing and answers `0`, and a caller that
+    /// discarded the count could not tell that from a success: it is how a pass
+    /// comes to believe it renamed a collection somebody else had deleted (P1).
+    ///
     /// # Errors
     /// Returns [`ServerError::Transport`] when the server did not answer, and
     /// [`ServerError::Incomplete`] when the edit would write nothing — a call
@@ -170,24 +178,20 @@ impl PlexServerClient {
         section: &SectionKey,
         collection: &RatingKey,
         edit: &CollectionEdit,
-    ) -> Result<(), ServerError> {
+    ) -> Result<usize, ServerError> {
         if edit.is_empty() {
             return Err(ServerError::Incomplete {
                 call: "PUT /library/sections/{id}/all",
                 missing: "any field to change",
             });
         }
-        let mut query = vec![
-            (
-                "type".to_owned(),
-                ItemKind::Collection.as_plex_type().to_string(),
-            ),
-            ("id".to_owned(), collection.to_string()),
-        ];
-        query.extend(edit.pairs());
-        let url = self.endpoint(&format!("library/sections/{section}/all"), &query)?;
-        self.send(Method::PUT, &url, None, &[]).await?;
-        Ok(())
+        self.edit_at(
+            section,
+            ItemKind::Collection,
+            std::slice::from_ref(collection),
+            edit.pairs(),
+        )
+        .await
     }
 
     /// Deletes one collection.

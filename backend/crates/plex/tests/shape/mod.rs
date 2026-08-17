@@ -75,6 +75,30 @@ pub fn unsupported_claims(fake: &Value, real: &Value) -> Vec<String> {
         .collect()
 }
 
+/// What the real answer carries that the fake does not, minus what is allowed.
+///
+/// The other direction, and the one that passed every omission the reference
+/// audit found: a fake that answers *less* than a real server is a fake whose
+/// silences are invisible. The fake is not an emulator (PRD section 21.10.2),
+/// so some omissions are deliberate, and a deliberate omission is a line
+/// somebody wrote in the allow-list with a reason rather than a silence.
+///
+/// An allowance is a path prefix, matched against the fact's path. It never
+/// matches a *type*: allowing `.MediaContainer.Metadata[].Chapter` says the
+/// fake does not model chapters, not that it may send one of the wrong type.
+#[must_use]
+pub fn missing_claims(fake: &Value, real: &Value, allowed: &[&str]) -> Vec<String> {
+    let fake = of(fake);
+    of(real)
+        .into_iter()
+        .filter(|fact| !fake.contains(fact))
+        .filter(|fact| {
+            let path = fact.split(':').next().unwrap_or(fact);
+            !allowed.iter().any(|allowance| path.starts_with(allowance))
+        })
+        .collect()
+}
+
 /// Panics naming the call when the fake claims anything the real answer does not.
 ///
 /// The message names the call and the exact facts, because a release-lane
@@ -87,6 +111,21 @@ pub fn assert_supported(call: &str, fake: &Value, real: &Value) {
         "contract drift on {call}: the fake answers fields a real Plex does not, \
          so every test written against them tests a server that does not exist.\n  {}",
         unsupported.join("\n  ")
+    );
+}
+
+/// Panics naming the call when the real answer carries something unaccounted for.
+///
+/// The message asks for a decision rather than a fix: either the fake owes the
+/// field an answer, or the allow-list owes it a line saying why not.
+pub fn assert_covered(call: &str, fake: &Value, real: &Value, allowed: &[&str]) {
+    let missing = missing_claims(fake, real, allowed);
+    assert!(
+        missing.is_empty(),
+        "contract gap on {call}: a real Plex answers fields the fake does not, and none of \
+         them is on the allow-list. Either the fake should answer them, or add each to the \
+         allow-list with the reason it is not modelled.\n  {}",
+        missing.join("\n  ")
     );
 }
 
@@ -146,12 +185,34 @@ mod tests {
     }
 
     #[test]
-    fn a_field_only_the_real_server_sends_is_not_drift() {
+    fn a_field_only_the_real_server_sends_is_not_drift_in_that_direction() {
         // The fake is not an emulator (PRD §21.10.2). It answers the surface
         // this crate calls and is allowed to be wrong about everything else.
         let fake = json!({"MediaContainer": {"machineIdentifier": "x"}});
         let real = json!({"MediaContainer": {"machineIdentifier": "abc", "myPlex": true}});
         assert!(unsupported_claims(&fake, &real).is_empty());
+    }
+
+    #[test]
+    fn a_field_only_the_real_server_sends_is_a_gap_until_somebody_allows_it() {
+        // The assertion that was missing, and the one every omission the
+        // reference audit found would have passed.
+        let fake = json!({"MediaContainer": {"machineIdentifier": "x"}});
+        let real = json!({"MediaContainer": {"machineIdentifier": "abc", "myPlex": true}});
+        assert_eq!(
+            missing_claims(&fake, &real, &[]),
+            [".MediaContainer.myPlex: boolean"]
+        );
+        assert!(missing_claims(&fake, &real, &[".MediaContainer.myPlex"]).is_empty());
+    }
+
+    #[test]
+    fn an_allowance_covers_everything_under_it() {
+        // A subtree the fake does not model is one line, not one line per leaf.
+        let fake = json!({"Metadata": [{"ratingKey": "1"}]});
+        let real = json!({"Metadata": [{"ratingKey": "1", "Chapter": [{"id": 1, "tag": "One"}]}]});
+        assert_eq!(missing_claims(&fake, &real, &[]).len(), 2);
+        assert!(missing_claims(&fake, &real, &[".Metadata[].Chapter"]).is_empty());
     }
 
     #[test]

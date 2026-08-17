@@ -100,6 +100,7 @@ dependencies = [
  "afisharr-plex",
  "afisharr-sources",
  "axum",
+ "percent-encoding",
  "serde",
  "serde_json",
  "serde_urlencoded",
