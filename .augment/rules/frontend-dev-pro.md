@@ -906,7 +906,7 @@ shadcn's tokens are CSS variables in oklch (Tailwind-v4 era) defined in `app.css
 
 ## Tooling: Biome, TypeScript
 
-**Biome replaces both ESLint and Prettier.** One Rust binary, one config file, one pass over the tree. Scaffold with `bunx sv create`, then add Biome — do **not** take the `eslint` or `prettier` add-ons from `sv add`:
+**Biome is the only linter and formatter.** One Rust binary, one config file, one pass over the tree. Scaffold with `bunx sv create`, then add Biome — take **no** linter or formatter add-ons from `sv add`:
 
 ```sh
 bun add -D --exact @biomejs/biome
