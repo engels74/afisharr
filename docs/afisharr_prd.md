@@ -29,8 +29,8 @@ repository, not in this document:
 
 | File | Covers |
 | --- | --- |
-| `.augment/rules/frontend-dev-pro.md` | The frontend stack: Bun, Svelte 5 (runes), SvelteKit 2, UnoCSS `presetWind4`, shadcn-svelte |
-| `.augment/rules/backend-rust-dev-pro.md` | The backend stack: Rust 1.97.1, edition 2024, tokio, axum, SQLx, serde |
+| `.agents/rules/frontend-dev-pro.md` | The frontend stack: Bun, Svelte 5 (runes), SvelteKit 2, UnoCSS `presetWind4`, shadcn-svelte |
+| `.agents/rules/backend-rust-dev-pro.md` | The backend stack: Rust 1.97.1, edition 2024, tokio, axum, SQLx, serde |
 
 **Read the rule file for the surface you are about to touch before you write any code for that
 surface.** This binds every author, human or agent, on every change. It is not background reading and
@@ -67,7 +67,7 @@ bug to report, not an ambiguity to resolve by choosing.**
 - *Coding guidelines* (§24) is normative for *how* code is written and sits outside this hierarchy.
   One exception is recorded in §24.4: the SPA has no server runtime, so the server-side half of the
   frontend guidelines is structurally inapplicable.
-- The two rule files in `.augment/rules/` are normative for *how* code is written on each stack, and
+- The two rule files in `.agents/rules/` are normative for *how* code is written on each stack, and
   they also sit outside this hierarchy. Read the relevant one before writing code (§0.1, §24.1).
   §24 is the project layer over them: it selects, tightens, and adds to them for Afisharr. Where a
   rule file and §24 disagree, §24 wins, because §24 knows this project's architecture and the rule
@@ -8004,8 +8004,8 @@ semantic property no linter available for either surface can see. Requirement in
 checklist lines in the implementation plan's §A.1–§A.4.
 
 **D-048 — The two stack rule files are normative, and they are read before code is written.**
-*Raised while recording the coding guidelines, 2026-08-09.* `.augment/rules/frontend-dev-pro.md`
-covers the frontend stack and `.augment/rules/backend-rust-dev-pro.md` covers the Rust backend
+*Raised while recording the coding guidelines, 2026-08-09.* `.agents/rules/frontend-dev-pro.md`
+covers the frontend stack and `.agents/rules/backend-rust-dev-pro.md` covers the Rust backend
 stack. Both are normative, alongside this document and the implementation plan. Every author, human
 or agent, reads the file for the surface they are about to touch before writing code for it.
 
@@ -8384,11 +8384,11 @@ These guidelines are normative for all code merged into the Afisharr repository.
 
 The guidelines cover two independent surfaces that meet only at the generated API contract:
 
-- **The Rust backend** (§24.2): a single binary, stable Rust 1.97.1, edition 2024, Axum, SQLite via SQLx, utoipa-generated OpenAPI, SSE. Stack rule file: `.augment/rules/backend-rust-dev-pro.md`.
-- **The frontend** (§24.3): SvelteKit 2 / Svelte 5 / UnoCSS `presetWind4` / shadcn-svelte, built with Bun, compiled to a fully prerendered static site and embedded in the Rust binary. Stack rule file: `.augment/rules/frontend-dev-pro.md`.
+- **The Rust backend** (§24.2): a single binary, stable Rust 1.97.1, edition 2024, Axum, SQLite via SQLx, utoipa-generated OpenAPI, SSE. Stack rule file: `.agents/rules/backend-rust-dev-pro.md`.
+- **The frontend** (§24.3): SvelteKit 2 / Svelte 5 / UnoCSS `presetWind4` / shadcn-svelte, built with Bun, compiled to a fully prerendered static site and embedded in the Rust binary. Stack rule file: `.agents/rules/frontend-dev-pro.md`.
 
 **Read the rule file for your surface before you write any code for it.** The two files in
-`.augment/rules/` are normative, on the same footing as this section, and the obligation is to read
+`.agents/rules/` are normative, on the same footing as this section, and the obligation is to read
 first — not to write, then check. It binds every author, human or agent, on every change.
 
 Each file states the one current idiomatic pattern for each construct on its stack, anchored to the
