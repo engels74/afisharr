@@ -101,6 +101,10 @@ Two test lanes, split on the filename:
 - Every other `*.test.ts` runs under `bun test` with happy-dom. Rune modules
   (`x.svelte.ts`) belong here — `test-setup.ts` compiles runes for Bun.
 
+`bunfig.toml` sets coverage thresholds on the `bun test` lane (85% lines, 90%
+functions, 80% statements), so an untested new module fails it with no test
+failing. Only `src/lib/api/generated/**` and `scripts/**` are exempt.
+
 In `bun test` files import relatively (`../../shared/i18n`), not via `$lib`:
 that alias comes from `.svelte-kit/tsconfig.json`, which `bun test` never reads.
 
