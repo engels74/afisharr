@@ -14,7 +14,7 @@ name: ci
 on:
   pull_request:
   push:
-    branches: [main, feat/standardize-ci-renovate]
+    branches: [main]
   merge_group:
   # The release lane runs this whole lane before it runs its own jobs.
   workflow_call:
