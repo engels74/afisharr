@@ -62,7 +62,7 @@ if command -v sqlx >/dev/null 2>&1; then
   # would find the workspace but not the pinned toolchain.
   cd "$root/backend"
   SQLX_OFFLINE=false DATABASE_URL="sqlite://$db" \
-    cargo sqlx prepare "${prepare_args[@]}" -- --all-targets
+    cargo sqlx prepare "${prepare_args[@]}" -- --locked --all-targets
   if [ "$check" = true ]; then
     echo "backend/.sqlx/ matches the current queries"
   else

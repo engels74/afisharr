@@ -1,0 +1,44 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": [
+    "github>engels74/automation:default#v1.0.0",
+    "github>engels74/automation:mixed#v1.0.0"
+  ],
+  "gitIgnoredAuthors": [
+    "41898282+github-actions[bot]@users.noreply.github.com"
+  ],
+  "customManagers": [
+    {
+      "customType": "regex",
+      "managerFilePatterns": [
+        "/^\\.github/actions/rust/action\\.yml$/"
+      ],
+      "matchStrings": [
+        "(?<depName>cargo-nextest|cargo-deny|cargo-machete|sqlx-cli)@(?<currentValue>[0-9.]+)"
+      ],
+      "datasourceTemplate": "crate"
+    }
+  ],
+  "packageRules": [
+    {
+      "description": "Keep TypeScript below 7 until Svelte compatibility is verified.",
+      "matchPackageNames": [
+        "typescript"
+      ],
+      "allowedVersions": "<7"
+    },
+    {
+      "description": "SQLx CLI and library must migrate together with regenerated offline query metadata.",
+      "matchPackageNames": [
+        "sqlx-cli",
+        "sqlx",
+        "sqlx-core",
+        "sqlx-macros",
+        "sqlx-sqlite"
+      ],
+      "groupName": "SQLx database tooling",
+      "automerge": false,
+      "dependencyDashboardApproval": true
+    }
+  ]
+}

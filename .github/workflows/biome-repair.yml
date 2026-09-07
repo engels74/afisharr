@@ -1,0 +1,29 @@
+name: Biome repair
+permissions:
+  contents: write
+  pull-requests: read
+  actions: write
+concurrency:
+  group: biome-repair-${{ github.event.pull_request.number }}
+  cancel-in-progress: false
+jobs:
+  repair:
+    uses: engels74/automation/.github/workflows/biome-repair.yml@v1.0.0
+    with:
+      config-files: |-
+        frontend/biome.json
+      source-roots: |-
+        frontend/src
+        frontend/scripts
+        frontend/vite.config.ts
+        frontend/svelte.config.js
+        frontend/uno.config.ts
+        frontend/tsconfig.json
+      bun-version: 1.3.14
+      package-directory: frontend
+'on':
+  pull_request_target:
+    types:
+      - opened
+      - synchronize
+      - reopened

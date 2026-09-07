@@ -54,7 +54,7 @@ trap 'rm -f "$document.new" "$types.new"' EXIT
 # `cd backend` rather than `--manifest-path`: rustup resolves the toolchain by
 # walking up from the working directory, so a run from the repository root gets
 # whatever default toolchain is installed and refuses the workspace's MSRV.
-(cd backend && cargo run --quiet -p afisharr -- openapi) >"$document.new"
+(cd backend && cargo run --locked --quiet -p afisharr -- openapi) >"$document.new"
 
 # openapi-typescript emits types only; `openapi-fetch` supplies the runtime and
 # is typed entirely from them, so there is no generated code to review by hand.
@@ -68,7 +68,7 @@ trap 'rm -f "$document.new" "$types.new"' EXIT
 # developer's push and every PR's contract lane with a diff nobody authored, and
 # a runner without registry access fails outright. Absolute paths, because the
 # arguments are relative to the root.
-(cd frontend && bunx --bun openapi-typescript "$root/$document.new" \
+(cd frontend && bunx --no-install --bun openapi-typescript "$root/$document.new" \
 	--output "$root/$types.new") >/dev/null
 
 if [ "$check" = true ]; then

@@ -1,67 +1,36 @@
 # SPDX-FileCopyrightText: 2026 Afisharr contributors
 # SPDX-License-Identifier: AGPL-3.0-or-later
-
 name: Rust toolchain
-description: >-
-  Installs the toolchain pinned by rust-toolchain.toml, restores the cargo
-  caches, and installs the named cargo subcommands.
-
+description: Pinned backend toolchain, cached builds, and versioned cargo tools.
 inputs:
   tools:
-    description: Space-separated cargo subcommands to install (nextest, deny, machete, sqlx).
-    required: false
-    default: ""
-
+    description: Space-separated cargo subcommands (nextest, deny, machete, sqlx).
+    default: ''
 runs:
   using: composite
   steps:
-    # rustup reads rust-toolchain.toml, so the pinned channel and components
-    # come from the repository rather than from a workflow input that can drift
-    # away from it.
-    #
-    # It finds that file by walking up from the working directory and never
-    # descends, so the step has to start inside `backend/`. At the checkout root
-    # it would silently install the default toolchain instead.
-    - name: install the pinned toolchain
-      shell: bash
-      working-directory: backend
-      run: rustup show active-toolchain || rustup toolchain install
-
-    - uses: actions/cache@v4
+    - uses: actions-rust-lang/setup-rust-toolchain@v2.0.0
       with:
-        path: |
-          ~/.cargo/registry/index
-          ~/.cargo/registry/cache
-          ~/.cargo/git/db
-          backend/target
-        key: cargo-${{ runner.os }}-${{ hashFiles('backend/rust-toolchain.toml', 'backend/Cargo.lock') }}
-        restore-keys: cargo-${{ runner.os }}-
-
-    - uses: actions/cache@v4
-      if: inputs.tools != ''
-      id: tool-cache
-      with:
-        path: ~/.cargo/bin
-        key: cargo-tools-${{ runner.os }}-${{ inputs.tools }}-${{ hashFiles('backend/rust-toolchain.toml') }}
-
-    # Also from `backend/`: the subcommands are built by the pinned toolchain,
-    # not by whatever rustup defaults to at the checkout root.
-    - name: install cargo subcommands
-      if: inputs.tools != '' && steps.tool-cache.outputs.cache-hit != 'true'
+        rust-src-dir: backend
+        cache-workspaces: backend
+    - name: Resolve requested tool versions
+      id: tools
       shell: bash
-      working-directory: backend
+      env:
+        CARGO_TOOLS: ${{ inputs.tools }}
       run: |
-        for tool in ${{ inputs.tools }}; do
+        resolved=()
+        for tool in $CARGO_TOOLS; do
           case "$tool" in
-          # `cargo sqlx` comes from a crate that does not carry the cargo-
-          # prefix, and its default features build the postgres and mysql
-          # drivers this workspace does not use.
-          sqlx)
-            cargo install sqlx-cli --locked \
-              --no-default-features --features sqlite,rustls
-            ;;
-          *)
-            cargo install "cargo-$tool" --locked
-            ;;
+            nextest) resolved+=(cargo-nextest@0.9.143) ;;
+            deny) resolved+=(cargo-deny@0.20.2) ;;
+            machete) resolved+=(cargo-machete@0.9.2) ;;
+            sqlx) resolved+=(sqlx-cli@0.9.0) ;;
+            *) echo "Unsupported cargo tool: $tool" >&2; exit 1 ;;
           esac
         done
+        (IFS=,; echo "tools=${resolved[*]}") >> "$GITHUB_OUTPUT"
+    - uses: taiki-e/install-action@v2.87.8
+      if: inputs.tools != ''
+      with:
+        tool: ${{ steps.tools.outputs.tools }}

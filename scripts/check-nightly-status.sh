@@ -65,13 +65,21 @@ none)
 	echo "The nightly lane has no completed run on main. Nothing to block on."
 	exit 0
 	;;
-success | neutral | skipped)
+success)
 	echo "The last nightly run on main concluded '$last_conclusion'."
 	exit 0
 	;;
 esac
 
-case "${GITHUB_EVENT_NAME:-}" in
+# A repaired Renovate head is still a prospective merge. It must read the
+# same nightly result and live PR waiver as the original pull_request run.
+event="${GITHUB_EVENT_NAME:-}"
+if [ "$event" = workflow_dispatch ] && [ -n "${REPAIR_PR_NUMBER:-}" ]; then
+    event=pull_request
+    PR_NUMBER="$REPAIR_PR_NUMBER"
+fi
+
+case "$event" in
 pull_request)
 	pr_number="${PR_NUMBER:-}"
 	named_by="the event payload"

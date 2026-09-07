@@ -9,7 +9,7 @@
 # investigating the other, and the fast ones (format, lint) fail loudly before
 # the slow ones start.
 
-name: merge
+name: ci
 
 on:
   pull_request:
@@ -18,14 +18,25 @@ on:
   merge_group:
   # The release lane runs this whole lane before it runs its own jobs.
   workflow_call:
+  workflow_dispatch:
+    inputs:
+      pr-number:
+        description: PR number for a repair dispatch
+        type: string
+        default: ''
+      expected-head-sha:
+        description: Exact repaired PR commit
+        type: string
+        default: ''
 
 concurrency:
-  group: merge-${{ github.ref }}
+  group: ci-${{ github.event_name }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
 permissions:
   contents: read
 
+  pull-requests: read
 env:
   CARGO_TERM_COLOR: always
   # The sqlx query macros read the committed offline data rather than a live
@@ -40,33 +51,52 @@ env:
 # calls a root script that does its own `cd`.
 
 jobs:
+  guard:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: engels74/automation/actions/dispatch-guard@v1.0.0
+        with:
+          token: ${{ github.token }}
+          pr-number: ${{ inputs.pr-number }}
+          expected-head-sha: ${{ inputs.expected-head-sha }}
   rust-fmt:
     name: rust-fmt
-    runs-on: ubuntu-latest
+    needs:
+      - guard
+    runs-on: ubuntu-24.04
     timeout-minutes: 5
     defaults:
       run:
         working-directory: backend
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7.0.1
+        with:
+          persist-credentials: false
       - uses: ./.github/actions/rust
       - run: cargo fmt --check
 
   rust-lint:
     name: rust-lint
-    runs-on: ubuntu-latest
+    needs:
+      - guard
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
     defaults:
       run:
         working-directory: backend
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7.0.1
+        with:
+          persist-credentials: false
       - uses: ./.github/actions/rust
-      - run: cargo clippy --workspace --all-targets --all-features -- -D warnings
+      - run: cargo clippy --locked --workspace --all-targets --all-features -- -D warnings
 
   rust-test:
     name: rust-test
-    runs-on: ubuntu-latest
+    needs:
+      - guard
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
     defaults:
       run:
@@ -77,26 +107,32 @@ jobs:
       # report green while never exercising the one-file claim at all.
       AFISHARR_REQUIRE_SPA: "1"
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7.0.1
       # The SPA is embedded at compile time, so it has to exist before cargo
       # builds anything. This is what makes the embedded-interface tests assert
       # rather than skip.
+        with:
+          persist-credentials: false
       - uses: ./.github/actions/frontend
       - run: bun run --cwd frontend build
         working-directory: .
       - uses: ./.github/actions/rust
         with:
           tools: nextest
-      - run: cargo nextest run --workspace --all-features
+      - run: cargo nextest run --locked --workspace --all-features
       # nextest does not run doctests.
-      - run: cargo test --doc --workspace
+      - run: cargo test --locked --doc --workspace
 
   rust-sqlx-prepare:
     name: rust-sqlx-prepare
-    runs-on: ubuntu-latest
+    needs:
+      - guard
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7.0.1
+        with:
+          persist-credentials: false
       - uses: ./.github/actions/rust
         with:
           tools: sqlx
@@ -112,32 +148,40 @@ jobs:
 
   rust-supply-chain:
     name: rust-supply-chain
-    runs-on: ubuntu-latest
+    needs:
+      - guard
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
     defaults:
       run:
         working-directory: backend
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7.0.1
+        with:
+          persist-credentials: false
       - uses: ./.github/actions/rust
         with:
           tools: deny machete
       # Licences, advisories, and bans. AGPL-3.0-or-later obliges every
       # dependency to be GPL-compatible and a transitive crate can introduce an
       # incompatible licence silently (PRD §21.9, D-028).
-      - run: cargo deny check
+      - run: cargo deny --locked check
       - run: cargo machete
 
   rust-miri:
     name: rust-miri
-    runs-on: ubuntu-latest
+    needs:
+      - guard
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7.0.1
       # Every crate sets `unsafe_code = "forbid"` at the workspace root, so
       # there is nothing for Miri to find. The lane exists so the crate that
       # first takes a justified `unsafe` block is covered by a lane that already
       # runs, and this step fails the moment one appears.
+        with:
+          persist-credentials: false
       - name: assert no crate has taken an unsafe exception
         run: |
           # grep exits 1 for "no match" and 2 for "could not scan". Only the
@@ -163,39 +207,42 @@ jobs:
 
   structure:
     name: structure
-    runs-on: ubuntu-latest
+    needs:
+      - guard
+    runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7.0.1
       # The script-checkable half of PRD §24.6 (D-047). Also a commit-stage prek
       # hook, so this is the backstop rather than the first line of defence.
+        with:
+          persist-credentials: false
       - run: ./scripts/check-file-size.sh
 
-  frontend-install:
-    name: frontend-install
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    steps:
-      - uses: actions/checkout@v5
-      - uses: ./.github/actions/frontend
-
+      - run: python3 scripts/test-nightly-status.py
   frontend-format-lint:
     name: frontend-format-lint
-    runs-on: ubuntu-latest
-    needs: frontend-install
+    needs:
+      - guard
+    runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7.0.1
+        with:
+          persist-credentials: false
       - uses: ./.github/actions/frontend
       - run: bun run --cwd frontend lint
 
   frontend-interface-rules:
     name: frontend-interface-rules
-    runs-on: ubuntu-latest
-    needs: frontend-install
+    needs:
+      - guard
+    runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7.0.1
+        with:
+          persist-credentials: false
       - uses: ./.github/actions/frontend
       # The two rules no general linter can see: no hard-coded user-facing
       # string (I-UX-7), and no display state inferred from an HTTP status or
@@ -204,33 +251,44 @@ jobs:
 
   frontend-typecheck:
     name: frontend-typecheck
-    runs-on: ubuntu-latest
-    needs: frontend-install
+    needs:
+      - guard
+    runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7.0.1
+        with:
+          persist-credentials: false
       - uses: ./.github/actions/frontend
       - run: bun run --cwd frontend check
 
   frontend-test-unit:
     name: frontend-test-unit
-    runs-on: ubuntu-latest
-    needs: frontend-install
+    needs:
+      - guard
+    runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7.0.1
+        with:
+          persist-credentials: false
       - uses: ./.github/actions/frontend
       - run: bun test --cwd frontend
 
   frontend-test-browser:
     name: frontend-test-browser
-    runs-on: ubuntu-latest
+    needs:
+      - guard
+      - frontend-typecheck
+      - frontend-test-unit
+    runs-on: ubuntu-24.04
     # The slowest frontend lane. A typecheck or unit failure is cheaper to
     # report first, so it waits on both.
-    needs: [frontend-typecheck, frontend-test-unit]
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7.0.1
+        with:
+          persist-credentials: false
       - uses: ./.github/actions/frontend
       - run: bunx playwright install --with-deps chromium
         working-directory: frontend
@@ -238,11 +296,14 @@ jobs:
 
   frontend-build:
     name: frontend-build
-    runs-on: ubuntu-latest
-    needs: frontend-install
+    needs:
+      - guard
+    runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7.0.1
+        with:
+          persist-credentials: false
       - uses: ./.github/actions/frontend
       # adapter-static. A page or component reaching for a server-only primitive
       # covered by §24.4 fails the build here.
@@ -250,29 +311,37 @@ jobs:
 
   contract-check:
     name: contract-check
-    runs-on: ubuntu-latest
+    needs:
+      - guard
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7.0.1
       # Both toolchains: the document is printed by the compiled binary, and
       # the client is generated from it with bun.
+        with:
+          persist-credentials: false
       - uses: ./.github/actions/rust
       - uses: ./.github/actions/frontend
       - run: ./scripts/check-openapi-contract.sh
 
   nightly-status:
     name: nightly-status
-    runs-on: ubuntu-latest
+    needs:
+      - guard
+    runs-on: ubuntu-24.04
     timeout-minutes: 5
     permissions:
       contents: read
       actions: read
       pull-requests: read
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7.0.1
       # A nightly failure blocks the next merge to main until it is fixed or
       # explicitly waived with a named reason (D-035). Without this, the nightly
       # lane becomes a wall of red nobody reads.
+        with:
+          persist-credentials: false
       - name: refuse to merge past a red nightly
         env:
           GH_TOKEN: ${{ github.token }}
@@ -281,13 +350,28 @@ jobs:
           # gate asked for one is visible to a re-run of the job.
           PR_NUMBER: ${{ github.event.pull_request.number }}
           MERGE_GROUP_HEAD_REF: ${{ github.event.merge_group.head_ref }}
+          REPAIR_PR_NUMBER: ${{ inputs.pr-number }}
         run: ./scripts/check-nightly-status.sh
 
-  merge-gate:
-    name: merge-gate
-    runs-on: ubuntu-latest
-    if: always()
+  hygiene:
+    runs-on: ubuntu-24.04
+    needs: guard
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          persist-credentials: false
+      - uses: j178/prek-action@v3.0.0
+        with:
+          prek-version: 0.5.2
+          extra-args: --all-files
+        env:
+          SKIP: no-commit-to-branch,cargo-fmt,cargo-clippy,cargo-deny,web-biome,interface-rules,file-size
+      - run: git diff --exit-code HEAD
+  required:
+    name: ci / required
     needs:
+      - guard
       - rust-fmt
       - rust-lint
       - rust-test
@@ -295,7 +379,6 @@ jobs:
       - rust-supply-chain
       - rust-miri
       - structure
-      - frontend-install
       - frontend-format-lint
       - frontend-interface-rules
       - frontend-typecheck
@@ -304,18 +387,17 @@ jobs:
       - frontend-build
       - contract-check
       - nightly-status
+      - hygiene
+    if: always()
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
     steps:
-      # Every lane above must succeed. "Parallel" never means "optional", and
-      # neither does "skipped": a job whose `needs` failed reports `skipped`
-      # rather than `failure`, so this asserts the result positively instead of
-      # naming the two ways it knows how to fail.
-      - name: assert every lane succeeded
-        env:
-          LANE_RESULTS: ${{ toJSON(needs) }}
-        run: |
-          printf '%s' "${LANE_RESULTS}" | jq -r 'to_entries[] | "\(.key): \(.value.result)"'
-          if ! printf '%s' "${LANE_RESULTS}" |
-            jq -e 'length > 0 and all(.[]; .result == "success")' >/dev/null; then
-            echo "One or more merge lanes did not succeed." >&2
-            exit 1
-          fi
+      - uses: engels74/automation/actions/dispatch-guard@v1.0.0
+        with:
+          token: ${{ github.token }}
+          pr-number: ${{ inputs.pr-number }}
+          expected-head-sha: ${{ inputs.expected-head-sha }}
+      - uses: engels74/automation/actions/gate@v1.0.0
+        with:
+          needs: ${{ toJSON(needs) }}
+          required: guard rust-fmt rust-lint rust-test rust-sqlx-prepare rust-supply-chain rust-miri structure frontend-format-lint frontend-interface-rules frontend-typecheck frontend-test-unit frontend-test-browser frontend-build contract-check nightly-status hygiene

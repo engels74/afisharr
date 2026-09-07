@@ -136,7 +136,7 @@ When a red nightly blocks the merge lane, fix it or add a
   boilerplate.
 - `prek.toml` — every local gate, each with the reason it exists. Read when a
   hook blocks a commit.
-- `.github/workflows/merge.yml` — the lanes a PR must pass and their exact
+- `.github/workflows/ci.yml` — the lanes a PR must pass and their exact
   commands; `nightly.yml` and `release.yml` hold the slower suites.
 - `docs/afisharr_prd.md` (10.5k lines) and `docs/afisharr_implementation_plan.md`
   (3.4k lines) — the specification that code comments cite as `§N.N` and

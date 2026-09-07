@@ -39,13 +39,15 @@ env:
 jobs:
   crash-injection:
     name: crash-injection
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 60
     defaults:
       run:
         working-directory: backend
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7.0.1
+        with:
+          persist-credentials: false
       - uses: ./.github/actions/rust
         with:
           tools: nextest
@@ -58,26 +60,28 @@ jobs:
         run: |
           # Captured rather than piped: a pipeline's status is grep's, so a
           # tree that does not compile would read as "no such tests" and pass.
-          listed=$(cargo nextest list --workspace --all-features -E 'test(crash_injection)')
+          listed=$(cargo nextest list --locked --workspace --all-features -E 'test(crash_injection)')
           if printf '%s' "$listed" | grep -q 'crash_injection'; then
-            cargo nextest run --workspace --all-features -E 'test(crash_injection)'
+            cargo nextest run --locked --workspace --all-features -E 'test(crash_injection)'
           else
             echo "No crash-injection tests exist yet (I-DATA-1 is claimed in Phase 9)."
           fi
 
   plex-reference-cross-check:
     name: plex-reference-cross-check
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 30
     defaults:
       run:
         working-directory: backend
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7.0.1
+        with:
+          persist-credentials: false
       - uses: ./.github/actions/rust
         with:
           tools: nextest
-      - uses: actions/setup-python@v6
+      - uses: actions/setup-python@v7.0.0
         with:
           python-version: "3.13"
       # The fake's shapes are claims about a server nobody here controls, and
@@ -102,18 +106,20 @@ jobs:
         env:
           AFISHARR_PLEX_REFERENCE_PYTHON: python
         run: |
-          cargo nextest run --package afisharr-plex --all-features \
+          cargo nextest run --locked --package afisharr-plex --all-features \
             --no-capture -E 'binary(reference)'
 
   property-tests:
     name: property-tests
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 60
     defaults:
       run:
         working-directory: backend
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7.0.1
+        with:
+          persist-credentials: false
       - uses: ./.github/actions/rust
         with:
           tools: nextest
@@ -123,22 +129,24 @@ jobs:
         run: |
           # Captured rather than piped: a pipeline's status is grep's, so a
           # tree that does not compile would read as "no such tests" and pass.
-          listed=$(cargo nextest list --workspace --all-features -E 'test(prop_)')
+          listed=$(cargo nextest list --locked --workspace --all-features -E 'test(prop_)')
           if printf '%s' "$listed" | grep -q 'prop_'; then
-            cargo nextest run --workspace --all-features -E 'test(prop_)'
+            cargo nextest run --locked --workspace --all-features -E 'test(prop_)'
           else
             echo "No property tests exist yet."
           fi
 
   teardown:
     name: teardown
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 60
     defaults:
       run:
         working-directory: backend
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7.0.1
+        with:
+          persist-credentials: false
       - uses: ./.github/actions/rust
         with:
           tools: nextest
@@ -149,22 +157,24 @@ jobs:
         run: |
           # Captured rather than piped: a pipeline's status is grep's, so a
           # tree that does not compile would read as "no such tests" and pass.
-          listed=$(cargo nextest list --workspace --all-features -E 'test(teardown)')
+          listed=$(cargo nextest list --locked --workspace --all-features -E 'test(teardown)')
           if printf '%s' "$listed" | grep -q 'teardown'; then
-            cargo nextest run --workspace --all-features -E 'test(teardown)'
+            cargo nextest run --locked --workspace --all-features -E 'test(teardown)'
           else
             echo "No teardown tests exist yet (I-REV-4 is claimed in Phase 11)."
           fi
 
   performance-at-scale:
     name: performance-at-scale
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 60
     defaults:
       run:
         working-directory: backend
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7.0.1
+        with:
+          persist-credentials: false
       - uses: ./.github/actions/rust
         with:
           tools: nextest
@@ -174,9 +184,12 @@ jobs:
         run: |
           # Captured rather than piped: a pipeline's status is grep's, so a
           # tree that does not compile would read as "no such tests" and pass.
-          listed=$(cargo nextest list --workspace --all-features -E 'test(perf_)')
+          listed=$(cargo nextest list --locked --workspace --all-features -E 'test(perf_)')
           if printf '%s' "$listed" | grep -q 'perf_'; then
-            cargo nextest run --workspace --all-features -E 'test(perf_)'
+            cargo nextest run --locked --workspace --all-features -E 'test(perf_)'
           else
             echo "No at-scale performance tests exist yet."
           fi
+concurrency:
+  group: nightly-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: true
